@@ -37,9 +37,8 @@
 /*------------------------------------------------------------------*/
 /* BUTTON
  *------------------------------------------------------------------*/
-#define BUTTONS_NUMBER    2  // hold down user button on boot to enter OTA DFU mode.
-#define BUTTON_1          _PINNUM(1, 10)  // user button
-#define BUTTON_2          _PINNUM(1, 10)
+#define BUTTON_DFU        _PINNUM(1, 10)  // user button
+#define BUTTON_DFU_OTA    _PINNUM(1, 10)  // hold on boot to enter OTA DFU mode
 #define BUTTON_PULL       NRF_GPIO_PIN_PULLUP
 
 //--------------------------------------------------------------------+

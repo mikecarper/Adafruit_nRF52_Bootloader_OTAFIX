@@ -39,9 +39,8 @@
 /*------------------------------------------------------------------*/
 /* BUTTON
  *------------------------------------------------------------------*/
-#define BUTTONS_NUMBER    2  // changed to GPIO32, default for meshcore and meshtastic
-#define BUTTON_1          _PINNUM(1, 0)  // user button
-#define BUTTON_2          _PINNUM(1, 0)
+#define BUTTON_DFU        _PINNUM(1, 0)  // GPIO32, default for MeshCore and Meshtastic
+#define BUTTON_DFU_OTA    _PINNUM(1, 0)
 #define BUTTON_PULL       NRF_GPIO_PIN_PULLUP
 
 //--------------------------------------------------------------------+

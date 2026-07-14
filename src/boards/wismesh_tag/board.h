@@ -41,9 +41,8 @@
 /*------------------------------------------------------------------*/
 /* BUTTON
  *------------------------------------------------------------------*/
-#define BUTTONS_NUMBER        2
-#define BUTTON_1              _PINNUM(0, 9)	// Allow booting to OTA DFU from button
-#define BUTTON_2              _PINNUM(0, 9)	// Allow booting to OTA DFU from button
+#define BUTTON_DFU            _PINNUM(0, 9) // Allow booting to OTA DFU from button
+#define BUTTON_DFU_OTA        _PINNUM(0, 9)
 #define BUTTON_PULL           NRF_GPIO_PIN_PULLUP
 
 //--------------------------------------------------------------------+

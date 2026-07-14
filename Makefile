@@ -1,11 +1,19 @@
 #------------------------------------------------------------------------------
 # CONFIGURE
-# - SDK_PATH   : path to SDK directory
+# - SDK_PATH     : path to SDK directory
 #
-# - SD_NAME    : e.g s132, s140
-# - SD_VERSION : SoftDevice version e.g 6.0.0
-# - SD_HEX     : to bootloader hex binary
+# - SD_NAME            : e.g s132, s140
+# - SD_VERSION         : SoftDevice version e.g 6.0.0
+# - SD_HEX             : to bootloader hex binary
+# - SIGNED_FW          : if bootloader will ONLY accept signed firmware
+# - SIGNED_FW_QX       : Qx for signed firmware verification
+# - SIGNED_FW_QY       : Qy for signed firmware verification
+# - DUALBANK_FW        : If bootloader will implement a dual bank feature to allow autorecover from failed
+# - FORCE_UF2          : if SIGNED_FW is 1, will force to include UF2 support (UNSECURE, UF2 does NOT validate signature!)
+# - DEFAULT_TO_OTA_DFU : if entering DFU, by default enter OTA DFU instead of Serial DFU
 #------------------------------------------------------------------------------
+
+PYTHON = python
 
 # local customization
 -include Makefile.user
@@ -16,6 +24,7 @@
 SDK_PATH     = lib/sdk/components
 SDK11_PATH   = lib/sdk11/components
 TUSB_PATH    = lib/tinyusb/src
+TCRYPT_PATH  = lib/tinycrypt/lib
 NRFX_PATH    = lib/nrfx
 SD_PATH      = lib/softdevice/$(SD_FILENAME)
 
@@ -33,6 +42,15 @@ SD_HEX       = $(SD_PATH)/$(SD_FILENAME)_softdevice.hex
 
 MBR_HEX			 = lib/softdevice/mbr/hex/mbr_nrf52_2.4.1_mbr.hex
 
+# Detect the operating system
+# The "OS" environment variable on Windows is always "Windows_NT"
+# when running under a modern shell like cmd.exe or powershell
+ifeq ($(OS),Windows_NT)
+	NULL_DEVICE = NUL
+else
+	NULL_DEVICE = /dev/null
+endif
+
 # linker by MCU eg. nrf52840.ld
 ifeq ($(DEBUG), 1)
   LD_FILE = linker/$(MCU_SUB_VARIANT)_debug.ld
@@ -48,6 +66,7 @@ ifeq (,$(findstring OTAFIX,$(GIT_VERSION)))
 GIT_VERSION := 0.9.2-OTAFIX2.3
 endif
 GIT_SUBMODULE_VERSIONS := $(shell git submodule status | cut -d" " -f3,4 | paste -s -d" " -)
+GIT_VERSION_BASE := $(shell echo "$(GIT_VERSION)" | sed -E 's/-[0-9]+-g[0-9a-f]+(-dirty)?$$//')
 
 # compiled file name
 OUT_NAME = $(BOARD)_bootloader-$(GIT_VERSION)
@@ -110,23 +129,37 @@ BIN = _bin/$(BOARD)
 
 # MCU_SUB_VARIANT can be nrf52 (nrf52832), nrf52833, nrf52840
 ifeq ($(MCU_SUB_VARIANT),nrf52)
+  CFLAGS += -DNRF52 -DNRF52832_XXAA
   SD_NAME = s132
   DFU_DEV_REV = 0xADAF
-  CFLAGS += -DNRF52 -DNRF52832_XXAA -DS132
   DFU_APP_DATA_RESERVED=7*4096
 else ifeq ($(MCU_SUB_VARIANT),nrf52833)
-  SD_NAME = s140
+  CFLAGS += -DNRF52833_XXAA
   DFU_DEV_REV = 52833
-  CFLAGS += -DNRF52833_XXAA -DS140
   DFU_APP_DATA_RESERVED=7*4096
+  ifndef SD_NAME
+		SD_NAME = s140
+	endif
 else ifeq ($(MCU_SUB_VARIANT),nrf52840)
-  SD_NAME = s140
+  CFLAGS += -DNRF52840_XXAA
   DFU_DEV_REV = 52840
-  CFLAGS += -DNRF52840_XXAA -DS140
   # App reserved 40KB (8+32) to match circuitpython for 840
   DFU_APP_DATA_RESERVED=10*4096
+  ifndef SD_NAME
+		SD_NAME = s140
+	endif
 else
   $(error Sub Variant $(MCU_SUB_VARIANT) is unknown)
+endif
+
+SD_NAME_UPPER = $(subst s,S,${SD_NAME})
+CFLAGS += -D$(SD_NAME_UPPER)
+
+#----------------------------------
+# ANT_LICENSE_KEY handling
+#----------------------------------
+ifdef ANT_LICENSE_KEY
+  CFLAGS += -DANT_LICENSE_KEY=\"$(ANT_LICENSE_KEY)\"
 endif
 
 #------------------------------------------------------------------------------
@@ -145,6 +178,15 @@ C_SRC += \
   src/sha256.c \
   src/detools/detools.c \
 
+# if using a signed firmware
+ifeq ($(SIGNED_FW), 1)
+C_SRC += \
+  $(TCRYPT_PATH)/source/sha256.c \
+  $(TCRYPT_PATH)/source/ecc.c \
+  $(TCRYPT_PATH)/source/ecc_dsa.c \
+  $(TCRYPT_PATH)/source/utils.c
+endif
+
 # all files in boards
 C_SRC += src/boards/boards.c
 
@@ -159,7 +201,11 @@ C_SRC += $(SDK11_PATH)/libraries/bootloader_dfu/bootloader_settings.c
 C_SRC += $(SDK11_PATH)/libraries/bootloader_dfu/bootloader_util.c
 C_SRC += $(SDK11_PATH)/libraries/bootloader_dfu/dfu_transport_serial.c
 C_SRC += $(SDK11_PATH)/libraries/bootloader_dfu/dfu_transport_ble.c
+ifeq ($(DUALBANK_FW), 1)
+C_SRC += $(SDK11_PATH)/libraries/bootloader_dfu/dfu_dual_bank.c
+else
 C_SRC += $(SDK11_PATH)/libraries/bootloader_dfu/dfu_single_bank.c
+endif
 C_SRC += $(SDK11_PATH)/ble/ble_services/ble_dfu/ble_dfu.c
 C_SRC += $(SDK11_PATH)/ble/ble_services/ble_dis/ble_dis.c
 C_SRC += $(SDK11_PATH)/drivers_nrf/pstorage/pstorage_raw.c
@@ -193,10 +239,10 @@ C_SRC += src/boards/$(BOARD)/pinconfig.c
 
 # USB Application ( MSC + UF2 )
 C_SRC += \
-	src/usb/msc_uf2.c \
 	src/usb/usb_desc.c \
-	src/usb/usb.c \
-	src/usb/uf2/ghostfat.c
+	src/usb/msc_uf2.c \
+	src/usb/uf2/ghostfat.c \
+	src/usb/usb.c
 
 # TinyUSB stack
 C_SRC += \
@@ -207,8 +253,8 @@ C_SRC += \
 	$(TUSB_PATH)/class/cdc/cdc_device.c \
 	$(TUSB_PATH)/class/msc/msc_device.c \
 	$(TUSB_PATH)/tusb.c
-
 endif
+
 
 #------------------------------------------------------------------------------
 # Assembly Files
@@ -227,6 +273,11 @@ IPATH += \
   src/cmsis/include \
   src/usb \
   $(TUSB_PATH)
+
+ifeq ($(SIGNED_FW), 1)
+IPATH += \
+  $(TCRYPT_PATH)/include
+endif
 
 # nrfx
 IPATH += \
@@ -330,12 +381,43 @@ ifneq ($(USE_NFCT),yes)
 endif
 
 CFLAGS += -DSOFTDEVICE_PRESENT
-CFLAGS += -DUF2_VERSION_BASE='"$(GIT_VERSION)"'
-CFLAGS += -DUF2_VERSION='"$(GIT_VERSION) $(GIT_SUBMODULE_VERSIONS)"'
+CFLAGS += -DUF2_VERSION_BASE='"$(GIT_VERSION_BASE)"'
+CFLAGS += -DUF2_VERSION='"$(GIT_VERSION)"'
 CFLAGS += -DBLEDIS_FW_VERSION='"$(GIT_VERSION) $(SD_NAME) $(SD_VERSION)"'
 
-_VER = $(subst ., ,$(word 1, $(subst -, ,$(GIT_VERSION))))
-CFLAGS += -DMK_BOOTLOADER_VERSION='($(word 1,$(_VER)) << 16) + ($(word 2,$(_VER)) << 8) + $(word 3,$(_VER))'
+ifeq ($(SIGNED_FW), 1)
+CFLAGS += -DSIGNED_FW
+CFLAGS += -DSIGNED_FW_QX='$(SIGNED_FW_QX)'
+CFLAGS += -DSIGNED_FW_QY='$(SIGNED_FW_QY)'
+endif
+
+ifeq ($(FORCE_UF2), 1)
+CFLAGS += -DFORCE_UF2
+endif
+
+ifeq ($(DEFAULT_TO_OTA_DFU), 1)
+CFLAGS += -DDEFAULT_TO_OTA_DFU
+endif
+
+# Extract semantic version numbers (MAJOR.MINOR.PATCH) from GIT_VERSION.
+# Supports tags like:
+#   v1.2.3
+#   1.2.3
+#   1.2.3-147-gd71abcd
+# If the version string does not match MAJOR.MINOR.PATCH, defaults to 0.0.0.
+_VER3 := $(shell echo "$(GIT_VERSION)" | sed -E 's/^v?([0-9]+)\.([0-9]+)\.([0-9]+).*/\1 \2 \3/; t; s/.*/0 0 0/')
+
+# Split extracted version into individual numeric components
+_VER_MAJ := $(word 1,$(_VER3))
+_VER_MIN := $(word 2,$(_VER3))
+_VER_PAT := $(word 3,$(_VER3))
+
+# Pack MAJOR.MINOR.PATCH into a single 32-bit integer:
+#   [31:16] MAJOR
+#   [15:8]  MINOR
+#   [7:0]   PATCH
+# This value is stored in the bootloader version register and must be a valid C integer constant.
+CFLAGS += -DMK_BOOTLOADER_VERSION='((($(_VER_MAJ)<<16)|($(_VER_MIN)<<8)|($(_VER_PAT))))'
 
 # Debug option use RTT for printf
 ifeq ($(DEBUG), 1)
@@ -354,12 +436,6 @@ ifeq ($(DEBUG), 1)
 endif
 
 CFLAGS += -DDFU_APP_DATA_RESERVED=$(DFU_APP_DATA_RESERVED)
-
-# https://gcc.gnu.org/bugzilla/show_bug.cgi?id=105523
-# Fixes for gcc version 12, 13 and 14.
-ifneq (,$(filter 12.% 13.% 14.%,$(shell $(CC) -dumpversion 2>/dev/null)))
-	CFLAGS += --param=min-pagesize=0
-endif
 
 #------------------------------------------------------------------------------
 # Linker Flags
@@ -452,17 +528,17 @@ $(BUILD)/$(OUT_NAME).hex: $(BUILD)/$(OUT_NAME).out
 # Hex file with mbr (still no SD)
 $(BUILD)/$(OUT_NAME)_nosd.hex: $(BUILD)/$(OUT_NAME).hex
 	@echo Create $(notdir $@)
-	@python3 tools/hexmerge.py --overlap=replace -o $@ $< $(MBR_HEX)
+	@$(PYTHON) tools/hexmerge.py --overlap=replace -o $@ $< $(MBR_HEX)
 
 # Bootolader self-update uf2
 $(BUILD)/update-$(OUT_NAME)_nosd.uf2: $(BUILD)/$(OUT_NAME)_nosd.hex
 	@echo Create $(notdir $@)
-	@python3 lib/uf2/utils/uf2conv.py -f $(UF2_FAMILY_ID_BOOTLOADER) -c -o $@ $^
+	$(PYTHON) lib/uf2/utils/uf2conv.py -f $(UF2_FAMILY_ID_BOOTLOADER) -c -o $@ $^
 
 # merge bootloader and sd hex together
 $(BUILD)/$(MERGED_FILE).hex: $(BUILD)/$(OUT_NAME).hex
 	@echo Create $(notdir $@)
-	@python3 tools/hexmerge.py -o $@ $< $(SD_HEX)
+	@$(PYTHON) tools/hexmerge.py -o $@ $< $(SD_HEX)
 
 # Create pkg zip file for bootloader+SD combo to use with DFU CDC
 $(BUILD)/$(MERGED_FILE).zip: $(BUILD)/$(OUT_NAME).hex

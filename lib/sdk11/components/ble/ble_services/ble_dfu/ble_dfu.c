@@ -17,13 +17,13 @@
 #include <stddef.h>
 #include "sdk_common.h"
 
-#define MAX_DFU_PKT_LEN         (247 - 3) // MTU - 3 bytes for ATT header       /**< Maximum length (in bytes) of the DFU Packet characteristic. */
-#define PKT_START_DFU_PARAM_LEN 2                                               /**< Length (in bytes) of the parameters for Packet Start DFU Request. */
-#define PKT_INIT_DFU_PARAM_LEN  2                                               /**< Length (in bytes) of the parameters for Packet Init DFU Request. */
-#define PKT_RCPT_NOTIF_REQ_LEN  3                                               /**< Length (in bytes) of the Packet Receipt Notification Request. */
-#define MAX_PKTS_RCPT_NOTIF_LEN 6                                               /**< Maximum length (in bytes) of the Packets Receipt Notification. */
-#define MAX_RESPONSE_LEN        7                                               /**< Maximum length (in bytes) of the response to a Control Point command. */
-#define MAX_NOTIF_BUFFER_LEN    MAX(MAX_PKTS_RCPT_NOTIF_LEN, MAX_RESPONSE_LEN)  /**< Maximum length (in bytes) of the buffer needed by DFU Service while sending notifications to peer. */
+#define MAX_DFU_PKT_LEN                 (BLEGATT_ATT_MTU_MAX - 3) /**< Maximum length (in bytes) of the DFU Packet characteristic. */
+#define PKT_START_DFU_PARAM_LEN         2                                               /**< Length (in bytes) of the parameters for Packet Start DFU Request. */
+#define PKT_INIT_DFU_PARAM_LEN          2                                               /**< Length (in bytes) of the parameters for Packet Init DFU Request. */
+#define PKT_RCPT_NOTIF_REQ_LEN          3                                               /**< Length (in bytes) of the Packet Receipt Notification Request. */
+#define MAX_PKTS_RCPT_NOTIF_LEN         6                                               /**< Maximum length (in bytes) of the Packets Receipt Notification. */
+#define MAX_RESPONSE_LEN                7                                               /**< Maximum length (in bytes) of the response to a Control Point command. */
+#define MAX_NOTIF_BUFFER_LEN            MAX(MAX_PKTS_RCPT_NOTIF_LEN, MAX_RESPONSE_LEN)  /**< Maximum length (in bytes) of the buffer needed by DFU Service while sending notifications to peer. */
 
 enum
 {
@@ -57,7 +57,8 @@ static uint32_t dfu_pkt_char_add(ble_dfu_t * const p_dfu)
 
     memset(&char_md, 0, sizeof(char_md));
 
-    char_md.char_props.write_wo_resp = 1;
+    char_md.char_props.write         = 1; // For those improved apps that can take advantage of ACK
+    char_md.char_props.write_wo_resp = 1; // Nordic IOS DFU app REQUIRES Write Without Response */
     char_md.p_char_user_desc         = NULL;
     char_md.p_char_pf                = NULL;
     char_md.p_user_desc_md           = NULL;
@@ -314,7 +315,7 @@ static uint32_t on_ctrl_pt_write(ble_dfu_t * p_dfu, ble_gatts_evt_write_t * p_bl
                                              (ble_dfu_procedure_t) p_ble_write_evt->data[0],
                                              BLE_DFU_RESP_VAL_OPER_FAILED);
             }
-            
+
             ble_dfu_evt.evt.ble_dfu_pkt_write.len    = 1;
             ble_dfu_evt.evt.ble_dfu_pkt_write.p_data = &(p_ble_write_evt->data[1]);
 
@@ -401,7 +402,7 @@ static void on_rw_authorize_req(ble_dfu_t * p_dfu, ble_evt_t * p_ble_evt)
         (p_authorize_request->type == BLE_GATTS_AUTHORIZE_TYPE_WRITE)
         &&
         (p_authorize_request->request.write.handle == p_dfu->dfu_ctrl_pt_handles.value_handle)
-        && 
+        &&
         (p_ble_evt->evt.gatts_evt.params.authorize_request.request.write.op != BLE_GATTS_OP_PREP_WRITE_REQ)
         &&
         (p_ble_evt->evt.gatts_evt.params.authorize_request.request.write.op != BLE_GATTS_OP_EXEC_WRITE_REQ_NOW)
@@ -555,29 +556,35 @@ uint32_t ble_dfu_bytes_rcvd_report(ble_dfu_t * p_dfu, uint32_t num_of_firmware_b
         return NRF_ERROR_INVALID_STATE;
     }
 
-    ble_gatts_hvx_params_t hvx_params;
-    uint16_t               index = 0;
+    uint32_t err_code;
+	do {
 
-    // Encode the Op Code.
-    m_notif_buffer[index++] = OP_CODE_RESPONSE;
+        ble_gatts_hvx_params_t hvx_params;
+        uint16_t               index = 0;
 
-    // Encode the Reqest Op Code.
-    m_notif_buffer[index++] = OP_CODE_IMAGE_SIZE_REQ;
+        // Encode the Op Code.
+        m_notif_buffer[index++] = OP_CODE_RESPONSE;
 
-    // Encode the Response Value.
-    m_notif_buffer[index++] = (uint8_t)BLE_DFU_RESP_VAL_SUCCESS;
+        // Encode the Reqest Op Code.
+        m_notif_buffer[index++] = OP_CODE_IMAGE_SIZE_REQ;
 
-    index += uint32_encode(num_of_firmware_bytes_rcvd, &m_notif_buffer[index]);
+        // Encode the Response Value.
+        m_notif_buffer[index++] = (uint8_t)BLE_DFU_RESP_VAL_SUCCESS;
 
-    memset(&hvx_params, 0, sizeof(hvx_params));
+        index += uint32_encode(num_of_firmware_bytes_rcvd, &m_notif_buffer[index]);
 
-    hvx_params.handle = p_dfu->dfu_ctrl_pt_handles.value_handle;
-    hvx_params.type   = BLE_GATT_HVX_NOTIFICATION;
-    hvx_params.offset = 0;
-    hvx_params.p_len  = &index;
-    hvx_params.p_data = m_notif_buffer;
+        memset(&hvx_params, 0, sizeof(hvx_params));
 
-    return sd_ble_gatts_hvx(p_dfu->conn_handle, &hvx_params);
+        hvx_params.handle = p_dfu->dfu_ctrl_pt_handles.value_handle;
+        hvx_params.type   = BLE_GATT_HVX_NOTIFICATION;
+        hvx_params.offset = 0;
+        hvx_params.p_len  = &index;
+        hvx_params.p_data = m_notif_buffer;
+
+        err_code = sd_ble_gatts_hvx(p_dfu->conn_handle, &hvx_params);
+    } while (err_code == NRF_ERROR_RESOURCES);
+
+    return err_code;
 }
 
 
@@ -593,22 +600,28 @@ uint32_t ble_dfu_pkts_rcpt_notify(ble_dfu_t * p_dfu, uint32_t num_of_firmware_by
         return NRF_ERROR_INVALID_STATE;
     }
 
-    ble_gatts_hvx_params_t hvx_params;
-    uint16_t               index = 0;
+    uint32_t err_code;
+	do {
 
-    m_notif_buffer[index++] = OP_CODE_PKT_RCPT_NOTIF;
+        ble_gatts_hvx_params_t hvx_params;
+        uint16_t               index = 0;
 
-    index += uint32_encode(num_of_firmware_bytes_rcvd, &m_notif_buffer[index]);
+        m_notif_buffer[index++] = OP_CODE_PKT_RCPT_NOTIF;
 
-    memset(&hvx_params, 0, sizeof(hvx_params));
+        index += uint32_encode(num_of_firmware_bytes_rcvd, &m_notif_buffer[index]);
 
-    hvx_params.handle = p_dfu->dfu_ctrl_pt_handles.value_handle;
-    hvx_params.type   = BLE_GATT_HVX_NOTIFICATION;
-    hvx_params.offset = 0;
-    hvx_params.p_len  = &index;
-    hvx_params.p_data = m_notif_buffer;
+        memset(&hvx_params, 0, sizeof(hvx_params));
 
-    return sd_ble_gatts_hvx(p_dfu->conn_handle, &hvx_params);
+        hvx_params.handle = p_dfu->dfu_ctrl_pt_handles.value_handle;
+        hvx_params.type   = BLE_GATT_HVX_NOTIFICATION;
+        hvx_params.offset = 0;
+        hvx_params.p_len  = &index;
+        hvx_params.p_data = m_notif_buffer;
+
+        err_code = sd_ble_gatts_hvx(p_dfu->conn_handle, &hvx_params);
+    } while (err_code == NRF_ERROR_RESOURCES);
+
+    return err_code;
 }
 
 
@@ -626,24 +639,30 @@ uint32_t ble_dfu_response_send(ble_dfu_t         * p_dfu,
         return NRF_ERROR_INVALID_STATE;
     }
 
-    ble_gatts_hvx_params_t hvx_params;
-    uint16_t               index = 0;
+    uint32_t err_code;
+	do {
 
-    m_notif_buffer[index++] = OP_CODE_RESPONSE;
+        ble_gatts_hvx_params_t hvx_params;
+        uint16_t               index = 0;
 
-    // Encode the Request Op code
-    m_notif_buffer[index++] = (uint8_t)dfu_proc;
+        m_notif_buffer[index++] = OP_CODE_RESPONSE;
 
-    // Encode the Response Value.
-    m_notif_buffer[index++] = (uint8_t)resp_val;
+        // Encode the Request Op code
+        m_notif_buffer[index++] = (uint8_t)dfu_proc;
 
-    memset(&hvx_params, 0, sizeof(hvx_params));
+        // Encode the Response Value.
+        m_notif_buffer[index++] = (uint8_t)resp_val;
 
-    hvx_params.handle = p_dfu->dfu_ctrl_pt_handles.value_handle;
-    hvx_params.type   = BLE_GATT_HVX_NOTIFICATION;
-    hvx_params.offset = 0;
-    hvx_params.p_len  = &index;
-    hvx_params.p_data = m_notif_buffer;
+        memset(&hvx_params, 0, sizeof(hvx_params));
 
-    return sd_ble_gatts_hvx(p_dfu->conn_handle, &hvx_params);
+        hvx_params.handle = p_dfu->dfu_ctrl_pt_handles.value_handle;
+        hvx_params.type   = BLE_GATT_HVX_NOTIFICATION;
+        hvx_params.offset = 0;
+        hvx_params.p_len  = &index;
+        hvx_params.p_data = m_notif_buffer;
+
+        err_code = sd_ble_gatts_hvx(p_dfu->conn_handle, &hvx_params);
+    } while (err_code == NRF_ERROR_RESOURCES);
+
+    return err_code;
 }

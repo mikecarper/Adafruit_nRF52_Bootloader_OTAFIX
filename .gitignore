@@ -56,6 +56,7 @@ dkms.conf
 
 segger/Output
 _build/
+cmake-build-*/
 bin/
 *.emSession
 *.jlink
@@ -72,3 +73,6 @@ venv/
 lib/python3.13/
 lib64
 pyvenv.cfg
+
+# Exclude all SoftDevice S340 files
+lib/softdevice/s340*

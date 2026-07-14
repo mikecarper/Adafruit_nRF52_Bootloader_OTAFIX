@@ -35,9 +35,8 @@
 /*------------------------------------------------------------------*/
 /* BUTTON
  *------------------------------------------------------------------*/
-#define BUTTONS_NUMBER    2               // these pins were reversed from the stock bootloader
-#define BUTTON_1          _PINNUM(0, 11)  // probably unconnected?
-#define BUTTON_2          _PINNUM(0, 12)  // user button
+#define BUTTON_DFU        _PINNUM(0, 11)  // probably unconnected; reversed from stock bootloader
+#define BUTTON_DFU_OTA    _PINNUM(0, 12)  // user button
 #define BUTTON_PULL       NRF_GPIO_PIN_PULLUP
 
 //--------------------------------------------------------------------+

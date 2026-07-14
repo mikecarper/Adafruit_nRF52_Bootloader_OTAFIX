@@ -35,10 +35,9 @@
 /*------------------------------------------------------------------*/
 /* BUTTON
  *------------------------------------------------------------------*/
-#define BUTTONS_NUMBER    2
-// #define BUTTON_1          _PINNUM(1, 7)   // Function button (TBN)
-#define BUTTON_1          _PINNUM(1, 10)  // Hold page turn to enter OTA DFU mode.
-#define BUTTON_2          _PINNUM(1, 10)  // Page Turn button
+// #define BUTTON_DFU        _PINNUM(1, 7)   // Function button (TBN)
+#define BUTTON_DFU        _PINNUM(1, 10)  // Hold page turn to enter OTA DFU mode.
+#define BUTTON_DFU_OTA    _PINNUM(1, 10)  // Page Turn button
 #define BUTTON_PULL       NRF_GPIO_PIN_PULLUP
 
 //--------------------------------------------------------------------+

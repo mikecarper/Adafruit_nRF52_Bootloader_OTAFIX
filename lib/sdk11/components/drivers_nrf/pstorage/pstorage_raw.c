@@ -32,7 +32,7 @@
  * full control of the flash, such as DFU. The registration function in this implementation only
  * allocates a module id for the queue but does not locate any flash pages for the registrant.
  * This implementation provides no safety checking of addresses when clearing or storing data into
- * flash. The application is responsible for handling flash addresses and care must therefore be 
+ * flash. The application is responsible for handling flash addresses and care must therefore be
  * taken in application not to erase application area.
  * This implementation does not support the @ref pstorage_update function.
  */
@@ -79,9 +79,9 @@ typedef struct
 {
     uint8_t              op_code;       /**< Identifies flash access operation being queued. Element is free is op-code is INVALID_OPCODE */
     pstorage_size_t      size;          /**< Identifies size in bytes requested for the operation. */
-    pstorage_size_t      offset;        /**< Offset requested by the application for access operation. */    
+    pstorage_size_t      offset;        /**< Offset requested by the application for access operation. */
     pstorage_handle_t    storage_addr;  /**< Address/Identifier for persistent memory. */
-    uint8_t            * p_data_addr;   /**< Address/Identifier for data memory. This is assumed to be resident memory. */    
+    uint8_t            * p_data_addr;   /**< Address/Identifier for data memory. This is assumed to be resident memory. */
 } cmd_queue_element_t;
 
 
@@ -152,7 +152,7 @@ static void app_notify(uint32_t result, cmd_queue_element_t * p_elem);
  * @note Only one flash access operation is permitted at a time by SoC. Hence a queue is
  * maintained by this module.
  */
- 
+
 /**
  * @brief Function for initializing a command queue element.
  *
@@ -216,7 +216,7 @@ static void pending_packets_init(void)
  * @retval true  If the packet was successfully added.
  * @retval false If the buffer is full or size exceeds maximum.
  */
-static bool pending_packet_add(pstorage_handle_t * p_handle, uint8_t * p_data, 
+static bool pending_packet_add(pstorage_handle_t * p_handle, uint8_t * p_data,
                                uint32_t size, uint32_t offset)
 {
     if (m_pending_count >= PENDING_PACKET_COUNT || size > PENDING_PACKET_SIZE)
@@ -429,7 +429,7 @@ static void process_pending_packets(void)
 
     // Page is ready, enqueue the store
     m_processing_pending = true;
-    
+
     uint32_t ret = cmd_queue_enqueue(PSTORAGE_STORE_OP_CODE, &p->handle, p->data, p->size, p->offset);
 
     if (ret != NRF_SUCCESS)
@@ -451,15 +451,15 @@ static void process_pending_packets(void)
 static bool lazy_erase_check_and_trigger(pstorage_handle_t * p_handle, pstorage_size_t size, pstorage_size_t offset)
 {
     uint32_t target_addr = p_handle->block_id + offset;
-    
+
     if (target_addr < dfu_base_address || dfu_page_erased == NULL)
     {
         return false;
     }
-    
+
     uint32_t rel_addr = target_addr - dfu_base_address;
     uint32_t page_index = rel_addr / PSTORAGE_FLASH_PAGE_SIZE;
-    
+
     // Also check end of packet
     uint32_t end_addr = target_addr + size - 1;
     uint32_t end_rel_addr = end_addr - dfu_base_address;
@@ -467,19 +467,19 @@ static bool lazy_erase_check_and_trigger(pstorage_handle_t * p_handle, pstorage_
 
     // Check if start page needs erase
     bool start_needs_erase = (page_index < dfu_image_page_count && !dfu_page_erased[page_index]);
-    
+
     // Check if end page needs erase (and is different from start page)
-    bool end_needs_erase = (end_page_index != page_index) && 
+    bool end_needs_erase = (end_page_index != page_index) &&
                            (end_page_index < dfu_image_page_count && !dfu_page_erased[end_page_index]);
 
     if (!start_needs_erase && !end_needs_erase)
     {
         return false;
     }
-    
+
     // Determine which page to erase (start page takes priority)
     uint32_t erase_page = start_needs_erase ? page_index : end_page_index;
-    
+
     m_lazy_erase_active = true;
     m_lazy_erase_page = erase_page;
 
@@ -489,7 +489,7 @@ static bool lazy_erase_check_and_trigger(pstorage_handle_t * p_handle, pstorage_
 
     cmd_queue_enqueue(PSTORAGE_CLEAR_OP_CODE, &erase_handle, NULL,
                      PSTORAGE_FLASH_PAGE_SIZE, 0);
-    
+
     return true;
 }
 
@@ -500,7 +500,11 @@ static bool lazy_erase_check_and_trigger(pstorage_handle_t * p_handle, pstorage_
  * @param[in] sys_evt System event received.
  */
 void pstorage_sys_event_handler(uint32_t sys_evt)
-{  
+{
+    // Do not bother processing events we are not interested in
+    if (sys_evt != NRF_EVT_FLASH_OPERATION_SUCCESS &&
+        sys_evt != NRF_EVT_FLASH_OPERATION_ERROR) return;
+
     uint32_t retval = NRF_SUCCESS;
 
     // The event shall only be processed if requested by this module.
@@ -562,7 +566,7 @@ void pstorage_sys_event_handler(uint32_t sys_evt)
                             pending_packet_pop();
 
                             cmd_queue_element_init(queue_rp);
-                            
+
                             // Clear flag BEFORE callback
                             m_processing_pending = false;
 
@@ -594,7 +598,7 @@ void pstorage_sys_event_handler(uint32_t sys_evt)
                     // Queue is empty but we have pending packets - process one
                     process_pending_packets();
                 }
-                
+
                 if (retval != NRF_SUCCESS)
                 {
                     app_notify(retval, &m_cmd_queue.cmd[m_cmd_queue.rp]);
@@ -620,6 +624,7 @@ void pstorage_sys_event_handler(uint32_t sys_evt)
  * @brief Function for processing of commands and issuing flash access request to the SoftDevice.
  *
  * @return The return value received from SoftDevice.
+ * @remark This function is only called when m_cmd_queue.flash_access == false
  */
 static uint32_t cmd_process(void)
 {
@@ -637,6 +642,9 @@ static uint32_t cmd_process(void)
     p_cmd = &m_cmd_queue.cmd[m_cmd_queue.rp];
 
     storage_addr = p_cmd->storage_addr.block_id;
+
+    // Let's assume we will do a flash access
+    m_cmd_queue.flash_access = true;
 
     switch (p_cmd->op_code)
     {
@@ -682,9 +690,10 @@ static uint32_t cmd_process(void)
             break;
     }
 
-    if (retval == NRF_SUCCESS)
+    // An error means we will not do it
+    if (retval != NRF_SUCCESS)
     {
-       m_cmd_queue.flash_access = true;
+       m_cmd_queue.flash_access = false;
     }
 
     return retval;
