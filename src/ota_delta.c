@@ -82,9 +82,11 @@ static const uint8_t APRV[4]     = { 'A','P','R','V' };
     nrfx_nvmc_words_write(BOOTLOADER_SETTINGS_ADDRESS, (const uint32_t*)&s, sizeof(s) / 4);
   }
   #define BANK_VALID_APP_V  0x01u
+  #define BANK_INVALID_APP_V 0xFFu
 #endif
 #ifdef OTA_DELTA_HOST_TEST
   #define BANK_VALID_APP_V  0x01u
+  #define BANK_INVALID_APP_V 0xFFu
 #endif
 
 #include "sha256.h"
@@ -156,27 +158,58 @@ struct apply_ctx {
   uint32_t ws_lo, ws_hi;        // workspace = [ws_lo, ws_hi); ws_hi == mota start (never written)
   int step;
 };
+static int dt_ws_addr(const struct apply_ctx* c, uintptr_t off, size_t n, uint32_t* addr) {
+  uint32_t span = c->ws_hi - c->ws_lo;
+  if (off > UINT32_MAX || n > UINT32_MAX) return 0;
+  uint32_t o = (uint32_t)off, z = (uint32_t)n;
+  if (o > span || z > span - o) return 0;
+  *addr = c->ws_lo + o;
+  return 1;
+}
 static int dt_mr(void* a, void* dst, uintptr_t src, size_t n) {
-  struct apply_ctx* c = a; uint32_t addr = c->ws_lo + (uint32_t)src;
-  if (addr + n > c->ws_hi) return -DETOOLS_IO_FAILED;
+  struct apply_ctx* c = a; uint32_t addr;
+  if (!dt_ws_addr(c, src, n, &addr)) return -DETOOLS_IO_FAILED;
   cread(addr, dst, n); return DETOOLS_OK;
 }
 static int dt_mw(void* a, uintptr_t dst, void* src, size_t n) {
-  struct apply_ctx* c = a; uint32_t addr = c->ws_lo + (uint32_t)dst;
-  if (addr + n > c->ws_hi) return -DETOOLS_IO_FAILED;
+  struct apply_ctx* c = a; uint32_t addr;
+  if (!dt_ws_addr(c, dst, n, &addr)) return -DETOOLS_IO_FAILED;
   cwrite(addr, (const uint8_t*)src, n); return DETOOLS_OK;
 }
 static int dt_me(void* a, uintptr_t addr0, size_t n) {
-  struct apply_ctx* c = a; uint32_t addr = c->ws_lo + (uint32_t)addr0;
-  if (addr + n > c->ws_hi) return -DETOOLS_IO_FAILED;
+  struct apply_ctx* c = a; uint32_t addr;
+  if (!dt_ws_addr(c, addr0, n, &addr)) return -DETOOLS_IO_FAILED;
   cerase(addr, n); return DETOOLS_OK;
 }
 static int dt_ss(void* a, int s) { ((struct apply_ctx*)a)->step = s; return DETOOLS_OK; }
 static int dt_sg(void* a, int* s) { *s = ((struct apply_ctx*)a)->step; return DETOOLS_OK; }
 static int dt_pr(void* a, uint8_t* dst, size_t n) {
   struct apply_ctx* c = a;
-  if (c->patch_pos + n > c->patch_len) return -DETOOLS_IO_FAILED;
-  fl_read(c->patch_addr + c->patch_pos, dst, n); c->patch_pos += (uint32_t)n; return DETOOLS_OK;
+  if (n > UINT32_MAX || c->patch_pos > c->patch_len || (uint32_t)n > c->patch_len - c->patch_pos)
+    return -DETOOLS_IO_FAILED;
+  fl_read(c->patch_addr + c->patch_pos, dst, (uint32_t)n);
+  c->patch_pos += (uint32_t)n; return DETOOLS_OK;
+}
+
+// Decode the five unsigned sizes in an in-place detools header without starting the decoder. This lets
+// us reject impossible flash geometry while the running application and its boot settings are intact.
+static int dt_header_u32(uint32_t addr, uint32_t len, uint32_t* pos, uint32_t* out) {
+  uint8_t b;
+  if (*pos >= len) return 0;
+  fl_read(addr + (*pos)++, &b, 1);
+  uint32_t v = b & 0x3Fu;
+  uint32_t shift = 6;
+  while (b & 0x80u) {
+    if (*pos >= len) return 0;
+    fl_read(addr + (*pos)++, &b, 1);
+    uint32_t bits = b & 0x7Fu;
+    if (shift >= 32 || bits > (UINT32_MAX >> shift)) return 0;
+    v |= bits << shift;
+    shift += 7;
+  }
+  if (v > 0x7FFFFFFFu) return 0;                  // detools stores header sizes in signed int
+  *out = v;
+  return 1;
 }
 
 // ---- `.mota` parse (fixed fields only) + EndF base location --------------------------------------
@@ -184,6 +217,22 @@ struct mota_min {
   uint32_t total, image_size, payload_size, payload_addr, approval_addr;
   uint8_t  base_hash[8], image_hash[32], codec_id, is_full, approved;
 };
+static int dt_geometry_ok(const struct mota_min* m, uint32_t body_len, uint32_t ws_span) {
+  uint8_t fixed;
+  uint32_t p = 1, memory, segment, shift, from, to;
+  if (m->payload_size < 2) return 0;
+  fl_read(m->payload_addr, &fixed, 1);
+  if (((fixed >> 4) & 0x07u) != 1u) return 0;      // detools PATCH_TYPE_IN_PLACE
+  if (!dt_header_u32(m->payload_addr, m->payload_size, &p, &memory) ||
+      !dt_header_u32(m->payload_addr, m->payload_size, &p, &segment) ||
+      !dt_header_u32(m->payload_addr, m->payload_size, &p, &shift) ||
+      !dt_header_u32(m->payload_addr, m->payload_size, &p, &from) ||
+      !dt_header_u32(m->payload_addr, m->payload_size, &p, &to)) return 0;
+  if (memory == 0 || memory > ws_span || segment != PAGE || shift > memory ||
+      shift % segment != 0 || from > memory - shift || to > memory) return 0;
+  if (body_len > UINT32_MAX - ENDF_LEN || from != body_len + ENDF_LEN) return 0;
+  return to == m->image_size && to <= ws_span;
+}
 static int parse_mota_at(uint32_t addr, struct mota_min* o) {
   uint8_t b[8 + MOTA_MFL];                          // MAGIC+total + the whole fixed manifest-minus-leaves
   uint32_t avail = MOTA_NRF52_FS_START - addr;
@@ -280,8 +329,9 @@ bool ota_delta_check_and_apply(void) {
   if (keep == 0) return false;                      // 'M' (0x4D) != 0, so never taken; keeps the marker live
   // ---- DIAGNOSTIC: stash a bail/progress code in GPREGRET2; the app reads it back into `ota status`.
   // 0xB0 entered (pre-gate) | 0xB1 gate passed (GPREGRET was 0x6A) | 0xB2 no/unapproved mota |
-  // 0xB3 full/bad-codec | 0xB4 no body_len | 0xB5 base mismatch | 0x9N detools err N | 0xB6 wrong size |
-  // 0xB7 result-hash mismatch | 0xB8 SUCCESS. If status shows 0xB0 -> GPREGRET wasn't 0x6A at the bootloader.
+  // 0xB3 full/bad-codec | 0xB4 no body_len | 0xB5 base mismatch | 0xB9 bad detools geometry |
+  // 0x9N detools err N | 0xB6 wrong size | 0xB7 result-hash mismatch | 0xB8 SUCCESS.
+  // If status shows 0xB0 -> GPREGRET wasn't 0x6A at the bootloader.
   gpregret2_set(0xB0);
   if (gpregret_get() != GPREGRET_OTA_APPLY) return false;
   gpregret_set(0);                                  // consume the trigger so we never loop
@@ -299,8 +349,15 @@ bool ota_delta_check_and_apply(void) {
   if (!find_body_len(&body_len))                { gpregret2_set(0xB4); goto reject; }
   sha256_region(APP_BASE, body_len, base32);
   if (memcmp(base32, m.base_hash, 8) != 0)      { gpregret2_set(0xB5); goto reject; }   // wrong base
+  if (!dt_geometry_ok(&m, body_len, mota_addr - APP_BASE)) {
+    gpregret2_set(0xB9); goto reject;
+  }
 
-  // commit point: clear approval BEFORE the destructive apply (a failure must not retry)
+  // Commit point: make every subsequent reset enter DFU BEFORE the first destructive application write.
+  // This is essential for UF2-installed apps, whose zero CRC otherwise makes a partial image bootable.
+  otah_settings_commit(BANK_INVALID_APP_V, 0, 0);
+
+  // Consume approval before applying so a failed patch is never retried automatically.
   clear_approval(&m);
 
   struct apply_ctx c;
