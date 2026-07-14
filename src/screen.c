@@ -186,12 +186,9 @@ static void print(int x, int y, int col, const char* text) {
       y += 10;
       continue;
     }
-    /*
-    if (x + 8 > DISPLAY_WIDTH) {
-        x = x0;
-        y += 10;
+    if (x < 0 || y < 0 || x + 6 > DISPLAY_WIDTH || y + 8 > DISPLAY_HEIGHT) {
+      return;
     }
-    */
     if (c < ' ') c = '?';
     if (c >= 0x7f) c = '?';
     c -= ' ';
@@ -242,6 +239,26 @@ static void drawBar(int y, int h, int color) {
 
 // draw drag & drop screen
 void screen_draw_drag(void) {
+#ifdef DISPLAY_CONTROLLER_ST7735
+  drawBar(0, 35, COLOR_GREEN);
+  drawBar(35, 35, COLOR_BLUE);
+  drawBar(70, 10, COLOR_ORANGE);
+
+  int name_x = (DISPLAY_WIDTH - CHAR4_KERNED_WIDTH * (int) strlen(DISPLAY_TITLE)) / 2;
+  print4(name_x >= 0 ? name_x : 0, 0, COLOR_WHITE, DISPLAY_TITLE);
+
+  int banner_x = (DISPLAY_WIDTH - 6 * (int) strlen(BANNER_TEXT)) / 2;
+  print(banner_x >= 0 ? banner_x : 0, 70, COLOR_WHITE, BANNER_TEXT);
+
+#define DRAG 45
+#define DRAGX 10
+  printicon(DRAGX + 20, DRAG, COLOR_WHITE, fileLogo);
+  printicon(DRAGX + 65, DRAG - 5, COLOR_WHITE, arrowLogo);
+  printicon(DRAGX + 108, DRAG - 9, COLOR_WHITE, pendriveLogo);
+  print(DRAGX - 5, DRAG - 10, COLOR_WHITE, "firmware.uf2");
+#endif
+
+#ifdef DISPLAY_CONTROLLER_ST7789
   drawBar(0, 52, COLOR_GREEN);
   drawBar(52, 55, COLOR_BLUE);
   drawBar(107, 14, COLOR_ORANGE);
@@ -263,11 +280,28 @@ void screen_draw_drag(void) {
   printicon(DRAGX + 129, DRAG, COLOR_WHITE, pendriveLogo);
   print(22, DRAG - 12, COLOR_WHITE, "firmware.uf2");
   print(160, DRAG - 12, COLOR_WHITE, UF2_VOLUME_LABEL);
+#endif
 
   draw_screen(frame_buf);
 }
 
 void screen_draw_ble(void) {
+#ifdef DISPLAY_CONTROLLER_ST7735
+  drawBar(0, 35, COLOR_GREEN);
+  drawBar(35, 35, COLOR_BLUE);
+  drawBar(70, 10, COLOR_ORANGE);
+
+  int name_x = (DISPLAY_WIDTH - CHAR4_KERNED_WIDTH * (int) strlen(DISPLAY_TITLE)) / 2;
+  print4(name_x >= 0 ? name_x : 0, 0, COLOR_WHITE, DISPLAY_TITLE);
+
+  int ble_x = (DISPLAY_WIDTH - CHAR4_KERNED_WIDTH * (int) strlen("BLE OTA")) / 2;
+  print4(ble_x >= 0 ? ble_x : 0, 36, COLOR_WHITE, "BLE OTA");
+
+  int banner_x = (DISPLAY_WIDTH - 6 * (int) strlen(BANNER_TEXT)) / 2;
+  print(banner_x >= 0 ? banner_x : 0, 70, COLOR_WHITE, BANNER_TEXT);
+#endif
+
+#ifdef DISPLAY_CONTROLLER_ST7789
   drawBar(0, 52, COLOR_GREEN);
   drawBar(52, 55, COLOR_BLUE);
   drawBar(107, 14, COLOR_ORANGE);
@@ -284,6 +318,7 @@ void screen_draw_ble(void) {
 
   int ble_x = (DISPLAY_WIDTH - CHAR4_KERNED_WIDTH * (int) strlen("BLE OTA")) / 2;
   print4(ble_x >= 0 ? ble_x : 0, 65, COLOR_WHITE, "BLE OTA");
+#endif
 
   draw_screen(frame_buf);
 }

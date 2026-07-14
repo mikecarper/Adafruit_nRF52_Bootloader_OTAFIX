@@ -16,7 +16,8 @@
   Elecrow ThinkNode M1, M3, M6  
   LilyGo T-Echo  
   Minewsemi MX25LE01  
-  Seeed SenseCAP Solar Node P1
+  Seeed SenseCAP Solar Node P1\
+  Heltec T096
 
 ## Changes in OTAFIX 2.1
 
@@ -44,6 +45,7 @@
   - **Elecrow ThinkNode M3** → `TNM3_DFU`
   - **Elecrow ThinkNode M6** → `TNM6_DFU`
   - **Heltec T114** → `T114_DFU`
+  - **Heltec T096** → `T096_DFU`
   - **LILYGO T-Echo** → `LGTE_DFU`
   - **Minewsemi MX25LE01** → `MX25_DFU`
   - **ProMicro NRF52840** → `PROM_DFU`
@@ -61,6 +63,7 @@
 - Elecrow ThinkNode M3
 - Elecrow ThinkNode M6
 - Heltec Automation Mesh Node T114 / HT-nRF5262
+- Heltec Automation Mesh Node T096 / HT-n5262G
 - LilyGO T-Echo
 - Minewsemi MX25LE01
 - Nologo ProMicro NRF52840 (aka SuperMini NRF52840)
