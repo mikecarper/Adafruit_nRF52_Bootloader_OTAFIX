@@ -50,8 +50,8 @@ array, an obvious alias the compiler never gets wrong. So `readback_test` guards
 1. **positive** — coherent readback ⇒ the apply succeeds, commits, and matches the expected image.
 2. **negative** — it *injects* the exact failure mode (workspace reads return stale pre-write bytes) and
    asserts the apply **fails safe**: the bank stays invalid, returns false (→ DFU, never a corrupt boot).
-3. **bounds/geometry** — rejects wraparound callback ranges and impossible detools flash geometry before
-   invalidating settings or modifying the current application.
+3. **bounds/geometry** — rejects wraparound callback ranges, wrapped container size/leaf arithmetic, and
+   impossible detools flash geometry before invalidating settings or modifying the current application.
 4. **source guard** — asserts the device `fl_read` still reads through `volatile`. This is the only check
    that catches a "someone reverted the fix" regression (1/2 can't, on the host). Verified: flipping
    `fl_read` back to a plain `memcpy` turns the suite red.

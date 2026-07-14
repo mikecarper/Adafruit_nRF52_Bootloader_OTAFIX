@@ -268,11 +268,15 @@ static int parse_mota_at(uint32_t addr, struct mota_min* o) {
   const uint8_t* ap = br_take(&r, 4);
   o->approved = (ap && memcmp(ap, APRV, 4) == 0) ? 1 : 0;
   if (bsl == 0 || bsl > 24 || o->payload_size == 0) return 0;
-  uint32_t bs = 1u << bsl, bc = (o->payload_size + bs - 1) / bs;
-  uint32_t off = r.n + bc * 4;                      // leaves[] then payload
-  o->payload_addr = addr + off;
+  // Do all variable-length geometry in 64 bits. With corrupt 32-bit sizes, the old ceil-divide,
+  // leaf-count multiplication, and final sum could wrap together into a small self-consistent `total`,
+  // leaving payload_addr far outside the staged container.
+  uint64_t bs = 1ull << bsl;
+  uint64_t bc = ((uint64_t)o->payload_size + bs - 1) / bs;
+  uint64_t off = (uint64_t)r.n + bc * 4u;            // leaves[] then payload
+  if (off + o->payload_size + 5u != total) return 0; // payload must end exactly at the trailer
+  o->payload_addr = addr + (uint32_t)off;            // exact-total check proves off < total <= avail
   o->total = total;
-  if (off + o->payload_size + 5 != total) return 0; // payload must end exactly at the trailer
   return 1;
 }
 

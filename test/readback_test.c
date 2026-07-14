@@ -174,8 +174,8 @@ int main(int argc, char** argv) {
         }
     }
 
-    // [3] Malformed callback ranges and an oversized detools memory geometry must be rejected without
-    // invalidating or changing the current application.
+    // [3] Malformed callback ranges, wrapped container geometry, and an oversized detools memory geometry
+    // must be rejected without invalidating or changing the current application.
     printf("[3] malformed detools bounds/geometry: ");
     {
         stage_flash();
@@ -186,15 +186,28 @@ int main(int argc, char** argv) {
                         dt_me(&c, UINTPTR_MAX, 1) < 0 &&
                         dt_pr(&c, &byte, SIZE_MAX) < 0;
 
+        // This 211-byte synthetic container passed the old uint32 parser: payload_size + block_size,
+        // leaf_count*4, and off+payload+trailer wrapped in concert to equal total while payload_addr
+        // pointed gigabytes away. The 64-bit geometry must reject it before any payload read.
+        uint8_t wrapped[211]; memset(wrapped, 0, sizeof wrapped);
+        memcpy(wrapped, "mOTA", 4); wrapped[4] = (uint8_t)sizeof wrapped; wrapped[8] = 2;
+        wrapped[23] = 0x55; wrapped[24] = 0x55; wrapped[25] = 0x55; wrapped[26] = 0x55;
+        wrapped[27] = 1;                              // block size 2; payload_size = 0x55555555
+        memcpy(wrapped + sizeof wrapped - 5, "vk496", 5);
+        memcpy(FLASH + g_write_start, wrapped, sizeof wrapped);
+        struct mota_min wrapped_m;
+        int wrapped_ok = !parse_mota_at(g_write_start, &wrapped_m);
+
+        stage_flash();                                // restore the valid vector for detools geometry test
         struct mota_min m; uint32_t found = scan_mota(&m);
         if (found) FLASH[m.payload_addr + 3] = 0x7F;  // memory_size 0x98000 -> oversized 0xFE000
         bool bad_applied = ota_delta_check_and_apply();
         int app_same = memcmp(FLASH + MOTA_NRF52_APP_BASE, g_base, g_base_n) == 0;
-        if (bounds_ok && !bad_applied && app_same && g_bank0 == 0x01 && g_settings_writes == 0) {
+        if (bounds_ok && wrapped_ok && !bad_applied && app_same && g_bank0 == 0x01 && g_settings_writes == 0) {
             printf("PASS — rejected before settings/app commit point\n");
         } else {
-            printf("FAIL — bounds=%d applied=%d app_same=%d bank=0x%X settings=%d\n",
-                   bounds_ok, bad_applied, app_same, g_bank0, g_settings_writes);
+            printf("FAIL — bounds=%d wrapped=%d applied=%d app_same=%d bank=0x%X settings=%d\n",
+                   bounds_ok, wrapped_ok, bad_applied, app_same, g_bank0, g_settings_writes);
             fails++;
         }
     }
