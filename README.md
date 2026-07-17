@@ -1,6 +1,6 @@
 # Adafruit nRF52 Bootloader with Enhanced OTA DFU
 
-## Changes in OTAFIX 2.3
+## Changes in OTAFIX 2.4
 
 - **In-place OTA delta apply**  
   Adds on-device application of compact firmware *delta* updates (MeshCore `.mota` containers), letting a device with no A/B slot update over a low-bandwidth link without transferring a full image.  

@@ -63,7 +63,7 @@ GIT_VERSION := $(shell git describe --dirty --always --tags)
 # build makes `git describe` fall back to a bare commit hash, which the MK_BOOTLOADER_VERSION
 # parser below cannot split into major.minor.patch — substitute the release string instead.
 ifeq (,$(findstring OTAFIX,$(GIT_VERSION)))
-GIT_VERSION := 0.9.2-OTAFIX2.3
+GIT_VERSION := 0.9.2-OTAFIX2.4
 endif
 GIT_SUBMODULE_VERSIONS := $(shell git submodule status | cut -d" " -f3,4 | paste -s -d" " -)
 GIT_VERSION_BASE := $(shell echo "$(GIT_VERSION)" | sed -E 's/-[0-9]+-g[0-9a-f]+(-dirty)?$$//')
