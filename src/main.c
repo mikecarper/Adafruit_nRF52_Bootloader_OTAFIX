@@ -73,6 +73,7 @@
 #include "tusb.h"
 
 void usb_init(bool cdc_only);
+bool usb_wait_for_mount(uint32_t timeout_ms);
 void usb_teardown(void);
 
 // tinyusb function that handles power event (detected, ready, removed)
@@ -81,6 +82,7 @@ extern void tusb_hal_nrf_power_event(uint32_t event);
 
 #else
 #define usb_init(x)       led_state(STATE_USB_MOUNTED) // mark nrf52832 as mounted
+#define usb_wait_for_mount(x) false
 #define usb_teardown()
 
 #endif
@@ -118,6 +120,7 @@ extern void tusb_hal_nrf_power_event(uint32_t event);
 
 #define BOOTLOADER_VERSION_REGISTER     NRF_TIMER2->CC[0]
 #define DFU_SERIAL_STARTUP_INTERVAL     1000
+#define DFU_USB_ENUMERATION_INTERVAL    3000
 
 // Allow for using reset button essentially to swap between application and bootloader.
 // This is controlled by a flag in the app and is the behavior of CPX and all Arcade boards when using MakeCode.
@@ -331,12 +334,26 @@ static void check_dfu_mode(void) {
     (*dbl_reset_mem) = 0;
   }
 
-  if ((dfu_start || !valid_app) && !serial_only_dfu && !uf2_dfu && !double_reset) {
+  // With no application and no explicitly requested transport, briefly offer
+  // USB first. If an active host does not enumerate us, fall back to BLE OTA.
+  bool const probe_usb = !valid_app && !_ota_dfu && !serial_only_dfu && !uf2_dfu && !double_reset;
+
+  if ((dfu_start || !valid_app) && !serial_only_dfu && !uf2_dfu && !double_reset && !probe_usb) {
     _ota_dfu = true; // set default to OTA only when no explicit UF2/serial/dbl-reset
   }
 
   // Enter DFU mode accordingly to input
   if (dfu_start || !valid_app) {
+    if (probe_usb) {
+      led_state(STATE_USB_UNMOUNTED);
+      usb_init(false);
+
+      if (!usb_wait_for_mount(DFU_USB_ENUMERATION_INTERVAL)) {
+        usb_teardown();
+        _ota_dfu = true;
+      }
+    }
+
     if (_ota_dfu) {
       #ifdef DISPLAY_PIN_SCK
         board_display_init();
@@ -346,7 +363,7 @@ static void check_dfu_mode(void) {
       if (!_sd_inited) mbr_init_sd();
       _sd_inited = true;
       ble_stack_init();
-    } else {
+    } else if (!probe_usb) {
       led_state(STATE_USB_UNMOUNTED);
       usb_init(serial_only_dfu);
     }
