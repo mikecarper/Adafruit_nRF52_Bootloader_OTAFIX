@@ -1,5 +1,16 @@
 # Adafruit nRF52 Bootloader with Enhanced OTA DFU
 
+## Changes in OTAFIX 2.4.1
+
+- **USB-first recovery with automatic BLE fallback**
+  When no valid application is installed, the bootloader first checks for an active USB data host. An enumerated host receives serial/UF2 DFU; battery power falls back to BLE OTA immediately, while a power-only USB connection falls back after three seconds.
+
+- **Persistent application CRC validation**
+  BLE/serial DFU now saves the CRC that was validated during installation, allowing the bootloader to verify application integrity on subsequent boots.
+
+- **Clean reboot after BLE OTA**
+  A successfully installed BLE application now starts after a hardware reset, ensuring clean SoftDevice, radio, and peripheral state. Interrupted updates still re-enter recovery DFU.
+
 ## Changes in OTAFIX 2.4
 
 - **In-place OTA delta apply**  
@@ -96,17 +107,17 @@ If you have somehow managed to accidentally flash an incorrect bootloader to you
 
 If the device does not show up on your computer after flashing the bootloader or performing an OTA update, it may be **waiting in OTA DFU mode**.
 
-In **OTAFIX 2.0** and above, OTA DFU is the default state when no valid application is present.  
-In this mode:
-- No UF2 drive is exposed
-- No serial port is available
-- The device is waiting for an OTA firmware update over BLE
+In **OTAFIX 2.4.1** and above, a device without a valid application chooses its recovery transport automatically:
+- Connected to an active USB data host: serial and UF2 DFU remain available.
+- Running on battery or connected to USB power without data: BLE OTA starts immediately or after the three-second USB detection window.
+
+In **OTAFIX 2.0 through 2.4**, a device without a valid application defaults directly to BLE OTA, where no UF2 drive or serial port is exposed.
 
 **What to do:**
-- Perform an OTA update using a supported DFU app, **or**
-- Explicitly request UF2/serial mode using **double-reset**.
+- On 2.4.1 or newer, connect the device to a computer with a data-capable USB cable and wait for the UF2 drive or serial port, **or** perform an OTA update using a supported DFU app.
+- On older releases, explicitly request UF2/serial mode using **double-reset**, or perform a BLE OTA update.
 
-This behaviour is intentional and prevents devices from getting stuck in UF2 mode after failed OTA updates.
+This behavior keeps computer-based recovery available without leaving battery-powered devices stuck waiting for USB.
 
 ---
 

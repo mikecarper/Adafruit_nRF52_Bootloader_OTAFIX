@@ -116,9 +116,10 @@ uint32_t dfu_init_prevalidate(uint8_t * p_init_data, uint32_t init_data_len, uin
  *           - A signature to ensure the image originates from a trusted source.
  *           Checks are intended to be expanded for customer-specific requirements.
  * 
- * @param[in] p_image    Pointer to the received image. The init data provided in the call 
- *                       \ref dfu_init_prevalidate will be used for validating the image.
- * @param[in] image_len  Length of the image data.
+ * @param[in]  p_image    Pointer to the received image. The init data provided in the call
+ *                        \ref dfu_init_prevalidate will be used for validating the image.
+ * @param[in]  image_len  Length of the image data.
+ * @param[out] p_crc_out  Validated image CRC to persist for boot-time integrity checks.
  *
  * @retval NRF_SUCCESS             If the post-validation succeeded, that meant the integrity of the
  *                                 image has been verified and the image originates from a trusted 
@@ -126,8 +127,9 @@ uint32_t dfu_init_prevalidate(uint8_t * p_init_data, uint32_t init_data_len, uin
  * @retval NRF_ERROR_INVALID_DATA  If the post-validation failed, that meant the post check of the 
  *                                 image failed such as the CRC is not matching the image transfered
  *                                 or the verification of the image fails (signing).
+ * @retval NRF_ERROR_NULL          If p_crc_out is NULL.
  */
-uint32_t dfu_init_postvalidate(uint8_t * p_image, uint32_t image_len);
+uint32_t dfu_init_postvalidate(uint8_t * p_image, uint32_t image_len, uint16_t * p_crc_out);
 
 #endif // DFU_INIT_H__
 

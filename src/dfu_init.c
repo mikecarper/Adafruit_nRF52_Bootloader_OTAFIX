@@ -73,9 +73,8 @@
 #include <dfu_types.h>
 #include "nrf_error.h"
 
-#ifndef SIGNED_FW
 #include "crc16.h"
-#else
+#ifdef SIGNED_FW
 #include <tinycrypt/sha256.h>
 #include <tinycrypt/ecc.h>
 #include <tinycrypt/ecc_dsa.h>
@@ -279,14 +278,21 @@ uint32_t dfu_init_prevalidate(uint8_t * p_init_data, uint32_t init_data_len, uin
 }
 
 
-uint32_t dfu_init_postvalidate(uint8_t * p_image, uint32_t image_len)
+uint32_t dfu_init_postvalidate(uint8_t * p_image, uint32_t image_len, uint16_t * p_crc_out)
 {
-#ifndef SIGNED_FW
-	uint16_t image_crc;
-	uint16_t received_crc;
+  uint16_t image_crc;
 
-	// calculate CRC from active block.
-	image_crc = crc16_compute(p_image, image_len, NULL);
+  if (p_crc_out == NULL)
+  {
+    return NRF_ERROR_NULL;
+  }
+
+  // Calculate a CRC for the bootloader settings even when signed firmware uses
+  // SHA-256 for transfer validation.
+  image_crc = crc16_compute(p_image, image_len, NULL);
+
+#ifndef SIGNED_FW
+	uint16_t received_crc;
 
 	// Decode the received CRC from extended data.
 	received_crc = uint16_decode((uint8_t *)&m_extended_packet[0]);
@@ -296,8 +302,6 @@ uint32_t dfu_init_postvalidate(uint8_t * p_image, uint32_t image_len)
 	{
 		return NRF_ERROR_INVALID_DATA;
 	}
-
-	return NRF_SUCCESS;
 
 #else
 
@@ -324,7 +328,9 @@ uint32_t dfu_init_postvalidate(uint8_t * p_image, uint32_t image_len)
 		return NRF_ERROR_INVALID_DATA;
 	}
 
-	return NRF_SUCCESS;
 #endif
+
+	*p_crc_out = image_crc;
+	return NRF_SUCCESS;
 }
 

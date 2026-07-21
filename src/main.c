@@ -202,8 +202,17 @@ int main(void) {
   // launching the user application
   bool bootloader_must_be_reentered = bootloader_must_reset_to_self();
 
+  // A successful BLE application update must reboot through reset so the
+  // application starts with clean SoftDevice, radio, and peripheral state.
+  // Interrupted updates keep using the recovery path below.
+  bool const reset_after_ble_app_update = _ota_dfu && bootloader_dfu_app_update_complete();
+
   // Reset peripherals
   board_teardown();
+
+  if (reset_after_ble_app_update) {
+    NVIC_SystemReset();
+  }
 
   // MeshCore OTA: if a verified+approved .mota was staged for this firmware, apply it in place now
   // (SoftDevice is off here; safe to rewrite the single app slot). On success, reset to boot the new

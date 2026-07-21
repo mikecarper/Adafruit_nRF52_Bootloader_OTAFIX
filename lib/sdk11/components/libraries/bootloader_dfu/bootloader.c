@@ -53,6 +53,7 @@ static bootloader_status_t      m_update_status;        /**< Current update stat
 static bool m_cancel_timeout_on_usb; /**< If set the timeout is cancelled when USB is enumerated. Otherwise, the timeout is only cancelled when DFU update is started. */
 static bool m_usb_was_mounted; /**< Tracks whether the USB DFU session was ever enumerated so we can exit when cable is later removed. */
 static bool m_startup_dfu_has_activity; /**< Tracks whether any valid serial or UF2 update traffic has started. */
+static bool m_app_update_complete; /**< Tracks a completed application update separately from timeout/reset exits. */
 
 APP_TIMER_DEF( _dfu_startup_timer );
 
@@ -279,6 +280,7 @@ void bootloader_dfu_update_process(dfu_update_status_t update_status)
 
   if (update_status.status_code == DFU_UPDATE_APP_COMPLETE)
   {
+    m_app_update_complete = true;
     settings.bank_0_crc  = update_status.app_crc;
     settings.bank_0_size = update_status.app_size;
     settings.bank_0      = BANK_VALID_APP;
@@ -378,6 +380,11 @@ bool bootloader_must_reset_to_self(void)
   return m_update_status == BOOTLOADER_RESET_TO_SELF;
 }
 
+bool bootloader_dfu_app_update_complete(void)
+{
+  return m_app_update_complete && (m_update_status == BOOTLOADER_COMPLETE);
+}
+
 uint32_t bootloader_init(void)
 {
   uint32_t                err_code;
@@ -400,6 +407,7 @@ uint32_t bootloader_dfu_start(bool ota, uint32_t timeout_ms, bool cancel_timeout
   m_cancel_timeout_on_usb = cancel_timeout_on_usb && !ota;
   m_usb_was_mounted = false;
   m_startup_dfu_has_activity = false;
+  m_app_update_complete = false;
 
   // Clear swap if banked update is used.
   err_code = dfu_init();

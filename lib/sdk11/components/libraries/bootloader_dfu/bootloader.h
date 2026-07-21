@@ -39,6 +39,13 @@ uint32_t bootloader_init(void);
  */
 bool bootloader_must_reset_to_self(void);
 
+/**@brief Function for checking whether an application update completed successfully.
+ * @details This function can only be called after bootloader_dfu_start returns.
+ * @retval true  If application activation and bootloader settings persistence completed.
+ * @retval false If DFU exited for another reason or updated a non-application image.
+ */
+bool bootloader_dfu_app_update_complete(void);
+
 /**@brief Function for validating application region in flash.
  * @retval     true          If Application region is valid.
  * @retval     false         If Application region is not valid.
