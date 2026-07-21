@@ -91,6 +91,24 @@ static const uint8_t APRV[4]     = { 'A','P','R','V' };
 
 #include "sha256.h"
 
+// The application watchdog survives the NVIC reset used to enter this
+// bootloader. Normal BLE/USB DFU reloads it from bootloader.c's event loop,
+// while the in-place delta applier runs outside that loop. Keep every enabled
+// reload channel alive throughout the potentially long scan/hash/apply path.
+// A host test has no hardware watchdog, so this becomes a no-op there.
+static void inherited_watchdog_feed(void) {
+#ifndef OTA_DELTA_HOST_TEST
+  if (NRF_WDT->RUNSTATUS != 0) {
+    const uint32_t enabled_channels = NRF_WDT->RREN & 0xFFu;
+    for (uint8_t channel = 0; channel < 8; channel++) {
+      if ((enabled_channels & (1u << channel)) != 0) {
+        NRF_WDT->RR[channel] = WDT_RR_RR_Reload;
+      }
+    }
+  }
+#endif
+}
+
 static uint32_t rd_u32(const uint8_t* p) {
   return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
@@ -106,7 +124,11 @@ static void br_skip(br_t* r, uint32_t k) { if (r->ok && (uint64_t)r->n + k <= r-
 static void sha256_region(uint32_t addr, uint32_t len, uint8_t out[32]) {
   sha256_ctx_t c; sha256_init(&c);
   uint8_t buf[256];
-  while (len) { uint32_t n = len < sizeof(buf) ? len : sizeof(buf); fl_read(addr, buf, n); sha256_update(&c, buf, n); addr += n; len -= n; }
+  while (len) {
+    inherited_watchdog_feed();
+    uint32_t n = len < sizeof(buf) ? len : sizeof(buf);
+    fl_read(addr, buf, n); sha256_update(&c, buf, n); addr += n; len -= n;
+  }
   sha256_final(&c, out);
 }
 
@@ -117,7 +139,12 @@ static int      g_cache_dirty;
 
 static void cache_flush(void) {
   if (!g_cache_page) return;
-  if (g_cache_dirty) { fl_erase(g_cache_page); fl_write_words(g_cache_page, (const uint32_t*)g_cache, PAGE / 4); }
+  if (g_cache_dirty) {
+    inherited_watchdog_feed();
+    fl_erase(g_cache_page);
+    inherited_watchdog_feed();
+    fl_write_words(g_cache_page, (const uint32_t*)g_cache, PAGE / 4);
+  }
   g_cache_page = 0; g_cache_dirty = 0;
 }
 static void cache_use(uint32_t page) {
@@ -169,16 +196,19 @@ static int dt_ws_addr(const struct apply_ctx* c, uintptr_t off, size_t n, uint32
 static int dt_mr(void* a, void* dst, uintptr_t src, size_t n) {
   struct apply_ctx* c = a; uint32_t addr;
   if (!dt_ws_addr(c, src, n, &addr)) return -DETOOLS_IO_FAILED;
+  inherited_watchdog_feed();
   cread(addr, dst, n); return DETOOLS_OK;
 }
 static int dt_mw(void* a, uintptr_t dst, void* src, size_t n) {
   struct apply_ctx* c = a; uint32_t addr;
   if (!dt_ws_addr(c, dst, n, &addr)) return -DETOOLS_IO_FAILED;
+  inherited_watchdog_feed();
   cwrite(addr, (const uint8_t*)src, n); return DETOOLS_OK;
 }
 static int dt_me(void* a, uintptr_t addr0, size_t n) {
   struct apply_ctx* c = a; uint32_t addr;
   if (!dt_ws_addr(c, addr0, n, &addr)) return -DETOOLS_IO_FAILED;
+  inherited_watchdog_feed();
   cerase(addr, n); return DETOOLS_OK;
 }
 static int dt_ss(void* a, int s) { ((struct apply_ctx*)a)->step = s; return DETOOLS_OK; }
@@ -187,6 +217,7 @@ static int dt_pr(void* a, uint8_t* dst, size_t n) {
   struct apply_ctx* c = a;
   if (n > UINT32_MAX || c->patch_pos > c->patch_len || (uint32_t)n > c->patch_len - c->patch_pos)
     return -DETOOLS_IO_FAILED;
+  inherited_watchdog_feed();
   fl_read(c->patch_addr + c->patch_pos, dst, (uint32_t)n);
   c->patch_pos += (uint32_t)n; return DETOOLS_OK;
 }
@@ -296,6 +327,7 @@ static uint32_t scan_mota(struct mota_min* o) {
   uint32_t top = (MOTA_NRF52_FS_START - MOTA_MIN_LEN) & ~(PAGE - 1);
   for (uint32_t a = top + PAGE; a > APP_BASE; ) {        // walk page boundaries high -> low
     a -= PAGE;
+    inherited_watchdog_feed();
     uint8_t m4[4]; fl_read(a, m4, 4);
     if (memcmp(m4, MAGIC, 4) == 0 && parse_mota_at(a, o)) return a;
   }
@@ -313,6 +345,7 @@ static uint32_t scan_mota(struct mota_min* o) {
 // body_len alignment is assumed; the scan stops at the first match (the current image's trailer).
 static int find_body_len(uint32_t* body_len_out) {
   for (uint32_t off = 0; off + ENDF_LEN <= MOTA_NRF52_FS_START - APP_BASE; off++) {
+    if ((off & (PAGE - 1u)) == 0) inherited_watchdog_feed();
     uint8_t e[8];
     fl_read(APP_BASE + off, e, 8);                  // marker(4) + body_len(4)
     if (memcmp(e, ENDF, 4) == 0 && rd_u32(e + 4) == off) { *body_len_out = off; return 1; }
@@ -327,6 +360,7 @@ static void clear_approval(const struct mota_min* o) {
 }
 
 bool ota_delta_check_and_apply(void) {
+  inherited_watchdog_feed();
   // Force a volatile read of the capability marker so -flto / --gc-sections cannot fold the reference away
   // and drop it — the running app scans the bootloader flash for it (ota_bl_info.h / OtaBlInfo.h).
   volatile uint8_t keep = *(const volatile uint8_t*)&g_mota_bl_info.magic[0];
@@ -359,6 +393,7 @@ bool ota_delta_check_and_apply(void) {
 
   // Commit point: make every subsequent reset enter DFU BEFORE the first destructive application write.
   // This is essential for UF2-installed apps, whose zero CRC otherwise makes a partial image bootable.
+  inherited_watchdog_feed();
   otah_settings_commit(BANK_INVALID_APP_V, 0, 0);
 
   // Consume approval before applying so a failed patch is never retried automatically.
@@ -377,7 +412,10 @@ bool ota_delta_check_and_apply(void) {
   sha256_region(APP_BASE, m.image_size, h);
   if (memcmp(h, m.image_hash, 32) != 0) { gpregret2_set(0xB7); return false; }   // result mismatch -> DFU
 
-  otah_settings_commit(BANK_VALID_APP_V, crc16_region(APP_BASE, m.image_size), m.image_size);
+  inherited_watchdog_feed();
+  uint16_t image_crc = crc16_region(APP_BASE, m.image_size);
+  inherited_watchdog_feed();
+  otah_settings_commit(BANK_VALID_APP_V, image_crc, m.image_size);
   gpregret2_set(0xB8);
   return true;
 
