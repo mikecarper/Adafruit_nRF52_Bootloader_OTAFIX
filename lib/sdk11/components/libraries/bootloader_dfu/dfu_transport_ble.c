@@ -46,9 +46,9 @@
 #define DEVICE_NAME                          "AdaDFU"                                                /**< Name of device. Will be included in the advertising data. */
 #endif //DEVICE_NAME
 
-#define MIN_CONN_INTERVAL                    (uint16_t)(MSEC_TO_UNITS(15, UNIT_1_25_MS))             /**< Minimum acceptable connection interval (11.25 milliseconds). */
+#define MIN_CONN_INTERVAL                    (uint16_t)(MSEC_TO_UNITS(10, UNIT_1_25_MS))             /**< Minimum acceptable connection interval (10 milliseconds). */
 #define MAX_CONN_INTERVAL                    (uint16_t)(MSEC_TO_UNITS(30, UNIT_1_25_MS))             /**< Maximum acceptable connection interval (15 milliseconds). */
-#define SLAVE_LATENCY                        4                                                       /**< Slave latency. */
+#define SLAVE_LATENCY                        0                                                       /**< Slave latency. */
 #define CONN_SUP_TIMEOUT                     MSEC_TO_UNITS(8000, UNIT_10_MS)                         /**< Connection supervisory timeout (4 seconds). */
 #define SPEEDUP_FLASH_WRITES                 1 /**< Speedup FLASH writes by changing Softdevice local latency */
 
