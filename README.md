@@ -100,10 +100,10 @@ If there is another nRF52840-based board you would like to see supported please 
 The recommended way to install the bootloader is using the UF2 file.  
 Download the UF2 file for your board (they can be found in the releases with filenames beginning with `update-`), enter UF2 mode (usually by double pressing the reset button within 0.5s) and copy the UF2 file across.
 
-Current preview: [OTAFIX 2.4.1 Preview 3](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/0.9.2-OTAFIX2.4.1-preview.3)
+Current preview: [OTAFIX 2.4.1 Preview 4](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/0.9.2-OTAFIX2.4.1-preview.4)
 
-- [Heltec T096 UF2](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/0.9.2-OTAFIX2.4.1-preview.3/update-heltec_t096_bootloader-0.9.2-OTAFIX2.4.1-preview.3_nosd.uf2)
-- [Heltec T114 UF2](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/0.9.2-OTAFIX2.4.1-preview.3/update-heltec_t114_bootloader-0.9.2-OTAFIX2.4.1-preview.3_nosd.uf2)
+- [Heltec T096 UF2](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/0.9.2-OTAFIX2.4.1-preview.4/update-heltec_t096_bootloader-0.9.2-OTAFIX2.4.1-preview.4_nosd.uf2)
+- [Heltec T114 UF2](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/0.9.2-OTAFIX2.4.1-preview.4/update-heltec_t114_bootloader-0.9.2-OTAFIX2.4.1-preview.4_nosd.uf2)
 
 If you have somehow managed to accidentally flash an incorrect bootloader to your device you will likely require flashing a full bootloader and SoftDevice zip package using ``adafruit-nrfutil``
 
