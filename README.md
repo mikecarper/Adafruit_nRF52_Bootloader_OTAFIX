@@ -11,8 +11,8 @@
 - **Clean reboot after BLE OTA**
   A successfully installed BLE application now starts after a hardware reset, ensuring clean SoftDevice, radio, and peripheral state. Interrupted updates still re-enter recovery DFU.
 
-- **Restored BLE OTA throughput**
-  Restores the 10 ms minimum connection interval and zero slave latency used by upstream OTAFIX, avoiding a significant transfer-speed regression.
+- **Reliable BLE OTA connection settings**
+  Uses a 15-30 ms preferred connection interval with zero slave latency and lets the phone control connection updates, avoiding both the earlier throughput regression and connection-update races.
 
 ## Changes in OTAFIX 2.4
 
@@ -157,7 +157,7 @@ For **OTAFIX 2.0**, the following settings are recommended (these may change - f
 <td valign="top">
 
 **Packet Receipt Notification (PRN):** ON  
-**Number of packets:** 30  
+**Number of packets:** 8  
 **Reboot time:** 0ms  
 **Scan timeout:** 2000ms  
 **Request high MTU:** ON for Android (See notes below) / Not available on iOS  
@@ -170,8 +170,7 @@ For **OTAFIX 2.0**, the following settings are recommended (these may change - f
 **Notes:**
 - Some Android devices and BLE stacks do not behave well with **Request high MTU** enabled.  
   If the transfer fails early with `ERROR: Operation Failed`, retry with **Request high MTU turned OFF**.
-- For maximum speed, Packet Receipt Notification can be disabled, and the number of packets increased.  
-  Android is generally more tolerant of higher values; on iOS and other small-packet hosts, values above ~60 are not recommended.
+- Keep Packet Receipt Notification enabled with no more than 8 packets. Higher values can overrun the bootloader's receive and flash queues on faster phones.
 
 </td>
 </tr>

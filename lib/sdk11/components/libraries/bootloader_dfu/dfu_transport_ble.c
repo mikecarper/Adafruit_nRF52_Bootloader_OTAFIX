@@ -46,10 +46,10 @@
 #define DEVICE_NAME                          "AdaDFU"                                                /**< Name of device. Will be included in the advertising data. */
 #endif //DEVICE_NAME
 
-#define MIN_CONN_INTERVAL                    (uint16_t)(MSEC_TO_UNITS(10, UNIT_1_25_MS))             /**< Minimum acceptable connection interval (10 milliseconds). */
-#define MAX_CONN_INTERVAL                    (uint16_t)(MSEC_TO_UNITS(30, UNIT_1_25_MS))             /**< Maximum acceptable connection interval (15 milliseconds). */
+#define MIN_CONN_INTERVAL                    (uint16_t)(MSEC_TO_UNITS(15, UNIT_1_25_MS))             /**< Minimum acceptable connection interval (15 milliseconds). */
+#define MAX_CONN_INTERVAL                    (uint16_t)(MSEC_TO_UNITS(30, UNIT_1_25_MS))             /**< Maximum acceptable connection interval (30 milliseconds). */
 #define SLAVE_LATENCY                        0                                                       /**< Slave latency. */
-#define CONN_SUP_TIMEOUT                     MSEC_TO_UNITS(8000, UNIT_10_MS)                         /**< Connection supervisory timeout (4 seconds). */
+#define CONN_SUP_TIMEOUT                     MSEC_TO_UNITS(4000, UNIT_10_MS)                         /**< Connection supervisory timeout (4 seconds). */
 #define SPEEDUP_FLASH_WRITES                 1 /**< Speedup FLASH writes by changing Softdevice local latency */
 
 #define APP_ADV_INTERVAL                     MSEC_TO_UNITS(25, UNIT_0_625_MS)                        /**< The advertising interval (25 ms.). */
@@ -954,17 +954,6 @@ static void on_ble_evt(ble_evt_t * p_ble_evt)
             {
                 m_conn_handle    = p_ble_evt->evt.gap_evt.conn_handle;
                 m_is_advertising = false;
-
-                // Force changing the slave latency to try to improve transfer throughput (bandwidth)
-                //  But Android and IOS will override it with their minimum supported value
-                ble_gap_conn_params_t p_conn_params;
-                p_conn_params.min_conn_interval = p_ble_evt->evt.gap_evt.params.connected.conn_params.min_conn_interval;
-                p_conn_params.max_conn_interval = p_ble_evt->evt.gap_evt.params.connected.conn_params.max_conn_interval;
-                p_conn_params.slave_latency     = SLAVE_LATENCY;
-                p_conn_params.conn_sup_timeout  = p_ble_evt->evt.gap_evt.params.connected.conn_params.conn_sup_timeout;
-
-                err_code = sd_ble_gap_conn_param_update(m_conn_handle, &p_conn_params);
-                APP_ERROR_CHECK(err_code);
 
                 // Data length negotiation is optional; peers may reject it while the
                 // connection remains usable for DFU.
