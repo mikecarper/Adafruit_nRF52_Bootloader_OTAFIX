@@ -334,7 +334,6 @@ CFLAGS += \
 	-flto \
 	-ffunction-sections \
 	-fdata-sections \
-	-fno-builtin \
 	-fshort-enums \
 	-fstack-usage \
 	-fno-strict-aliasing \
