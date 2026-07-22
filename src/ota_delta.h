@@ -6,7 +6,7 @@
 // clear the approval flag (so a failure never retries), apply the detools in-place patch over the app
 // region, verify the result hashes to the manifest image_hash, and update the bootloader settings so
 // the new image boots. On any failure after the (non-destructive) base check we leave the settings
-// invalid → the bootloader falls through to DFU (UF2-recoverable); we never boot an unverified image.
+// invalid -> the bootloader falls through to DFU (UF2-recoverable); we never boot an unverified image.
 #ifndef OTA_DELTA_H_
 #define OTA_DELTA_H_
 

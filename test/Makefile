@@ -1,4 +1,4 @@
-# Host test for the MeshCore .mota in-place apply — runs the REAL bootloader apply (ota_delta.c) over a
+# Host test for the MeshCore .mota in-place apply - runs the REAL bootloader apply (ota_delta.c) over a
 # simulated flash, NO hardware. See README.md.
 #
 #   make check                                  # apply the committed vector, assert success

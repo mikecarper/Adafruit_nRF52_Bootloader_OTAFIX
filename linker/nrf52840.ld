@@ -22,17 +22,17 @@ MEMORY
      is migration-safe: the bootloader still starts at 0xF4000 (UICR/BOOTLOADER_REGION_START unchanged) and
      the MBR-params (0xFE000) and bootloader-settings (0xFF000) pages are untouched.
 
-     Full nRF52840 (RAK4631) flash map — only the FLASH/CF2 boundary (*) moves vs stock:
+     Full nRF52840 (RAK4631) flash map - only the FLASH/CF2 boundary (*) moves vs stock:
 
          0x00000  MBR
          0x01000  SoftDevice (S140 6.1.1)
          0x26000  Application  (MeshCore; staged .mota lives just below the filesystem, < 0xD4000)
          ...
-         0xF4000  ┌─ bootloader code (FLASH) ── 39 KB ──┐   stock: 38 KB, ends 0xFD800
-         0xFDC00  ├─ CF2 bootloaderConfig ───── 1 KB ───┤ (*) stock: 2 KB, starts 0xFD800
-         0xFE000  ├─ MBR params ─────────────── 4 KB ───┤   unchanged
-         0xFF000  ├─ bootloader settings ────── 4 KB ───┤   unchanged
-        0x100000  └─ (end of flash) ────────────────────┘
+         0xF4000  +- bootloader code (FLASH) -- 39 KB --+   stock: 38 KB, ends 0xFD800
+         0xFDC00  +- CF2 bootloaderConfig ----- 1 KB ---+ (*) stock: 2 KB, starts 0xFD800
+         0xFE000  +- MBR params --------------- 4 KB ---+   unchanged
+         0xFF000  +- bootloader settings ------ 4 KB ---+   unchanged
+        0x100000  +- (end of flash) --------------------+
   */
      
   FLASH (rx) : ORIGIN = 0xF4000, LENGTH = 0xFE000-0xF4000 - 1K /* 39 KB */

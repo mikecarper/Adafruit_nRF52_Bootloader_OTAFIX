@@ -1,11 +1,11 @@
 // Shared OTA flash-layout constants for the MeshCore `.mota` delta-apply path on nRF52840 (RAK4631).
-// SINGLE SOURCE OF TRUTH — keep byte-identical with MeshCore src/helpers/ota/OtaFlashLayout_nrf52.h.
+// SINGLE SOURCE OF TRUTH - keep byte-identical with MeshCore src/helpers/ota/OtaFlashLayout_nrf52.h.
 //
 // The running app lives at the SoftDevice end (APP_BASE) up to the primary LittleFS region at
 // FS_START. MeshCore stages a verified+approved `.mota` in the free flash below FS_START; on the next
 // boot the bootloader scans [APP_BASE, FS_START) for it and applies it in place. APP_BASE here is the
 // nominal S140 value; the bootloader itself uses the runtime DFU_BANK_0_REGION_START (== CODE_REGION_1
-// _START) so it tracks the actual SoftDevice — the two must agree on a given device.
+// _START) so it tracks the actual SoftDevice - the two must agree on a given device.
 
 #ifndef OTA_LAYOUT_H_
 #define OTA_LAYOUT_H_

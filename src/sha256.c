@@ -1,5 +1,5 @@
 // Minimal FIPS-180 SHA-256. Public domain (derived from Brad Conte's crypto-algorithms,
-// https://github.com/B-Con/crypto-algorithms — released to the public domain). Standalone.
+// https://github.com/B-Con/crypto-algorithms - released to the public domain). Standalone.
 #include "sha256.h"
 
 #define ROTR(a,b) (((a) >> (b)) | ((a) << (32 - (b))))

@@ -105,7 +105,7 @@ static void pstorage_callback_handler(pstorage_handle_t * p_handle,
 static void dfu_startup_timer_handler(void * p_context)
 {
 #ifdef NRF_USBD
-  // If host enumerated the device, keep waiting — m_usb_was_mounted was set
+  // If host enumerated the device, keep waiting - m_usb_was_mounted was set
   // by tud_mount_cb() and the unplug path in wait_for_events() will handle exit.
   if (m_cancel_timeout_on_usb && m_usb_was_mounted)
   {

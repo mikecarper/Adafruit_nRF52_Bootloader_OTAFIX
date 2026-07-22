@@ -16,7 +16,7 @@
 - **In-place OTA delta apply**  
   Adds on-device application of compact firmware *delta* updates (MeshCore `.mota` containers), letting a device with no A/B slot update over a low-bandwidth link without transferring a full image.  
   After the running application stages a verified, approved `.mota` in free flash and reboots with the apply trigger set, the bootloader locates it, re-checks that the delta was built against the exact running firmware (the `.mota` `base_hash` vs the `EndF` trailer of the current app), applies the patch in place with the bundled [detools](https://github.com/eerimoq/detools) decoder, and verifies the result against the manifest `image_hash` before marking the new image valid.  
-  The trigger is a dedicated `GPREGRET` magic set only on approval, so normal boots never scan or apply. Any failure (no trigger, base mismatch, bad patch, post-apply hash mismatch) leaves the bank invalid and falls through to OTA DFU — an interrupted apply can never boot a corrupt image.
+  The trigger is a dedicated `GPREGRET` magic set only on approval, so normal boots never scan or apply. Any failure (no trigger, base mismatch, bad patch, post-apply hash mismatch) leaves the bank invalid and falls through to OTA DFU - an interrupted apply can never boot a corrupt image.
 
 ## Changes in OTAFIX 2.2
 
@@ -52,20 +52,20 @@
 
 - **Unique BLE advertising names per board**  
   In OTA DFU mode, devices advertise using a board-specific name instead of the generic `AdaDFU`:
-  - **Elecrow ThinkNode M1** → `TNM1_DFU`
-  - **Elecrow ThinkNode M3** → `TNM3_DFU`
-  - **Elecrow ThinkNode M6** → `TNM6_DFU`
-  - **Heltec T114** → `T114_DFU`
-  - **Heltec T096** → `T096_DFU`
-  - **LILYGO T-Echo** → `LGTE_DFU`
-  - **Minewsemi MX25LE01** → `MX25_DFU`
-  - **ProMicro NRF52840** → `PROM_DFU`
-  - **RAK 4631** → `4631_DFU`
-  - **RAK WisMesh Tag** → `RTAG_DFU`
-  - **Seeed SenseCAP Solar Node P1** → `SCAP_DFU`
-  - **Seeed T1000e** → `T1KE_DFU`
-  - **Seeed WioTracker L1** → `WTL1_DFU`
-  - **XIAO NRF52 BLE / SENSE** → `XIAO_DFU`
+  - **Elecrow ThinkNode M1** -> `TNM1_DFU`
+  - **Elecrow ThinkNode M3** -> `TNM3_DFU`
+  - **Elecrow ThinkNode M6** -> `TNM6_DFU`
+  - **Heltec T114** -> `T114_DFU`
+  - **Heltec T096** -> `T096_DFU`
+  - **LILYGO T-Echo** -> `LGTE_DFU`
+  - **Minewsemi MX25LE01** -> `MX25_DFU`
+  - **ProMicro NRF52840** -> `PROM_DFU`
+  - **RAK 4631** -> `4631_DFU`
+  - **RAK WisMesh Tag** -> `RTAG_DFU`
+  - **Seeed SenseCAP Solar Node P1** -> `SCAP_DFU`
+  - **Seeed T1000e** -> `T1KE_DFU`
+  - **Seeed WioTracker L1** -> `WTL1_DFU`
+  - **XIAO NRF52 BLE / SENSE** -> `XIAO_DFU`
 
 ---
 
@@ -142,7 +142,7 @@ or **nRF Connect**
 
 My preference is the **nRF Device Firmware Update** app.
 
-For **OTAFIX 2.0**, the following settings are recommended (these may change — feel free to experiment and report your findings):
+For **OTAFIX 2.0**, the following settings are recommended (these may change - feel free to experiment and report your findings):
 
 <table>
 <tr>

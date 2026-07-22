@@ -58,7 +58,7 @@ static const uint8_t APRV[4]     = { 'A','P','R','V' };
   // Read flash through a VOLATILE pointer. In-place apply WRITES flash (nrfx_nvmc_words_write) and then
   // READS IT BACK here (decode readback + the post-apply sha256). Those touch the same flash through two
   // different pointer provenances (an integer-cast read pointer vs the nrfx write), so whole-program -flto
-  // alias analysis concludes they can't alias and caches/reorders a STALE read — the post-check then hashes
+  // alias analysis concludes they can't alias and caches/reorders a STALE read - the post-check then hashes
   // pre-decode bytes -> mismatch -> apply silently refused. (-fno-strict-aliasing does NOT help: this is
   // provenance, not type-based aliasing.) The host harness can't reproduce it: there read+write hit the
   // same C array, an obvious alias. volatile forces the actual load each time.
@@ -276,8 +276,8 @@ static int parse_mota_at(uint32_t addr, struct mota_min* o) {
   uint8_t tr[5]; fl_read(addr + total - 5, tr, 5);
   if (memcmp(tr, TRAILER, 5) != 0) return 0;
 
-  // Fixed-layout manifest — every field at a constant offset; base_hash/signer/signature are always
-  // present (zero-filled when not applicable), so there are no conditionals (docs/ota_protocol.md §4).
+  // Fixed-layout manifest - every field at a constant offset; base_hash/signer/signature are always
+  // present (zero-filled when not applicable), so there are no conditionals (docs/ota_protocol.md Section 4).
   br_t r = { b, hdr, 0, 1 };
   br_skip(&r, 4 + 4);                               // MAGIC + MOTA_TOTAL_SIZE (already validated above)
   if (br_u8(&r) != 2) return 0;                     // format_ver
@@ -317,7 +317,7 @@ static int parse_mota_at(uint32_t addr, struct mota_min* o) {
 // FS_START) contiguously (0xFF-padding the tail up to FS_START), so the *current* `.mota` is always the
 // highest in flash; a leftover from a prior, differently-sized fetch sits strictly BELOW it (a larger
 // new fetch overwrites everything from its lower start up to FS_START). Scanning top-down therefore
-// returns the current container and never stops on a stale one — and the caller's APRV check is applied
+// returns the current container and never stops on a stale one - and the caller's APRV check is applied
 // to THAT (highest) container only, so a stale lower `.mota` is never applied even if it is still
 // approved. (EndF is the mirror image: the app image grows up from APP_BASE, so the current trailer is
 // the LOWEST valid marker and find_body_len scans bottom-up. Each marker is scanned from the end where
@@ -341,7 +341,7 @@ static uint32_t scan_mota(struct mota_min* o) {
 // OTA update. Bottom-up returns the CURRENT (lowest) trailer; a stale one from a prior larger image sits
 // above it and is never reached. No hash check is needed here: the caller immediately recomputes
 // sha256(body) and compares it to the delta's base_hash, so a (vanishingly unlikely) coincidental "EndF"
-// just fails that gate and the update is refused — never misapplied. Byte-by-byte (like the app) so no
+// just fails that gate and the update is refused - never misapplied. Byte-by-byte (like the app) so no
 // body_len alignment is assumed; the scan stops at the first match (the current image's trailer).
 static int find_body_len(uint32_t* body_len_out) {
   for (uint32_t off = 0; off + ENDF_LEN <= MOTA_NRF52_FS_START - APP_BASE; off++) {
@@ -362,7 +362,7 @@ static void clear_approval(const struct mota_min* o) {
 bool ota_delta_check_and_apply(void) {
   inherited_watchdog_feed();
   // Force a volatile read of the capability marker so -flto / --gc-sections cannot fold the reference away
-  // and drop it — the running app scans the bootloader flash for it (ota_bl_info.h / OtaBlInfo.h).
+  // and drop it - the running app scans the bootloader flash for it (ota_bl_info.h / OtaBlInfo.h).
   volatile uint8_t keep = *(const volatile uint8_t*)&g_mota_bl_info.magic[0];
   if (keep == 0) return false;                      // 'M' (0x4D) != 0, so never taken; keeps the marker live
   // ---- DIAGNOSTIC: stash a bail/progress code in GPREGRET2; the app reads it back into `ota status`.

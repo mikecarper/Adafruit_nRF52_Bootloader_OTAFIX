@@ -8,14 +8,14 @@
 // apply silently refused -> the old firmware boots unchanged. (-fno-strict-aliasing does NOT help: this
 // is pointer provenance, not type-based aliasing.) The fix: fl_read reads through a `volatile` pointer.
 //
-// WHY THIS NEEDS A SPECIAL TEST: a plain host run cannot reproduce the miscompile — here otah_read and
+// WHY THIS NEEDS A SPECIAL TEST: a plain host run cannot reproduce the miscompile - here otah_read and
 // otah_write_words both touch the SAME C array (FLASH[]), an obvious alias the compiler will never get
 // wrong, with or without -flto. So we cover the bug four ways:
 //   [1] POSITIVE  coherent readback  -> apply succeeds, commits, and matches the expected image.
 //   [2] NEGATIVE  inject the exact failure mode (workspace reads return STALE bytes) -> assert the apply
 //                 FAILS SAFE: the bank remains invalid and it returns false (never boots corrupt data).
 //   [3] BOUNDS    malformed detools address/size/header inputs are rejected before touching app flash.
-//   [4] GUARD     assert the device fl_read reads through `volatile` — the one check that catches a
+//   [4] GUARD     assert the device fl_read reads through `volatile` - the one check that catches a
 //                 "someone reverted the fix" regression, which [1]/[2] cannot on the host.
 //
 // Build/run: see test/Makefile (`make check`). Uses the committed vectors in test/vectors/ by default.
@@ -39,7 +39,7 @@ static int g_settings_writes, g_app_write_while_valid;
 void otah_read(uint32_t a, void* d, uint32_t n) {
     memcpy(d, FLASH + a, n);
     if (g_stale) {
-        // Overlay the pre-apply snapshot over any part of this read that falls in the workspace — i.e.
+        // Overlay the pre-apply snapshot over any part of this read that falls in the workspace - i.e.
         // model "the compiler served a cached read from before the write" for exactly the bytes the
         // in-place decode writes and reads back. Reads outside the workspace (the .mota payload, the
         // running body before any write) are unaffected, just like the real miscompile.
@@ -125,7 +125,7 @@ static int guard_device_flread_is_volatile(void) {
     if (fe) *fe = saved;
     free(s);
     if (ok) printf("  device fl_read reads through a volatile pointer (LTO-safe)  [%s]\n", used);
-    else    printf("  *** device fl_read is NOT volatile — -flto WILL cache a stale readback (the bug is back) ***\n");
+    else    printf("  *** device fl_read is NOT volatile - -flto WILL cache a stale readback (the bug is back) ***\n");
     return ok;
 }
 
@@ -140,26 +140,26 @@ int main(int argc, char** argv) {
     int fails = 0;
     int committed, matches; bool applied;
 
-    // [1] POSITIVE — coherent readback: the apply must succeed, commit, and reproduce the new image.
+    // [1] POSITIVE - coherent readback: the apply must succeed, commit, and reproduce the new image.
     printf("[1] positive (coherent readback): ");
     applied = run_case(/*stale=*/0, &committed, &matches);
     if (applied && committed && matches && g_settings_writes == 2 && !g_app_write_while_valid) {
-        printf("PASS — invalidated before writes, then committed valid result\n");
+        printf("PASS - invalidated before writes, then committed valid result\n");
     } else {
-        printf("FAIL — applied=%d committed=%d matches=%d settings=%d unsafe_writes=%d\n",
+        printf("FAIL - applied=%d committed=%d matches=%d settings=%d unsafe_writes=%d\n",
                applied, committed, matches, g_settings_writes, g_app_write_while_valid);
         fails++;
     }
 
-    // [2] NEGATIVE — inject the LTO failure mode (stale workspace readback). The apply MUST fail safe:
+    // [2] NEGATIVE - inject the LTO failure mode (stale workspace readback). The apply MUST fail safe:
     // it must leave the bank INVALID (so even UF2's zero-CRC settings cannot boot it) and return false.
     printf("[2] negative (stale workspace readback = the LTO bug): ");
     applied = run_case(/*stale=*/1, &committed, &matches);
     if (!committed && !applied && !matches && g_bank0 == 0xFF && g_settings_writes == 1 &&
         !g_app_write_while_valid) {
-        printf("PASS — apply refused, bank remains invalid (fails safe -> DFU)\n");
+        printf("PASS - apply refused, bank remains invalid (fails safe -> DFU)\n");
     } else {
-        printf("FAIL — applied=%d committed=%d matches=%d bank=0x%X settings=%d unsafe_writes=%d\n",
+        printf("FAIL - applied=%d committed=%d matches=%d bank=0x%X settings=%d unsafe_writes=%d\n",
                applied, committed, matches, g_bank0, g_settings_writes, g_app_write_while_valid);
         fails++;
     }
@@ -168,9 +168,9 @@ int main(int argc, char** argv) {
     {
         int c2, m2; bool a2 = run_case(0, &c2, &m2);
         if (a2 && c2 && !(applied && committed)) {
-            printf("    (sensitivity OK: coherent commits, stale does not — vector exercises readback)\n");
+            printf("    (sensitivity OK: coherent commits, stale does not - vector exercises readback)\n");
         } else if (a2 && c2) {
-            printf("    NOTE: coherent and stale both committed — vector may not exercise cross-page readback\n");
+            printf("    NOTE: coherent and stale both committed - vector may not exercise cross-page readback\n");
         }
     }
 
@@ -204,15 +204,15 @@ int main(int argc, char** argv) {
         bool bad_applied = ota_delta_check_and_apply();
         int app_same = memcmp(FLASH + MOTA_NRF52_APP_BASE, g_base, g_base_n) == 0;
         if (bounds_ok && wrapped_ok && !bad_applied && app_same && g_bank0 == 0x01 && g_settings_writes == 0) {
-            printf("PASS — rejected before settings/app commit point\n");
+            printf("PASS - rejected before settings/app commit point\n");
         } else {
-            printf("FAIL — bounds=%d wrapped=%d applied=%d app_same=%d bank=0x%X settings=%d\n",
+            printf("FAIL - bounds=%d wrapped=%d applied=%d app_same=%d bank=0x%X settings=%d\n",
                    bounds_ok, wrapped_ok, bad_applied, app_same, g_bank0, g_settings_writes);
             fails++;
         }
     }
 
-    // [4] GUARD — the device fl_read must stay volatile.
+    // [4] GUARD - the device fl_read must stay volatile.
     printf("[4] source guard (device fl_read is volatile):\n");
     if (!guard_device_flread_is_volatile()) fails++;
 

@@ -1,4 +1,4 @@
-// Host simulation of the nRF52 bootloader's .mota in-place apply — NO hardware needed.
+// Host simulation of the nRF52 bootloader's .mota in-place apply - NO hardware needed.
 //
 // Lays out a RAM "flash" exactly like the device (running image at APP_BASE, a staged .mota bottom-aligned
 // below FS_START, GPREGRET set), then runs the REAL ota_delta_check_and_apply() and checks the result
@@ -33,7 +33,7 @@ void     otah_gpregret_set(uint32_t v)                     { g_gpregret = v; }
 uint16_t otah_crc16(uint32_t a, uint32_t len)              { (void)a; (void)len; return 0x1234; }
 void otah_settings_commit(uint16_t b, uint16_t c, uint32_t s) { g_bank0 = b; g_crc = c; g_size = s; g_committed = 1; }
 
-#include "ota_delta.c"   // unit under test (statics — scan_mota/find_body_len/parse_mota_at — visible here)
+#include "ota_delta.c"   // unit under test (statics - scan_mota/find_body_len/parse_mota_at - visible here)
 
 static long load(const char* path, uint8_t** out) {
     FILE* f = fopen(path, "rb"); if (!f) { fprintf(stderr, "cannot open %s\n", path); exit(2); }
@@ -56,7 +56,7 @@ int main(int argc, char** argv) {
     uint32_t write_start = (uint32_t)((MOTA_NRF52_FS_START - mota_n) & ~(MOTA_NRF52_FLASH_PAGE - 1));
     if (write_start < MOTA_NRF52_APP_BASE + base_n) { fprintf(stderr, "mota overlaps app!\n"); return 2; }
     memcpy(FLASH + write_start, mota, mota_n);
-    // the app writes APRV into the staged manifest's approval field before reset — do the same here
+    // the app writes APRV into the staged manifest's approval field before reset - do the same here
     static const uint8_t APRV4[4] = {'A','P','R','V'};
     memcpy(FLASH + write_start + 8 + 193, APRV4, 4);   // approval @ manifest offset 193 (fixed layout)
     g_gpregret = GPREGRET_OTA_APPLY;
@@ -100,6 +100,6 @@ int main(int argc, char** argv) {
             printf("  FIRST DIFF at image offset %ld: got 0x%02x want 0x%02x\n", i, FLASH[MOTA_NRF52_APP_BASE + i], expect[i]); break;
         }
     }
-    printf("\n%s\n", ok ? "RESULT: APPLY OK — app region == expected new image" : "RESULT: APPLY FAILED");
+    printf("\n%s\n", ok ? "RESULT: APPLY OK - app region == expected new image" : "RESULT: APPLY FAILED");
     return ok ? 0 : 1;
 }

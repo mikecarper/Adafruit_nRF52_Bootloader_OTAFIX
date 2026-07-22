@@ -6,7 +6,7 @@
 // `.mota` format change) and the device would just come back up unchanged.
 //
 // The app scans the bootloader flash region for MOTA_BL_MAGIC and reads the fields. Mirror of MeshCore's
-// src/helpers/ota/OtaBlInfo.h — keep byte-identical.
+// src/helpers/ota/OtaBlInfo.h - keep byte-identical.
 #ifndef OTA_BL_INFO_H_
 #define OTA_BL_INFO_H_
 
