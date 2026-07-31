@@ -2,4 +2,5 @@
 apply_sim
 apply_sim_lto
 readback_test
+bootloader_image_test
 *.o
