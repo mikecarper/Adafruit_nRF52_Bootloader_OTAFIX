@@ -45,8 +45,42 @@ void neopixel_teardown(void);
 //--------------------------------------------------------------------+
 
 static uint32_t _systick_count = 0;
+
+#ifdef EXTERNAL_WATCHDOG_DONE_PIN
+static void external_watchdog_tick(void) {
+  const uint32_t phase = _systick_count % EXTERNAL_WATCHDOG_FEED_INTERVAL_MS;
+  if (phase == 0) {
+    nrf_gpio_pin_set(EXTERNAL_WATCHDOG_DONE_PIN);
+  } else if (phase == EXTERNAL_WATCHDOG_FEED_PULSE_MS) {
+    nrf_gpio_pin_clear(EXTERNAL_WATCHDOG_DONE_PIN);
+  }
+}
+#endif
+
+void board_watchdog_feed(void) {
+#ifdef EXTERNAL_WATCHDOG_DONE_PIN
+  // board_teardown() returns every GPIO to its reset state before the in-place
+  // delta applier runs, so make this one-shot feed self-contained.
+  nrf_gpio_pin_clear(EXTERNAL_WATCHDOG_DONE_PIN);
+  nrf_gpio_cfg_output(EXTERNAL_WATCHDOG_DONE_PIN);
+  nrf_gpio_pin_set(EXTERNAL_WATCHDOG_DONE_PIN);
+  NRFX_DELAY_US(EXTERNAL_WATCHDOG_FEED_PULSE_MS * 1000UL);
+  nrf_gpio_pin_clear(EXTERNAL_WATCHDOG_DONE_PIN);
+#endif
+}
+
+void board_watchdog_teardown(void) {
+#ifdef EXTERNAL_WATCHDOG_DONE_PIN
+  nrf_gpio_pin_clear(EXTERNAL_WATCHDOG_DONE_PIN);
+  nrf_gpio_cfg_default(EXTERNAL_WATCHDOG_DONE_PIN);
+#endif
+}
+
 void SysTick_Handler(void) {
   _systick_count++;
+#ifdef EXTERNAL_WATCHDOG_DONE_PIN
+  external_watchdog_tick();
+#endif
   led_tick();
 }
 
@@ -83,6 +117,10 @@ void board_init(void) {
   button_init(BUTTON_DFU_OTA);
 #endif
   NRFX_DELAY_US(100); // wait for the pin state is stable
+
+#ifdef EXTERNAL_WATCHDOG_DONE_PIN
+  board_watchdog_feed();
+#endif
 
 #if LEDS_NUMBER > 0
   // use PMW0 for LED RED
@@ -168,6 +206,8 @@ void board_teardown(void) {
 #ifdef DISPLAY_PIN_SCK
   board_display_teardown();
 #endif
+
+  board_watchdog_teardown();
 
   // Stop RTC1 used by app_timer
   NVIC_DisableIRQ(RTC1_IRQn);

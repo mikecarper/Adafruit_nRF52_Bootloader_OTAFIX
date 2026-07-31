@@ -58,6 +58,7 @@ segger/Output
 _build/
 cmake-build-*/
 bin/
+_bin/
 *.emSession
 *.jlink
 .idea/

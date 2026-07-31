@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.17)
 include(CMakePrintHelpers)
-find_package(Python COMPONENTS Interpreter)
+find_package(Python REQUIRED COMPONENTS Interpreter)
 
 if (NOT DEFINED BOARD)
   message(FATAL_ERROR "BOARD is not defined")
@@ -46,6 +46,8 @@ if (NOT DEFINED CMAKE_BUILD_TYPE OR CMAKE_BUILD_TYPE STREQUAL "")
 endif ()
 
 project(Adafruit_nRF52_Bootloader C ASM)
+include(CheckCCompilerFlag)
+
 set(CMAKE_EXECUTABLE_SUFFIX .elf)
 add_executable(bootloader
   # src
@@ -148,6 +150,7 @@ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
 else ()
   set(LD_FILE ${CMAKE_CURRENT_LIST_DIR}/linker/${MCU_VARIANT}.ld)
 endif ()
+set_property(TARGET bootloader APPEND PROPERTY LINK_DEPENDS ${LD_FILE})
 
 target_link_options(bootloader PUBLIC
   "LINKER:--script=${LD_FILE}"
@@ -157,6 +160,8 @@ target_link_options(bootloader PUBLIC
   --specs=nosys.specs --specs=nano.specs
   )
 target_compile_options(bootloader PUBLIC
+  -mabi=aapcs
+  -Os
   -flto
   -fno-builtin
   -fshort-enums
@@ -178,13 +183,31 @@ target_compile_options(bootloader PUBLIC
   # Suppress warning caused by SDK
   -Wno-unused-parameter -Wno-expansion-to-defined -Wno-array-bounds
   )
+
+# Nordic's legacy SVC wrappers have broken inline-assembly constraints. GCC 11's
+# IPA mod/ref pass can otherwise optimize away arguments prepared for an SVC.
+check_c_compiler_flag("-fno-ipa-modref" COMPILER_SUPPORTS_FNO_IPA_MODREF)
+if (COMPILER_SUPPORTS_FNO_IPA_MODREF)
+  target_compile_options(bootloader PUBLIC -fno-ipa-modref)
+  target_link_options(bootloader PUBLIC -fno-ipa-modref)
+endif ()
+
 target_compile_definitions(bootloader PUBLIC
   DETOOLS_CONFIG_COMPRESSION_NONE=0
   SOFTDEVICE_PRESENT
   CONFIG_GPIO_AS_PINRESET
+  __HEAP_SIZE=0
   __START=main
   __STARTUP_CLEAR_BSS
   )
+
+if (NOT DEFINED USE_NFCT OR NOT USE_NFCT STREQUAL "yes")
+  target_compile_definitions(bootloader PUBLIC CONFIG_NFCT_PINS_AS_GPIOS)
+endif ()
+
+if (DEFINED DEVICE_NAME)
+  target_compile_definitions(bootloader PUBLIC DEVICE_NAME="${DEVICE_NAME}")
+endif ()
 
 if (SIGNED_FW)
   if (SIGNED_FW_QX STREQUAL "" OR SIGNED_FW_QY STREQUAL "")
@@ -231,6 +254,8 @@ else ()
     src/usb/msc_uf2.c
     src/usb/usb.c
     src/usb/usb_desc.c
+    src/usb/uf2/bootloader_image.c
+    src/usb/uf2/bootloader_manifest.c
     src/usb/uf2/ghostfat.c
     # TinyUSB
     ${TINYUSB_DIR}/portable/nordic/nrf5x/dcd_nrf5x.c
@@ -288,11 +313,11 @@ string(TOUPPER ${SD_NAME} SD_NAME_UPPER)
 target_compile_definitions(bootloader PUBLIC ${SD_NAME_UPPER})
 target_include_directories(bootloader PUBLIC
   ${SOFTDEVICE_DIR}/${SD_FILENAME}/${SD_FILENAME}_API/include
+  ${SOFTDEVICE_DIR}/${SD_FILENAME}/${SD_FILENAME}_API/include/nrf52
   )
 
 # debug build
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-  # TODO not work yet, also need to add segger rtt, DFU_APP_DATA_RESERVED=0, BOOTLOADER_REGION_START=0xED000
   target_sources(bootloader PUBLIC lib/SEGGER_RTT/RTT/SEGGER_RTT.c)
   target_include_directories(bootloader PUBLIC lib/SEGGER_RTT/RTT)
   target_compile_definitions(bootloader PUBLIC
@@ -349,10 +374,31 @@ target_compile_definitions(bootloader PUBLIC
   MK_BOOTLOADER_VERSION=${MK_BOOTLOADER_VERSION}
   )
 
-# Add bin/hex output
+# Add bin/hex output. For USB-capable targets the manifest patcher also emits a
+# fixed-size binary for the bootloader region, avoiding a sparse UICR section
+# turning objcopy's raw binary into a roughly 255 MB file.
+if (MCU_VARIANT STREQUAL "nrf52")
+  set(BOOTLOADER_BIN_COMMAND
+    ${CMAKE_OBJCOPY}
+    --remove-section=.uicrBootStartAddress
+    --remove-section=.uicrMbrParamsPageAddress
+    -Obinary
+    $<TARGET_FILE:bootloader>
+    $<TARGET_FILE_DIR:bootloader>/bootloader.bin
+    )
+else ()
+  set(BOOTLOADER_BIN_COMMAND
+    ${Python_EXECUTABLE}
+    ${CMAKE_CURRENT_LIST_DIR}/tools/patch_bootloader_manifest.py
+    $<TARGET_FILE_DIR:bootloader>/bootloader.hex
+    --bin-out
+    $<TARGET_FILE_DIR:bootloader>/bootloader.bin
+    )
+endif ()
+
 add_custom_command(TARGET bootloader POST_BUILD
-  COMMAND ${CMAKE_OBJCOPY} -Obinary $<TARGET_FILE:bootloader> $<TARGET_FILE_DIR:bootloader>/bootloader.bin
   COMMAND ${CMAKE_OBJCOPY} -Oihex $<TARGET_FILE:bootloader> $<TARGET_FILE_DIR:bootloader>/bootloader.hex
+  COMMAND ${BOOTLOADER_BIN_COMMAND}
   COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/tools/hexmerge.py --overlap=replace -o $<TARGET_FILE_DIR:bootloader>/bootloader_mbr.hex $<TARGET_FILE_DIR:bootloader>/bootloader.hex ${MBR_HEX}
   COMMAND ${Python_EXECUTABLE} ${UF2CONV_PY} -f ${UF2_FAMILY_ID_BOOTLOADER} -c -o $<TARGET_FILE_DIR:bootloader>/bootloader_mbr.uf2 $<TARGET_FILE_DIR:bootloader>/bootloader_mbr.hex
   VERBATIM)

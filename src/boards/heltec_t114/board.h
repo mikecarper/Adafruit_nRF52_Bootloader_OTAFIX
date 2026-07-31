@@ -85,7 +85,7 @@
 //--------------------------------------------------------------------+
 // BLE OTA
 //--------------------------------------------------------------------+
-#define BLEDIS_MANUFACTURER   "Heltec AutoMation"
+#define BLEDIS_MANUFACTURER   "Heltec Automation"
 #define BLEDIS_MODEL          "HT-n5262"
 
 //--------------------------------------------------------------------+
@@ -99,6 +99,6 @@
 #define UF2_PRODUCT_NAME      "HT-n5262"
 #define UF2_VOLUME_LABEL      "HT-n5262"
 #define UF2_BOARD_ID          "HT-n5262"
-#define UF2_INDEX_URL         "HT-n5262"
+#define UF2_INDEX_URL         "https://heltec.org/project/mesh-node-t114/"
 
 #endif

@@ -9,8 +9,9 @@
 
 | Board | Name | VID PID | URL |
 | --- | --- | --- | --- |
+| heltec_mesh_tower_v2 | Heltec MeshTower V2 | 0x239A:0x0071 | https://heltec.org/project/meshtower/ |
 | heltec_t096 | HT-n5262G | 0x239A:0x0071 | https://heltec.org/project/t096/ |
-| heltec_t114 | HT-n5262 | 0x239A:0x0071 | HT-n5262 |
+| heltec_t114 | HT-n5262 | 0x239A:0x0071 | https://heltec.org/project/mesh-node-t114/ |
 | lilygo_techo | LilyGo T-Echo | 0x239A:0x0029 | https://lilygo.cc/products/t-echo-lilygo |
 | minewsemi_mx25le01 | MinewSemi MX25LE01 | 0x239A:0x0029 | https://www.minewsemi.com |
 | promicro_nrf52840 | ProMicro NRF52840 | 0x239A:0x00B3 | https://www.nologo.tech/product/otherboard/NRF52840.html |

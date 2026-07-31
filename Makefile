@@ -241,6 +241,8 @@ C_SRC += src/boards/$(BOARD)/pinconfig.c
 C_SRC += \
 	src/usb/usb_desc.c \
 	src/usb/msc_uf2.c \
+	src/usb/uf2/bootloader_image.c \
+	src/usb/uf2/bootloader_manifest.c \
 	src/usb/uf2/ghostfat.c \
 	src/usb/usb.c
 
@@ -455,29 +457,22 @@ LIBS += -lm -lc
 
 ASFLAGS += $(CFLAGS)
 
-#function for removing duplicates in a list
-remduplicates = $(strip $(if $1,$(firstword $1) $(call remduplicates,$(filter-out $(firstword $1),$1))))
-
-C_SOURCE_FILE_NAMES = $(notdir $(C_SRC))
-C_PATHS = $(call remduplicates, $(dir $(C_SRC) ) )
-C_OBJECTS = $(addprefix $(BUILD)/, $(C_SOURCE_FILE_NAMES:.c=.o) )
-
-ASM_SOURCE_FILE_NAMES = $(notdir $(ASM_SRC))
-ASM_PATHS = $(call remduplicates, $(dir $(ASM_SRC) ))
-ASM_OBJECTS = $(addprefix $(BUILD)/, $(ASM_SOURCE_FILE_NAMES:.S=.o) )
-
-vpath %.c $(C_PATHS)
-vpath %.S $(ASM_PATHS)
+C_OBJECTS = $(addprefix $(BUILD)/,$(C_SRC:.c=.o))
+ASM_OBJECTS = $(addprefix $(BUILD)/,$(ASM_SRC:.S=.o))
 
 OBJECTS = $(C_OBJECTS) $(ASM_OBJECTS)
+DEP_FILES = $(OBJECTS:.o=.d)
 
 INC_PATHS = $(addprefix -I,$(IPATH))
+
+-include $(DEP_FILES)
 
 #------------------------------------------------------------------------------
 # BUILD TARGETS
 #------------------------------------------------------------------------------
 
-.PHONY: all clean flash flash-dfu flash-sd flash-mbr dfu-flash sd mbr gdbflash gdb
+.DEFAULT_GOAL := all
+.PHONY: all clean copy-artifact flash flash-dfu flash-sd flash-mbr dfu-flash sd mbr gdbflash gdb
 
 # default target to build
 all: $(BUILD)/$(OUT_NAME).out $(BUILD)/$(OUT_NAME)_nosd.hex $(BUILD)/update-$(OUT_NAME)_nosd.uf2 $(BUILD)/$(MERGED_FILE).hex $(BUILD)/$(MERGED_FILE).zip
@@ -504,15 +499,17 @@ linkermap: $(BUILD)/$(OUT_NAME).out
 # Create objects from C SRC files
 $(BUILD)/%.o: %.c
 	@echo CC $(notdir $<)
-	@$(CC) $(CFLAGS) $(INC_PATHS) -c -o $@ $<
+	@$(MKDIR) "$(dir $@)"
+	@$(CC) $(CFLAGS) $(INC_PATHS) -MMD -MP -MF $(@:.o=.d) -c -o $@ $<
 
 # Assemble files
 $(BUILD)/%.o: %.S
 	@echo AS $(notdir $<)
-	@$(CC) -x assembler-with-cpp $(ASFLAGS) $(INC_PATHS) -c -o $@ $<
+	@$(MKDIR) "$(dir $@)"
+	@$(CC) -x assembler-with-cpp $(ASFLAGS) $(INC_PATHS) -MMD -MP -MF $(@:.o=.d) -c -o $@ $<
 
 # Link
-$(BUILD)/$(OUT_NAME).out: $(BUILD) $(OBJECTS)
+$(BUILD)/$(OUT_NAME).out: $(BUILD) $(OBJECTS) $(LD_FILE)
 	@echo LD $(notdir $@)
 	@$(CC) -o $@ $(LDFLAGS) $(OBJECTS) -Wl,--start-group $(LIBS) -Wl,--end-group
 	@$(SIZE) $@
@@ -520,9 +517,12 @@ $(BUILD)/$(OUT_NAME).out: $(BUILD) $(OBJECTS)
 #------------------- Binary generator -------------------
 
 # Create hex file (no sd, no mbr)
-$(BUILD)/$(OUT_NAME).hex: $(BUILD)/$(OUT_NAME).out
+$(BUILD)/$(OUT_NAME).hex: $(BUILD)/$(OUT_NAME).out tools/patch_bootloader_manifest.py
 	@echo Create $(notdir $@)
 	@$(OBJCOPY) -O ihex $< $@
+ifneq ($(MCU_SUB_VARIANT),nrf52)
+	@$(PYTHON) tools/patch_bootloader_manifest.py $@
+endif
 
 # Hex file with mbr (still no SD)
 $(BUILD)/$(OUT_NAME)_nosd.hex: $(BUILD)/$(OUT_NAME).hex
@@ -545,9 +545,9 @@ $(BUILD)/$(MERGED_FILE).zip: $(BUILD)/$(OUT_NAME).hex
 
 #-------------- Artifacts --------------
 $(BIN):
-	@$(MKDIR) -p $@
+	@$(MKDIR) "$@"
 
-copy-artifact: $(BIN)
+copy-artifact: $(BUILD)/update-$(OUT_NAME)_nosd.uf2 $(BUILD)/$(MERGED_FILE).hex $(BUILD)/$(MERGED_FILE).zip | $(BIN)
 	@$(CP) $(BUILD)/update-$(OUT_NAME)_nosd.uf2 $(BIN)
 	@$(CP) $(BUILD)/$(MERGED_FILE).hex $(BIN)
 	@$(CP) $(BUILD)/$(MERGED_FILE).zip $(BIN)

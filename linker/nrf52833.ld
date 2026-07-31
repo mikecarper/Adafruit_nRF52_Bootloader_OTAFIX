@@ -55,6 +55,7 @@ SECTIONS
   .bootloaderConfig :
   {
     KEEP(*(.bootloaderConfig))
+    KEEP(*(.bootloaderManifest))
   } > BOOTLOADER_CONFIG
 
   /* Place the bootloader settings page in flash. */

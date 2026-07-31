@@ -220,6 +220,7 @@ int main(void) {
   if ( ota_delta_check_and_apply() ) {
     NVIC_SystemReset();
   }
+  board_watchdog_teardown();
 
   /* Jump to application if valid
    * "Master Boot Record and SoftDevice initializaton procedure"

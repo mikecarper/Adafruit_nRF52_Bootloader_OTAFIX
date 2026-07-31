@@ -18,12 +18,18 @@ readback_test: readback_test.c $(SRC)/ota_delta.c $(SRC)/detools/detools.c $(SRC
                $(SRC)/ota_delta.h $(SRC)/ota_layout.h
 	$(CC) $(CFLAGS) -DOTA_DELTA_HOST_TEST $(INC) readback_test.c $(SRC)/detools/detools.c $(SRC)/sha256.c -o $@
 
-check: apply_sim readback_test
+bootloader_image_test: bootloader_image_test.c $(SRC)/usb/uf2/bootloader_image.c \
+                       $(SRC)/usb/uf2/bootloader_image.h
+	$(CC) $(CFLAGS) -I $(SRC) bootloader_image_test.c $(SRC)/usb/uf2/bootloader_image.c -o $@
+
+check: apply_sim readback_test bootloader_image_test
 	./apply_sim vectors/base.img vectors/delta.mota vectors/new.img
 	@echo
 	./readback_test
+	@echo
+	./bootloader_image_test
 
 clean:
-	rm -f apply_sim readback_test
+	rm -f apply_sim readback_test bootloader_image_test
 
 .PHONY: check clean

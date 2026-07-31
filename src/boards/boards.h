@@ -70,6 +70,8 @@
 
 void board_init(void);
 void board_teardown(void);
+void board_watchdog_feed(void);
+void board_watchdog_teardown(void);
 
 //--------------------------------------------------------------------+
 // LED

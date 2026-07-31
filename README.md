@@ -14,6 +14,12 @@
 - **Reliable BLE OTA connection settings**
   Uses a 15-30 ms preferred connection interval with zero slave latency and lets the phone control connection updates, avoiding both the earlier throughput regression and connection-update races.
 
+- **Heltec MeshTower V2 support**
+  Adds a dedicated headless target with the correct status LED, user button, and external-watchdog feed. Both the standard-power V2 and high-power V2H use this target.
+
+- **Fail-closed bootloader UF2 updates**
+  Bootloader self-update files now carry a board-bound manifest and a CRC32 over the complete bootloader region. The receiver verifies the UICR addresses, legacy VID/PID, unique DFU device identity, manifest, and CRC before asking the MBR to copy the image. This distinguishes boards such as the T096, T114, and MeshTower even though their factory bootloaders share a VID/PID. A bootloader containing this check intentionally rejects older self-update UF2 files that do not have the manifest; newly generated files remain installable by older bootloaders.
+
 ## Changes in OTAFIX 2.4
 
 - **In-place OTA delta apply**  
@@ -60,6 +66,7 @@
   - **Elecrow ThinkNode M6** -> `TNM6_DFU`
   - **Heltec T114** -> `T114_DFU`
   - **Heltec T096** -> `T096_DFU`
+  - **Heltec MeshTower V2 / V2H** -> `TOWER_V2_OTA`
   - **LILYGO T-Echo** -> `LGTE_DFU`
   - **Minewsemi MX25LE01** -> `MX25_DFU`
   - **ProMicro NRF52840** -> `PROM_DFU`
@@ -78,6 +85,7 @@
 - Elecrow ThinkNode M6
 - Heltec Automation Mesh Node T114 / HT-nRF5262
 - Heltec Automation Mesh Node T096 / HT-n5262G
+- Heltec Automation MeshTower V2 / V2H
 - LilyGO T-Echo
 - Minewsemi MX25LE01
 - Nologo ProMicro NRF52840 (aka SuperMini NRF52840)
@@ -86,7 +94,7 @@
 - Seeed Studio SenseCAP Card Tracker T1000-E
 - Seeed SenseCAP Solar Node P1
 - Seeed Studio Wio Tracker L1
-- Seeed Studio XIAO nRF52840 BLE ([See note](#notes-on-xiao-nrf52840-ble)
+- Seeed Studio XIAO nRF52840 BLE ([See note](#notes-on-xiao-nrf52840-ble))
 - Seeed Studio XIAO nRF52840 BLE SENSE
 
 If there is another nRF52840-based board you would like to see supported please raise a github issue and we can make it happen.

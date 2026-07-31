@@ -10,7 +10,7 @@ on:
       - created
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -60,17 +60,69 @@ jobs:
       run: |
         make BOARD=${{ matrix.board }} all
         make BOARD=${{ matrix.board }} copy-artifact
+        cmake -S . -B cmake-build-${{ matrix.board }} -DBOARD=${{ matrix.board }}
+        cmake --build cmake-build-${{ matrix.board }}
 
     - uses: actions/upload-artifact@v7
       with:
         name: ${{ matrix.board }}
         path: _bin/${{ matrix.board }}
 
-    - name: Upload Release Asset
-      uses: softprops/action-gh-release@v3
-      if: ${{ github.event_name == 'release' }}
-      with:
-        files: |
-          _bin/${{ matrix.board }}/${{ matrix.board }}_bootloader-*.zip
-          _bin/${{ matrix.board }}/${{ matrix.board }}_bootloader-*.hex
-          _bin/${{ matrix.board }}/update-${{ matrix.board }}_bootloader-*.uf2
+  feature-builds:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: true
+
+      - name: Install ARM GCC
+        uses: carlosperate/arm-none-eabi-gcc-action@v1
+        with:
+          release: '12.3.Rel1'
+
+      - name: Install Tools
+        run: |
+          pip3 install adafruit-nrfutil uritemplate requests intelhex setuptools
+
+      - name: Run host tests
+        run: make -C test check
+
+      - name: Build signed and dual-bank display variants
+        shell: bash
+        run: |
+          QX=0x6b,0x17,0xd1,0xf2,0xe1,0x2c,0x42,0x47,0xf8,0xbc,0xe6,0xe5,0x63,0xa4,0x40,0xf2,0x77,0x03,0x7d,0x81,0x2d,0xeb,0x33,0xa0,0xf4,0xa1,0x39,0x45,0xd8,0x98,0xc2,0x96
+          QY=0x4f,0xe3,0x42,0xe2,0xfe,0x1a,0x7f,0x9b,0x8e,0xe7,0xeb,0x4a,0x7c,0x0f,0x9e,0x16,0x2b,0xce,0x33,0x57,0x6b,0x31,0x5e,0xce,0xcb,0xb6,0x40,0x68,0x37,0xbf,0x51,0xf5
+          for board in heltec_t096 heltec_t114; do
+            make BOARD="$board" BUILD="_build/signed-$board" SIGNED_FW=1 \
+              SIGNED_FW_QX="$QX" SIGNED_FW_QY="$QY" all
+            make BOARD="$board" BUILD="_build/dualbank-$board" DUALBANK_FW=1 all
+
+            cmake -S . -B "cmake-build-signed-$board" -DBOARD="$board" \
+              -DSIGNED_FW=ON -DSIGNED_FW_QX="$QX" -DSIGNED_FW_QY="$QY"
+            cmake --build "cmake-build-signed-$board"
+            cmake -S . -B "cmake-build-dualbank-$board" -DBOARD="$board" -DDUALBANK_FW=ON
+            cmake --build "cmake-build-dualbank-$board"
+          done
+
+  release:
+    if: ${{ github.event_name == 'release' }}
+    needs: [build, feature-builds]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: _release
+          merge-multiple: true
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            _release/*.zip
+            _release/*.hex
+            _release/*.uf2

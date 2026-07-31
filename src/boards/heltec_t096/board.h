@@ -78,7 +78,7 @@
 //--------------------------------------------------------------------+
 // BLE OTA
 //--------------------------------------------------------------------+
-#define BLEDIS_MANUFACTURER   "Heltec AutoMation"
+#define BLEDIS_MANUFACTURER   "Heltec Automation"
 #define BLEDIS_MODEL          "HT-n5262G"
 
 //--------------------------------------------------------------------+

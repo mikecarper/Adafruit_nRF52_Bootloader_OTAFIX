@@ -51,6 +51,7 @@ static const uint8_t APRV[4]     = { 'A','P','R','V' };
   #include "nrf.h"
   #include "nrfx_nvmc.h"
   #include "crc16.h"
+  #include "boards.h"
   #include "bootloader_types.h"
   #include "bootloader_settings.h"
   #include "dfu_types.h"
@@ -98,6 +99,8 @@ static const uint8_t APRV[4]     = { 'A','P','R','V' };
 // A host test has no hardware watchdog, so this becomes a no-op there.
 static void inherited_watchdog_feed(void) {
 #ifndef OTA_DELTA_HOST_TEST
+  static uint8_t external_feed_divider;
+
   if (NRF_WDT->RUNSTATUS != 0) {
     const uint32_t enabled_channels = NRF_WDT->RREN & 0xFFu;
     for (uint8_t channel = 0; channel < 8; channel++) {
@@ -105,6 +108,13 @@ static void inherited_watchdog_feed(void) {
         NRF_WDT->RR[channel] = WDT_RR_RR_Reload;
       }
     }
+  }
+
+  // The external watchdog pulse is deliberately less frequent than the cheap
+  // internal reload. Hashing calls this checkpoint every 256 bytes; pulsing on
+  // every call would add several seconds to a large update.
+  if ((external_feed_divider++ & 0x7FU) == 0) {
+    board_watchdog_feed();
   }
 #endif
 }

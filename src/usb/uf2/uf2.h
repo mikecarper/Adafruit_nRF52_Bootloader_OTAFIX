@@ -49,14 +49,22 @@ SOFTWARE.
 #define UF2_FLAG_FAMILYID 0x00002000
 
 #define MAX_BLOCKS (CFG_UF2_FLASH_SIZE / 256 + 100)
+
+enum {
+    UF2_UPDATE_KIND_NONE = 0,
+    UF2_UPDATE_KIND_APPLICATION,
+    UF2_UPDATE_KIND_BOOTLOADER,
+};
+
 typedef struct {
     uint32_t numBlocks;
     uint32_t numWritten;
+    uint32_t bootloaderEraseOffset;
 
-    bool aborted;             // aborting update and reset
-    bool update_bootloader;   // if updating bootloader (else app)
-    bool has_uicr;            // if containing uicr data
-    bool boot_id_matches;     // if bootloader id in cf2 config matches our VID/PID
+    uint8_t updateKind;
+    bool aborted;
+    bool has_uicr;
+    bool bootloaderStagingErased;
 
     uint8_t writtenMask[MAX_BLOCKS / 8 + 1];
 } WriteState;

@@ -202,7 +202,7 @@ void tud_msc_write10_complete_cb(uint8_t lun)
       dfu_update_status_t update_status;
       memset(&update_status, 0, sizeof(dfu_update_status_t ));
 
-      if ( _wr_state.update_bootloader )
+      if ( _wr_state.updateKind == UF2_UPDATE_KIND_BOOTLOADER )
       {
         // update bootloader always end with reset
         update_status.status_code = DFU_RESET;
