@@ -22,14 +22,21 @@ bootloader_image_test: bootloader_image_test.c $(SRC)/usb/uf2/bootloader_image.c
                        $(SRC)/usb/uf2/bootloader_image.h
 	$(CC) $(CFLAGS) -I $(SRC) bootloader_image_test.c $(SRC)/usb/uf2/bootloader_image.c -o $@
 
-check: apply_sim readback_test bootloader_image_test
+sd_apply_test: sd_apply_test.c $(SRC)/ota_delta.c $(SRC)/detools/detools.c $(SRC)/sha256.c \
+               $(SRC)/ota_delta.h $(SRC)/ota_layout.h $(SRC)/ota_sd_handoff.h $(SRC)/ota_sd_spi.h
+	$(CC) $(CFLAGS) -DOTA_DELTA_HOST_TEST -DMOTA_SD_CARD $(INC) sd_apply_test.c \
+		$(SRC)/detools/detools.c $(SRC)/sha256.c -o $@
+
+check: apply_sim readback_test bootloader_image_test sd_apply_test
 	./apply_sim vectors/base.img vectors/delta.mota vectors/new.img
 	@echo
 	./readback_test
 	@echo
 	./bootloader_image_test
+	@echo
+	./sd_apply_test
 
 clean:
-	rm -f apply_sim readback_test bootloader_image_test
+	rm -f apply_sim readback_test bootloader_image_test sd_apply_test
 
 .PHONY: check clean

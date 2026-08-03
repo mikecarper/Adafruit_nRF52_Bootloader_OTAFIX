@@ -475,7 +475,7 @@ INC_PATHS = $(addprefix -I,$(IPATH))
 .PHONY: all clean copy-artifact flash flash-dfu flash-sd flash-mbr dfu-flash sd mbr gdbflash gdb
 
 # default target to build
-all: $(BUILD)/$(OUT_NAME).out $(BUILD)/$(OUT_NAME)_nosd.hex $(BUILD)/update-$(OUT_NAME)_nosd.uf2 $(BUILD)/$(MERGED_FILE).hex $(BUILD)/$(MERGED_FILE).zip
+all: $(BUILD)/$(OUT_NAME).out $(BUILD)/$(OUT_NAME)_mbr.hex $(BUILD)/update-$(OUT_NAME)_mbr.uf2 $(BUILD)/$(MERGED_FILE).hex $(BUILD)/$(MERGED_FILE).zip
 
 # Print out the value of a make variable.
 # https://stackoverflow.com/questions/16467718/how-to-print-out-a-variable-in-makefile
@@ -516,7 +516,7 @@ $(BUILD)/$(OUT_NAME).out: $(BUILD) $(OBJECTS) $(LD_FILE)
 
 #------------------- Binary generator -------------------
 
-# Create hex file (no sd, no mbr)
+# Create the bootloader-only hex (no MBR or SoftDevice).
 $(BUILD)/$(OUT_NAME).hex: $(BUILD)/$(OUT_NAME).out tools/patch_bootloader_manifest.py
 	@echo Create $(notdir $@)
 	@$(OBJCOPY) -O ihex $< $@
@@ -524,13 +524,14 @@ ifneq ($(MCU_SUB_VARIANT),nrf52)
 	@$(PYTHON) tools/patch_bootloader_manifest.py $@
 endif
 
-# Hex file with mbr (still no SD)
-$(BUILD)/$(OUT_NAME)_nosd.hex: $(BUILD)/$(OUT_NAME).hex
+# MBR + bootloader hex. The old `_nosd` name meant "no SoftDevice", but was
+# easily mistaken for "no SD card support"; `_mbr` names what is present.
+$(BUILD)/$(OUT_NAME)_mbr.hex: $(BUILD)/$(OUT_NAME).hex
 	@echo Create $(notdir $@)
 	@$(PYTHON) tools/hexmerge.py --overlap=replace -o $@ $< $(MBR_HEX)
 
-# Bootolader self-update uf2
-$(BUILD)/update-$(OUT_NAME)_nosd.uf2: $(BUILD)/$(OUT_NAME)_nosd.hex
+# Bootloader self-update UF2 containing the MBR + bootloader.
+$(BUILD)/update-$(OUT_NAME)_mbr.uf2: $(BUILD)/$(OUT_NAME)_mbr.hex
 	@echo Create $(notdir $@)
 	$(PYTHON) lib/uf2/utils/uf2conv.py -f $(UF2_FAMILY_ID_BOOTLOADER) -c -o $@ $^
 
@@ -547,8 +548,8 @@ $(BUILD)/$(MERGED_FILE).zip: $(BUILD)/$(OUT_NAME).hex
 $(BIN):
 	@$(MKDIR) "$@"
 
-copy-artifact: $(BUILD)/update-$(OUT_NAME)_nosd.uf2 $(BUILD)/$(MERGED_FILE).hex $(BUILD)/$(MERGED_FILE).zip | $(BIN)
-	@$(CP) $(BUILD)/update-$(OUT_NAME)_nosd.uf2 $(BIN)
+copy-artifact: $(BUILD)/update-$(OUT_NAME)_mbr.uf2 $(BUILD)/$(MERGED_FILE).hex $(BUILD)/$(MERGED_FILE).zip | $(BIN)
+	@$(CP) $(BUILD)/update-$(OUT_NAME)_mbr.uf2 $(BIN)
 	@$(CP) $(BUILD)/$(MERGED_FILE).hex $(BIN)
 	@$(CP) $(BUILD)/$(MERGED_FILE).zip $(BIN)
 
@@ -569,7 +570,7 @@ erase:
 	$(call FLASH_ERASE_CMD)
 
 # Flash the compiled
-flash: $(BUILD)/$(OUT_NAME)_nosd.hex
+flash: $(BUILD)/$(OUT_NAME)_mbr.hex
 	@echo Flashing: $(notdir $<)
 	$(call FLASH_CMD,$<)
 
@@ -586,7 +587,7 @@ flash-mbr:
 	$(call FLASH_NOUICR_CMD,$(MBR_HEX))
 
 # flash using uf2
-flash-uf2: $(BUILD)/update-$(OUT_NAME)_nosd.uf2
+flash-uf2: $(BUILD)/update-$(OUT_NAME)_mbr.uf2
 	@echo Flashing: $(notdir $<)
 	python lib/uf2/utils/uf2conv.py -f $(UF2_FAMILY_ID_BOOTLOADER) --deploy $<
 

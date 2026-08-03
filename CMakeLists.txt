@@ -88,6 +88,11 @@ add_executable(bootloader
   ${NRFX_DIR}/mdk/gcc_startup_${MCU_VARIANT}.S
   )
 
+if (MOTA_SD_CARD)
+  target_sources(bootloader PUBLIC src/ota_sd_spi.c)
+  target_compile_definitions(bootloader PUBLIC MOTA_SD_CARD=1)
+endif ()
+
 if (DUALBANK_FW)
   target_sources(bootloader PUBLIC
     ${SDK11_DIR}/libraries/bootloader_dfu/dfu_dual_bank.c

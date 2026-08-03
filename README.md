@@ -17,6 +17,9 @@
 - **Heltec MeshTower V2 support**
   Adds a dedicated headless target with the correct status LED, user button, and external-watchdog feed. Both the standard-power V2 and high-power V2H use this target.
 
+- **MeshTower V2 microSD self-updates**
+  The `heltec_mesh_tower_v2_sdcard` target reads a checksummed raw-sector handoff from the onboard microSD socket and applies either a full MeshCore `.mota` image or an in-place delta. The card holds the download, while application writes remain bounded below InternalFS at `0xED000`. Build it with `make BOARD=heltec_mesh_tower_v2_sdcard`; it must be paired with MeshCore's SD-card firmware target.
+
 - **Fail-closed bootloader UF2 updates**
   Bootloader self-update files now carry a board-bound manifest and a CRC32 over the complete bootloader region. The receiver verifies the UICR addresses, legacy VID/PID, unique DFU device identity, manifest, and CRC before asking the MBR to copy the image. This distinguishes boards such as the T096, T114, and MeshTower even though their factory bootloaders share a VID/PID. A bootloader containing this check intentionally rejects older self-update UF2 files that do not have the manifest; newly generated files remain installable by older bootloaders.
 
@@ -106,9 +109,11 @@ If there is another nRF52840-based board you would like to see supported please 
 **IMPORTANT:** If you are running a MeshCore companion firmware or Ripple firmware on your device **you will need to run an erase after flashing a new bootloader**. Use the MeshCore web flasher to do the erase, it will guide you to the correct erase firmware for your device. Other erase firmwares will not work, they will not erase the ExtraFS area.
 
 The recommended way to install the bootloader is using the UF2 file.  
-Download the UF2 file for your board (they can be found in the releases with filenames beginning with `update-`), enter UF2 mode (usually by double pressing the reset button within 0.5s) and copy the UF2 file across.
+Download the UF2 file for your board (they can be found in the releases with filenames beginning with `update-` and ending in `_mbr.uf2`), enter UF2 mode (usually by double pressing the reset button within 0.5s) and copy the UF2 file across. The `_mbr` artifact contains the MBR and bootloader; SD-card support is determined by the board target. Packages ending in `_s140_<version>.zip` additionally contain the SoftDevice.
 
 Current preview: [OTAFIX 2.4.1 Preview 5](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/0.9.2-OTAFIX2.4.1-preview.5)
+
+Preview 5 predates the naming correction, so its otherwise equivalent MBR + bootloader UF2 files use the legacy `_nosd` suffix. New builds use `_mbr` to avoid confusing "no SoftDevice" with "no SD-card support".
 
 - [Heltec T096 UF2](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/0.9.2-OTAFIX2.4.1-preview.5/update-heltec_t096_bootloader-0.9.2-OTAFIX2.4.1-preview.5_nosd.uf2)
 - [Heltec T114 UF2](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/0.9.2-OTAFIX2.4.1-preview.5/update-heltec_t114_bootloader-0.9.2-OTAFIX2.4.1-preview.5_nosd.uf2)

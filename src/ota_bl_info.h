@@ -30,7 +30,7 @@ typedef struct {
   uint8_t  magic[8];     // MOTA_BL_MAGIC*
   uint16_t apply_abi;    // max .mota format_ver this bootloader can apply
   uint16_t codec_mask;   // bit i set => can apply codec_id i (in-place delta = bit 2)
-  uint8_t  reserved[4];  // 0
+  uint8_t  storage_flags[4]; // byte 0 bit 0 => raw-SD handoff/apply; remaining bytes reserved
 } mota_bl_info_t;
 
 #endif // OTA_BL_INFO_H_

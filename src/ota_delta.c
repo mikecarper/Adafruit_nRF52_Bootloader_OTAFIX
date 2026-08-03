@@ -4,6 +4,10 @@
 #include "ota_delta.h"
 #include "ota_layout.h"
 #include "ota_bl_info.h"
+#if defined(MOTA_SD_CARD)
+#include "ota_sd_handoff.h"
+#include "ota_sd_spi.h"
+#endif
 #include "detools/detools.h"
 #include <string.h>
 #include <stdint.h>
@@ -14,8 +18,13 @@ __attribute__((used)) const mota_bl_info_t g_mota_bl_info = {
   { MOTA_BL_MAGIC0, MOTA_BL_MAGIC1, MOTA_BL_MAGIC2, MOTA_BL_MAGIC3,
     MOTA_BL_MAGIC4, MOTA_BL_MAGIC5, MOTA_BL_MAGIC6, MOTA_BL_MAGIC7 },
   MOTA_BL_APPLY_ABI,
-  (uint16_t)(1u << 2),                 // this bootloader applies in-place (codec_id 2) deltas
+#if defined(MOTA_SD_CARD)
+  (uint16_t)((1u << 0) | (1u << 2)),   // SD: full images and in-place deltas
+  { 1, 0, 0, 0 },                      // storage flag bit 0 = SD handoff
+#else
+  (uint16_t)(1u << 2),                 // internal flash: in-place deltas only
   { 0, 0, 0, 0 },
+#endif
 };
 
 // ---- `.mota` / EndF on-wire constants (mirror of src/helpers/ota/OtaFormat.h, C-friendly) ---------
@@ -27,8 +36,14 @@ static const uint8_t APRV[4]     = { 'A','P','R','V' };
 #define MOTA_MFL          197u   // fixed manifest-minus-leaves length (head 89 + base_hash 8 + signer 32 + sig 64 + approval 4)
 #define MFLAG_FULL        0x01u
 #define MFLAG_SIGNED      0x02u
+#define CODEC_FULL        0u
 #define CODEC_INPLACE     2u
 #define PAGE              MOTA_NRF52_FLASH_PAGE
+#if defined(MOTA_SD_CARD)
+  #define APP_LIMIT       MOTA_NRF52_APP_END
+#else
+  #define APP_LIMIT       MOTA_NRF52_FS_START
+#endif
 
 // ---- platform flash / settings / gpregret abstraction --------------------------------------------
 #ifdef OTA_DELTA_HOST_TEST
@@ -123,6 +138,24 @@ static uint32_t rd_u32(const uint8_t* p) {
   return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
+#if defined(MOTA_SD_CARD)
+static uint32_t g_sd_first_sector;
+static uint32_t g_sd_total_size;
+
+// In an SD build, patch/container offsets are relative to the first sector
+// named by the handoff. Internal-flash builds continue to use absolute flash
+// addresses, preserving the existing tested path.
+static int staged_read(uint32_t address_or_offset, void* dst, uint32_t len) {
+  if ((uint64_t)address_or_offset + len > g_sd_total_size) return 0;
+  return ota_sd_read_bytes(g_sd_first_sector, address_or_offset, dst, len) ? 1 : 0;
+}
+#else
+static int staged_read(uint32_t address_or_offset, void* dst, uint32_t len) {
+  fl_read(address_or_offset, dst, len);
+  return 1;
+}
+#endif
+
 // Tiny bounds-checked cursor so the manifest is parsed by reading each field by name in order, instead of
 // hand-computed offsets (mirrors MeshCore's OtaByteIO.h ByteReader). Any over-read flips ok=0.
 typedef struct { const uint8_t* p; uint32_t len, n; int ok; } br_t;
@@ -143,7 +176,7 @@ static void sha256_region(uint32_t addr, uint32_t len, uint8_t out[32]) {
 }
 
 // ---- coherent single-page write-back cache (in-place reads back shifted data it just wrote) -------
-static uint8_t  g_cache[PAGE];
+static uint8_t  g_cache[PAGE] __attribute__((aligned(4)));
 static uint32_t g_cache_page;                   // page-aligned addr; 0 == INVALID (no app page is at 0)
 static int      g_cache_dirty;
 
@@ -228,7 +261,7 @@ static int dt_pr(void* a, uint8_t* dst, size_t n) {
   if (n > UINT32_MAX || c->patch_pos > c->patch_len || (uint32_t)n > c->patch_len - c->patch_pos)
     return -DETOOLS_IO_FAILED;
   inherited_watchdog_feed();
-  fl_read(c->patch_addr + c->patch_pos, dst, (uint32_t)n);
+  if (!staged_read(c->patch_addr + c->patch_pos, dst, (uint32_t)n)) return -DETOOLS_IO_FAILED;
   c->patch_pos += (uint32_t)n; return DETOOLS_OK;
 }
 
@@ -237,12 +270,12 @@ static int dt_pr(void* a, uint8_t* dst, size_t n) {
 static int dt_header_u32(uint32_t addr, uint32_t len, uint32_t* pos, uint32_t* out) {
   uint8_t b;
   if (*pos >= len) return 0;
-  fl_read(addr + (*pos)++, &b, 1);
+  if (!staged_read(addr + (*pos)++, &b, 1)) return 0;
   uint32_t v = b & 0x3Fu;
   uint32_t shift = 6;
   while (b & 0x80u) {
     if (*pos >= len) return 0;
-    fl_read(addr + (*pos)++, &b, 1);
+    if (!staged_read(addr + (*pos)++, &b, 1)) return 0;
     uint32_t bits = b & 0x7Fu;
     if (shift >= 32 || bits > (UINT32_MAX >> shift)) return 0;
     v |= bits << shift;
@@ -262,7 +295,7 @@ static int dt_geometry_ok(const struct mota_min* m, uint32_t body_len, uint32_t 
   uint8_t fixed;
   uint32_t p = 1, memory, segment, shift, from, to;
   if (m->payload_size < 2) return 0;
-  fl_read(m->payload_addr, &fixed, 1);
+  if (!staged_read(m->payload_addr, &fixed, 1)) return 0;
   if (((fixed >> 4) & 0x07u) != 1u) return 0;      // detools PATCH_TYPE_IN_PLACE
   if (!dt_header_u32(m->payload_addr, m->payload_size, &p, &memory) ||
       !dt_header_u32(m->payload_addr, m->payload_size, &p, &segment) ||
@@ -276,14 +309,19 @@ static int dt_geometry_ok(const struct mota_min* m, uint32_t body_len, uint32_t 
 }
 static int parse_mota_at(uint32_t addr, struct mota_min* o) {
   uint8_t b[8 + MOTA_MFL];                          // MAGIC+total + the whole fixed manifest-minus-leaves
+#if defined(MOTA_SD_CARD)
+  if (addr > g_sd_total_size) return 0;
+  uint32_t avail = g_sd_total_size - addr;
+#else
   uint32_t avail = MOTA_NRF52_FS_START - addr;
+#endif
   uint32_t hdr = avail < sizeof(b) ? avail : sizeof(b);
   if (hdr < 8 + MOTA_MFL) return 0;                 // need the whole fixed manifest in `b` (trailer read separately)
-  fl_read(addr, b, hdr);
+  if (!staged_read(addr, b, hdr)) return 0;
   if (memcmp(b, MAGIC, 4) != 0) return 0;
   uint32_t total = rd_u32(b + 4);
   if (total < 8 + MOTA_MFL + 5 || total > avail) return 0;
-  uint8_t tr[5]; fl_read(addr + total - 5, tr, 5);
+  uint8_t tr[5]; if (!staged_read(addr + total - 5, tr, 5)) return 0;
   if (memcmp(tr, TRAILER, 5) != 0) return 0;
 
   // Fixed-layout manifest - every field at a constant offset; base_hash/signer/signature are always
@@ -334,6 +372,25 @@ static int parse_mota_at(uint32_t addr, struct mota_min* o) {
 // the current one is encountered first.)
 #define MOTA_MIN_LEN  (8 + MOTA_MFL + 5)
 static uint32_t scan_mota(struct mota_min* o) {
+#if defined(MOTA_SD_CARD)
+  uint8_t handoff[MOTA_SD_SECTOR_SIZE];
+  if (!ota_sd_init() || !ota_sd_read_sector(MOTA_SD_HANDOFF_SECTOR, handoff)) return 0;
+  if (memcmp(handoff, MOTA_SD_HANDOFF_MAGIC, 8) != 0 ||
+      mota_sd_handoff_rd32(handoff + 8) != MOTA_SD_HANDOFF_VERSION ||
+      mota_sd_handoff_crc32(handoff, 32) != mota_sd_handoff_rd32(handoff + 32)) return 0;
+  uint32_t first = mota_sd_handoff_rd32(handoff + 12);
+  uint32_t sectors = mota_sd_handoff_rd32(handoff + 16);
+  uint32_t total = mota_sd_handoff_rd32(handoff + 20);
+  uint32_t total_inv = mota_sd_handoff_rd32(handoff + 24);
+  uint32_t card_sectors = mota_sd_handoff_rd32(handoff + 28);
+  if (first <= MOTA_SD_HANDOFF_SECTOR || sectors == 0 || total < MOTA_MIN_LEN ||
+      total_inv != ~total || (uint64_t)sectors * MOTA_SD_SECTOR_SIZE < total ||
+      first >= card_sectors || sectors > card_sectors - first) return 0;
+  g_sd_first_sector = first;
+  g_sd_total_size = total;
+  if (!parse_mota_at(0, o) || o->total != total) return 0;
+  return 1;                                           // nonzero sentinel; container begins at file offset 0
+#else
   uint32_t top = (MOTA_NRF52_FS_START - MOTA_MIN_LEN) & ~(PAGE - 1);
   for (uint32_t a = top + PAGE; a > APP_BASE; ) {        // walk page boundaries high -> low
     a -= PAGE;
@@ -342,6 +399,7 @@ static uint32_t scan_mota(struct mota_min* o) {
     if (memcmp(m4, MAGIC, 4) == 0 && parse_mota_at(a, o)) return a;
   }
   return 0;
+#endif
 }
 
 // Locate the running image's EndF trailer (= body_len) by scanning bottom-up for the self-validating
@@ -354,7 +412,7 @@ static uint32_t scan_mota(struct mota_min* o) {
 // just fails that gate and the update is refused - never misapplied. Byte-by-byte (like the app) so no
 // body_len alignment is assumed; the scan stops at the first match (the current image's trailer).
 static int find_body_len(uint32_t* body_len_out) {
-  for (uint32_t off = 0; off + ENDF_LEN <= MOTA_NRF52_FS_START - APP_BASE; off++) {
+  for (uint32_t off = 0; off + ENDF_LEN <= APP_LIMIT - APP_BASE; off++) {
     if ((off & (PAGE - 1u)) == 0) inherited_watchdog_feed();
     uint8_t e[8];
     fl_read(APP_BASE + off, e, 8);                  // marker(4) + body_len(4)
@@ -364,9 +422,91 @@ static int find_body_len(uint32_t* body_len_out) {
 }
 
 static void clear_approval(const struct mota_min* o) {
+#if defined(MOTA_SD_CARD)
+  // The trigger was already consumed from GPREGRET. The app invalidates sector
+  // 1 before staging another update, so the SD file cannot be retried by a
+  // normal reset and no raw-sector write implementation is needed here.
+  (void)o;
+#else
   uint8_t z[4] = { 0, 0, 0, 0 };
   cwrite(o->approval_addr, z, 4);
   cache_flush();
+#endif
+}
+
+#if defined(MOTA_SD_CARD)
+static int sha256_staged_region(uint32_t offset, uint32_t len, uint8_t out[32]) {
+  sha256_ctx_t c; sha256_init(&c);
+  uint8_t buf[256];
+  while (len) {
+    inherited_watchdog_feed();
+    uint32_t n = len < sizeof(buf) ? len : sizeof(buf);
+    if (!staged_read(offset, buf, n)) return 0;
+    sha256_update(&c, buf, n);
+    offset += n;
+    len -= n;
+  }
+  sha256_final(&c, out);
+  return 1;
+}
+
+static bool apply_full_sd(const struct mota_min* m) {
+  if (!m->is_full || m->codec_id != CODEC_FULL ||
+      m->image_size == 0 || m->payload_size != m->image_size ||
+      m->image_size > APP_LIMIT - APP_BASE) {
+    gpregret2_set(0xB3);
+    return false;
+  }
+
+  // Verify the complete SD payload before the first destructive flash write.
+  uint8_t h[32];
+  if (!sha256_staged_region(m->payload_addr, m->payload_size, h) ||
+      memcmp(h, m->image_hash, sizeof(h)) != 0) {
+    gpregret2_set(0xBA);
+    return false;
+  }
+
+  inherited_watchdog_feed();
+  otah_settings_commit(BANK_INVALID_APP_V, 0, 0);
+  clear_approval(m);
+  g_cache_page = 0;
+  g_cache_dirty = 0;
+
+  for (uint32_t off = 0; off < m->image_size; off += PAGE) {
+    inherited_watchdog_feed();
+    uint32_t n = m->image_size - off;
+    if (n > PAGE) n = PAGE;
+    memset(g_cache, 0xFF, PAGE);
+    if (!staged_read(m->payload_addr + off, g_cache, n)) {
+      gpregret2_set(0xBB);
+      return false;
+    }
+    fl_erase(APP_BASE + off);
+    inherited_watchdog_feed();
+    fl_write_words(APP_BASE + off, (const uint32_t*)g_cache, PAGE / 4);
+  }
+
+  sha256_region(APP_BASE, m->image_size, h);
+  if (memcmp(h, m->image_hash, sizeof(h)) != 0) {
+    gpregret2_set(0xB7);
+    return false;
+  }
+  inherited_watchdog_feed();
+  uint16_t image_crc = crc16_region(APP_BASE, m->image_size);
+  inherited_watchdog_feed();
+  otah_settings_commit(BANK_VALID_APP_V, image_crc, m->image_size);
+  gpregret2_set(0xB8);
+  return true;
+}
+#endif
+
+static bool finish_apply(bool result) {
+#if defined(MOTA_SD_CARD)
+  // A rejected handoff falls through to the application without a hardware
+  // reset, so do not leave SPIM2 or the SD pins owned by the bootloader.
+  ota_sd_deinit();
+#endif
+  return result;
 }
 
 bool ota_delta_check_and_apply(void) {
@@ -374,30 +514,43 @@ bool ota_delta_check_and_apply(void) {
   // Force a volatile read of the capability marker so -flto / --gc-sections cannot fold the reference away
   // and drop it - the running app scans the bootloader flash for it (ota_bl_info.h / OtaBlInfo.h).
   volatile uint8_t keep = *(const volatile uint8_t*)&g_mota_bl_info.magic[0];
-  if (keep == 0) return false;                      // 'M' (0x4D) != 0, so never taken; keeps the marker live
+  if (keep == 0) return finish_apply(false);        // 'M' (0x4D) != 0, so never taken; keeps the marker live
   // ---- DIAGNOSTIC: stash a bail/progress code in GPREGRET2; the app reads it back into `ota status`.
   // 0xB0 entered (pre-gate) | 0xB1 gate passed (GPREGRET was 0x6A) | 0xB2 no/unapproved mota |
-  // 0xB3 full/bad-codec | 0xB4 no body_len | 0xB5 base mismatch | 0xB9 bad detools geometry |
+  // 0xB3 bad full/codec | 0xB4 no body_len | 0xB5 base mismatch | 0xB9 bad detools geometry |
+  // 0xBA SD full pre-hash mismatch | 0xBB SD read failure |
   // 0x9N detools err N | 0xB6 wrong size | 0xB7 result-hash mismatch | 0xB8 SUCCESS.
   // If status shows 0xB0 -> GPREGRET wasn't 0x6A at the bootloader.
   gpregret2_set(0xB0);
-  if (gpregret_get() != GPREGRET_OTA_APPLY) return false;
+  if (gpregret_get() != GPREGRET_OTA_APPLY) return finish_apply(false);
   gpregret_set(0);                                  // consume the trigger so we never loop
   gpregret2_set(0xB1);
 
   struct mota_min m;
   uint32_t mota_addr = scan_mota(&m);
-  if (!mota_addr || !m.approved) { gpregret2_set(0xB2); return false; }   // nothing staged / not approved
+  if (!mota_addr || !m.approved) { gpregret2_set(0xB2); return finish_apply(false); } // nothing staged / unapproved
+
+#if defined(MOTA_SD_CARD)
+  if (m.is_full) return finish_apply(apply_full_sd(&m));
+#endif
 
   // base check (non-destructive): the running image's body must hash to the delta's base_hash.
   // Any pre-apply rejection clears the approval (this `.mota` is not applicable) and boots normally.
   uint32_t body_len;
   uint8_t base32[32];
-  if (m.is_full || m.codec_id != CODEC_INPLACE) { gpregret2_set(0xB3); goto reject; }
+  if (m.is_full || m.codec_id != CODEC_INPLACE ||
+      m.image_size == 0 || m.image_size > APP_LIMIT - APP_BASE) {
+    gpregret2_set(0xB3); goto reject;
+  }
   if (!find_body_len(&body_len))                { gpregret2_set(0xB4); goto reject; }
   sha256_region(APP_BASE, body_len, base32);
   if (memcmp(base32, m.base_hash, 8) != 0)      { gpregret2_set(0xB5); goto reject; }   // wrong base
-  if (!dt_geometry_ok(&m, body_len, mota_addr - APP_BASE)) {
+#if defined(MOTA_SD_CARD)
+  const uint32_t workspace_span = APP_LIMIT - APP_BASE;
+#else
+  const uint32_t workspace_span = mota_addr - APP_BASE;
+#endif
+  if (!dt_geometry_ok(&m, body_len, workspace_span)) {
     gpregret2_set(0xB9); goto reject;
   }
 
@@ -411,25 +564,31 @@ bool ota_delta_check_and_apply(void) {
 
   struct apply_ctx c;
   c.patch_addr = m.payload_addr; c.patch_len = m.payload_size; c.patch_pos = 0;
-  c.ws_lo = APP_BASE; c.ws_hi = mota_addr; c.step = 0;          // workspace stays strictly below the mota
+  c.ws_lo = APP_BASE;
+#if defined(MOTA_SD_CARD)
+  c.ws_hi = APP_LIMIT;                                  // patch is off-chip; whole app region is workspace
+#else
+  c.ws_hi = mota_addr;                                  // workspace stays strictly below internal mota
+#endif
+  c.step = 0;
   int r = detools_apply_patch_in_place_callbacks(dt_mr, dt_mw, dt_me, dt_ss, dt_sg, dt_pr,
                                                  (size_t)m.payload_size, &c);
   cache_flush();
-  if (r < 0) { gpregret2_set(0x90 | ((uint32_t)(-r) & 0x0F)); return false; }   // detools error code in low nibble
-  if ((uint32_t)r != m.image_size) { gpregret2_set(0xB6); return false; }       // wrong reconstructed size
+  if (r < 0) { gpregret2_set(0x90 | ((uint32_t)(-r) & 0x0F)); return finish_apply(false); }
+  if ((uint32_t)r != m.image_size) { gpregret2_set(0xB6); return finish_apply(false); }
 
   uint8_t h[32];
   sha256_region(APP_BASE, m.image_size, h);
-  if (memcmp(h, m.image_hash, 32) != 0) { gpregret2_set(0xB7); return false; }   // result mismatch -> DFU
+  if (memcmp(h, m.image_hash, 32) != 0) { gpregret2_set(0xB7); return finish_apply(false); }
 
   inherited_watchdog_feed();
   uint16_t image_crc = crc16_region(APP_BASE, m.image_size);
   inherited_watchdog_feed();
   otah_settings_commit(BANK_VALID_APP_V, image_crc, m.image_size);
   gpregret2_set(0xB8);
-  return true;
+  return finish_apply(true);
 
 reject:
   clear_approval(&m);
-  return false;
+  return finish_apply(false);
 }

@@ -14,6 +14,7 @@
 // Scan/workspace ceiling: below the lowest FS region. Companion builds put ExtraFS at 0xD4000; the
 // repeater leaves 0xD4000..0xED000 free. 0xD4000 is the safe universal ceiling for all RAK4631 roles.
 #define MOTA_NRF52_FS_START    0x000D4000u
+#define MOTA_NRF52_APP_END     0x000ED000u   // InternalFS begins here
 #define MOTA_NRF52_FLASH_PAGE  4096u
 
 // GPREGRET value MeshCore writes (then resets) to ask the bootloader to apply a staged `.mota`.
