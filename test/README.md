@@ -18,6 +18,10 @@ Debug an arbitrary scenario (e.g. the real firmware that misbehaved on a device)
 ```bash
 make apply_sim
 ./apply_sim <base.img> <delta.mota> <expected_new.img>
+
+# Exercise the SD-backed bootloader path with a real full or delta package.
+make sd_apply_test
+./sd_apply_test <base.img> <full-or-delta.mota> <expected_new.img>
 ```
 
 `base.img` / `expected_new.img` are flat app images (`BODY||EndF`, what lives at `APP_BASE`); for an nRF52

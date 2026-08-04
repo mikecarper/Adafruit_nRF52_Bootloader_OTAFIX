@@ -263,7 +263,60 @@ static int result_ok(bool applied, const uint8_t* expected, uint32_t expected_le
          memcmp(FLASH + MOTA_NRF52_APP_BASE, expected, expected_len) == 0;
 }
 
-int main(void) {
+static int run_external(const char* base_path, const char* mota_path,
+                        const char* expected_path) {
+  uint8_t* base;
+  uint8_t* mota;
+  uint8_t* expected;
+  long base_len = load(base_path, &base);
+  long mota_len = load(mota_path, &mota);
+  long expected_len = load(expected_path, &expected);
+
+  if (base_len <= 0 || mota_len <= 0 || expected_len <= 0 ||
+      (uint64_t)base_len > MOTA_NRF52_APP_END - MOTA_NRF52_APP_BASE ||
+      (uint64_t)expected_len > MOTA_NRF52_APP_END - MOTA_NRF52_APP_BASE ||
+      (uint64_t)mota_len > sizeof(SD_CARD)) {
+    fprintf(stderr, "input exceeds simulated flash or SD region\n");
+    free(base);
+    free(mota);
+    free(expected);
+    return 2;
+  }
+
+  reset_device(base, (uint32_t)base_len);
+  if (!stage_sd_mota(mota, (uint32_t)mota_len)) {
+    fprintf(stderr, "mota does not fit simulated SD card\n");
+    free(base);
+    free(mota);
+    free(expected);
+    return 2;
+  }
+
+  bool applied = ota_delta_check_and_apply();
+  int ok = result_ok(applied, expected, (uint32_t)expected_len);
+  printf("SD EXTERNAL RESULT: %s", ok ? "APPLY OK" : "APPLY FAILED");
+  printf(" - app region %s expected image\n", ok ? "matches" : "does not match");
+  if (!ok) {
+    printf("  applied=%d bank=0x%X size=%u settings=%d unsafe=%d\n",
+           applied, g_bank0, g_size, g_settings_writes,
+           g_app_write_while_valid);
+  }
+
+  free(base);
+  free(mota);
+  free(expected);
+  return ok ? 0 : 1;
+}
+
+int main(int argc, char** argv) {
+  if (argc == 4) return run_external(argv[1], argv[2], argv[3]);
+  if (argc != 1) {
+    fprintf(stderr,
+            "usage: %s [<base.img> <full-or-delta.mota> <expected-new.img>]\n",
+            argv[0]);
+    return 2;
+  }
+
   uint8_t* base;
   uint8_t* delta;
   uint8_t* expected;
