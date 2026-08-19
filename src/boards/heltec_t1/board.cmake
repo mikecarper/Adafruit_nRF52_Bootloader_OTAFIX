@@ -1,0 +1,2 @@
+set(MCU_VARIANT nrf52840)
+set(DEVICE_NAME T1_DFU)

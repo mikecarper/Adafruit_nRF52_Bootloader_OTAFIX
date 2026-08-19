@@ -11,6 +11,7 @@
 | --- | --- | --- | --- |
 | heltec_mesh_tower_v2 | Heltec MeshTower V2 | 0x239A:0x0071 | https://heltec.org/project/meshtower/ |
 | heltec_t096 | HT-n5262G | 0x239A:0x0071 | https://heltec.org/project/t096/ |
+| heltec_t1 | Heltec Mesh Node T1 | 0x239A:0x0071 | https://heltec.org/project/mesh-node-t1/ |
 | heltec_t114 | HT-n5262 | 0x239A:0x0071 | https://heltec.org/project/mesh-node-t114/ |
 | lilygo_techo | LilyGo T-Echo | 0x239A:0x0029 | https://lilygo.cc/products/t-echo-lilygo |
 | minewsemi_mx25le01 | MinewSemi MX25LE01 | 0x239A:0x0029 | https://www.minewsemi.com |
@@ -21,6 +22,7 @@
 | thinknode_m3 | ELECROW ThinkNode-M3 | 0x239A:0x00DA | https://www.elecrow.com |
 | thinknode_m6 | ELECROW ThinkNodeM6 | 0x239A:0x00DA | https://www.elecrow.com |
 | wio_tracker_l1 | Seeed TRACKER L1 | 0x2886:0x1667 | https://www.seeedstudio.com/ |
+| wiscore_rak3401 | WisBlock RAK3401 | 0x239A:0x0029 | https://docs.rakwireless.com/product-categories/wisblock/rak3401/overview/ |
 | wiscore_rak4631_board | WisBlock RAK4631 Board | 0x239A:0x0029 | https://store.rakwireless.com/collections/wisblock-core |
 | wismesh_tag | WisMesh Tag | 0x239A:0x0029 | https://store.rakwireless.com/products/wismesh-tag-meshtastic-gps-lora-tracker-ip66 |
 | xiao_nrf52840_ble | Seeed XIAO nRF52840 | 0x2886:0x0044 | https://www.seeedstudio.com/ |

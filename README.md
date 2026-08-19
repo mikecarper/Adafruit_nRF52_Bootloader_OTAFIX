@@ -14,6 +14,15 @@
 - **Reliable BLE OTA connection settings**
   Uses a 15-30 ms preferred connection interval with zero slave latency and lets the phone control connection updates, avoiding both the earlier throughput regression and connection-update races.
 
+- **Board-configurable bootloader display layouts**
+  The status-screen renderer now supports arbitrary integer font scaling and board-level coordinates. This keeps the 240x135 ST7789 layout while fitting the complete UF2 and BLE status screens on 160x80 ST7735 panels.
+
+- **WisBlock RAK3401 support**
+  Adds a current CMake/Make target with the correct nRF52840 rail voltage, base-board LEDs, and BLE identity. It retains the factory RAK4631 bootloader's legacy `0x239A:0x0029` UF2 identity for immediate device compatibility while using the board-specific `3401_DFU` manifest identity for safe self-updates.
+
+- **Heltec Mesh Node T1 support**
+  Adds both build systems, the two bootloader buttons, and the complete 160x80 display layout. For immediate factory-device compatibility, this target explicitly retains Heltec's legacy `0x239A:0x0071` UF2 identity while using the board-specific `T1_DFU` manifest identity for safe self-updates.
+
 - **Heltec MeshTower V2 support**
   Adds a dedicated headless target with the correct status LED, user button, and external-watchdog feed. Both the standard-power V2 and high-power V2H use this target.
 
@@ -21,7 +30,7 @@
   The `heltec_mesh_tower_v2_sdcard` target reads a checksummed raw-sector handoff from the onboard microSD socket and applies either a full MeshCore `.mota` image or an in-place delta. The card holds the download, while application writes remain bounded below InternalFS at `0xED000`. Build it with `make BOARD=heltec_mesh_tower_v2_sdcard`; it must be paired with MeshCore's SD-card firmware target.
 
 - **Fail-closed bootloader UF2 updates**
-  Bootloader self-update files now carry a board-bound manifest and a CRC32 over the complete bootloader region. The receiver verifies the UICR addresses, legacy VID/PID, unique DFU device identity, manifest, and CRC before asking the MBR to copy the image. This distinguishes boards such as the T096, T114, and MeshTower even though their factory bootloaders share a VID/PID. A bootloader containing this check intentionally rejects older self-update UF2 files that do not have the manifest; newly generated files remain installable by older bootloaders.
+  Bootloader self-update files now carry a board-bound manifest and a CRC32 over the complete bootloader region. The receiver verifies the UICR addresses, legacy VID/PID, unique DFU device identity, manifest, and CRC before asking the MBR to copy the image. This distinguishes boards such as the T1, T096, T114, and MeshTower even though their factory bootloaders share a VID/PID. A bootloader containing this check intentionally rejects older self-update UF2 files that do not have the manifest; newly generated files remain installable by older bootloaders.
 
 ## Changes in OTAFIX 2.4
 
@@ -69,10 +78,12 @@
   - **Elecrow ThinkNode M6** -> `TNM6_DFU`
   - **Heltec T114** -> `T114_DFU`
   - **Heltec T096** -> `T096_DFU`
+  - **Heltec T1** -> `T1_DFU`
   - **Heltec MeshTower V2 / V2H** -> `TOWER_V2_OTA`
   - **LILYGO T-Echo** -> `LGTE_DFU`
   - **Minewsemi MX25LE01** -> `MX25_DFU`
   - **ProMicro NRF52840** -> `PROM_DFU`
+  - **RAK 3401** -> `3401_DFU`
   - **RAK 4631** -> `4631_DFU`
   - **RAK WisMesh Tag** -> `RTAG_DFU`
   - **Seeed SenseCAP Solar Node P1** -> `SCAP_DFU`
@@ -88,10 +99,12 @@
 - Elecrow ThinkNode M6
 - Heltec Automation Mesh Node T114 / HT-nRF5262
 - Heltec Automation Mesh Node T096 / HT-n5262G
+- Heltec Automation Mesh Node T1
 - Heltec Automation MeshTower V2 / V2H
 - LilyGO T-Echo
 - Minewsemi MX25LE01
 - Nologo ProMicro NRF52840 (aka SuperMini NRF52840)
+- RAK 3401
 - RAK 4631 ([See note](#notes-on-RAK4631-bootloader))
 - RAK WisMesh Tag
 - Seeed Studio SenseCAP Card Tracker T1000-E
@@ -111,13 +124,13 @@ If there is another nRF52840-based board you would like to see supported please 
 The recommended way to install the bootloader is using the UF2 file.  
 Download the UF2 file for your board (they can be found in the releases with filenames beginning with `update-` and ending in `_mbr.uf2`), enter UF2 mode (usually by double pressing the reset button within 0.5s) and copy the UF2 file across. The `_mbr` artifact contains the MBR and bootloader; SD-card support is determined by the board target. Packages ending in `_s140_<version>.zip` additionally contain the SoftDevice.
 
-Current preview: [OTAFIX 2.4.1 Preview 5](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/0.9.2-OTAFIX2.4.1-preview.5)
+Current preview: [OTAFIX 2.4.1 Preview 7](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/0.9.2-OTAFIX2.4.1-preview.7)
 
-Preview 5 predates the naming correction, so its otherwise equivalent MBR + bootloader UF2 files use the legacy `_nosd` suffix. New builds use `_mbr` to avoid confusing "no SoftDevice" with "no SD-card support".
-
-- [Heltec T096 UF2](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/0.9.2-OTAFIX2.4.1-preview.5/update-heltec_t096_bootloader-0.9.2-OTAFIX2.4.1-preview.5_nosd.uf2)
-- [Heltec T114 UF2](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/0.9.2-OTAFIX2.4.1-preview.5/update-heltec_t114_bootloader-0.9.2-OTAFIX2.4.1-preview.5_nosd.uf2)
-- [Heltec MeshTower V2 UF2](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/0.9.2-OTAFIX2.4.1-preview.5/update-heltec_mesh_tower_v2_bootloader-0.9.2-OTAFIX2.4.1-preview.5_nosd.uf2)
+- [Heltec T1 UF2](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/0.9.2-OTAFIX2.4.1-preview.7/update-heltec_t1_bootloader-0.9.2-OTAFIX2.4.1-preview.7_mbr.uf2)
+- [Heltec T096 UF2](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/0.9.2-OTAFIX2.4.1-preview.7/update-heltec_t096_bootloader-0.9.2-OTAFIX2.4.1-preview.7_mbr.uf2)
+- [Heltec T114 UF2](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/0.9.2-OTAFIX2.4.1-preview.7/update-heltec_t114_bootloader-0.9.2-OTAFIX2.4.1-preview.7_mbr.uf2)
+- [Heltec MeshTower V2 UF2](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/0.9.2-OTAFIX2.4.1-preview.7/update-heltec_mesh_tower_v2_bootloader-0.9.2-OTAFIX2.4.1-preview.7_mbr.uf2)
+- [WisBlock RAK3401 UF2](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/0.9.2-OTAFIX2.4.1-preview.7/update-wiscore_rak3401_bootloader-0.9.2-OTAFIX2.4.1-preview.7_mbr.uf2)
 
 If you have somehow managed to accidentally flash an incorrect bootloader to your device you will likely require flashing a full bootloader and SoftDevice zip package using ``adafruit-nrfutil``
 

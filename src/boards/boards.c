@@ -800,7 +800,7 @@ void neopixel_write (uint8_t *pixels) {
 
 static void tft_controller_init(void) {
 #ifdef DISPLAY_CONTROLLER_ST7735
-  // Initialization sequence for the T096's 160x80 ST7735S display.
+  // Initialization sequence for the supported 160x80 ST7735S displays.
   uint8_t cmdinit_st7735[] = {
     #if !defined(DISPLAY_PIN_RST) || (DISPLAY_PIN_RST < 0)
     ST77XX_SWRESET, ST_CMD_DELAY, 150,
