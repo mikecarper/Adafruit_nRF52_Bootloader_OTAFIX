@@ -17,9 +17,9 @@
 #include <string.h>
 #include "ota_layout.h"
 
-#define FLASH_LEN  MOTA_NRF52_FS_START          // [0, FS_START) is enough (settings/MBR are stubbed)
+#define FLASH_LEN  MOTA_NRF52_APP_END            // covers both internal-flash staging ceilings
 static uint8_t  FLASH[FLASH_LEN];
-static uint32_t g_gpregret;
+static uint32_t g_gpregret, g_gpregret2;
 static uint16_t g_bank0, g_crc; static uint32_t g_size; static int g_committed;
 
 void     otah_read(uint32_t a, void* d, uint32_t n)        { memcpy(d, FLASH + a, n); }
@@ -30,6 +30,7 @@ void     otah_write_words(uint32_t a, const uint32_t* s, uint32_t nw) {
 }
 uint32_t otah_gpregret_get(void)                           { return g_gpregret; }
 void     otah_gpregret_set(uint32_t v)                     { g_gpregret = v; }
+uint32_t otah_gpregret2_get(void)                          { return g_gpregret2; }
 uint16_t otah_crc16(uint32_t a, uint32_t len)              { (void)a; (void)len; return 0x1234; }
 void otah_settings_commit(uint16_t b, uint16_t c, uint32_t s) { g_bank0 = b; g_crc = c; g_size = s; g_committed = 1; }
 
@@ -60,19 +61,20 @@ int main(int argc, char** argv) {
     static const uint8_t APRV4[4] = {'A','P','R','V'};
     memcpy(FLASH + write_start + 8 + 193, APRV4, 4);   // approval @ manifest offset 193 (fixed layout)
     g_gpregret = GPREGRET_OTA_APPLY;
+    g_gpregret2 = GPREGRET2_OTA_STAGE_LEGACY;
 
     printf("== layout ==\n  APP_BASE=0x%X base=%ld bytes (ends 0x%lX)\n  FS_START=0x%X  mota=%ld bytes @0x%X\n",
            MOTA_NRF52_APP_BASE, base_n, MOTA_NRF52_APP_BASE + base_n, MOTA_NRF52_FS_START, mota_n, write_start);
 
     // ---- step-by-step diagnostics (the static internals) ----
     uint32_t body_len = 0;
-    int fb = find_body_len(&body_len);
+    int fb = find_body_len(MOTA_NRF52_STAGE_CEILING_LEGACY, &body_len);
     printf("== find_body_len ==\n  ok=%d body_len=%u\n", fb, body_len);
     if (fb) { uint8_t h[32]; sha256_region(MOTA_NRF52_APP_BASE, body_len, h);
               printf("  sha256:8(running body)= "); hex8(h); printf("\n"); }
 
     struct mota_min m; memset(&m, 0, sizeof m);
-    uint32_t found = scan_mota(&m);
+    uint32_t found = scan_mota(&m, MOTA_NRF52_STAGE_CEILING_LEGACY);
     printf("== scan_mota ==\n  found=0x%X (expected 0x%X)\n", found, write_start);
     if (found) {
         printf("  total=%u image_size=%u payload_size@addr=0x%X approval=0x%X approved=%d\n",

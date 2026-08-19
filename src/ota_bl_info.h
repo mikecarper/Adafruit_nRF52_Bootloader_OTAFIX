@@ -26,11 +26,15 @@
 // bootloader parses changes (e.g. the fixed-layout manifest). The app requires bl.apply_abi >= mota.format_ver.
 #define MOTA_BL_APPLY_ABI  2u
 
+// storage_flags[0]
+#define MOTA_BL_STORAGE_SD             0x01u
+#define MOTA_BL_STORAGE_STAGE_CEILING  0x02u // understands the GPREGRET2 staging-ceiling handoff
+
 typedef struct {
   uint8_t  magic[8];     // MOTA_BL_MAGIC*
   uint16_t apply_abi;    // max .mota format_ver this bootloader can apply
   uint16_t codec_mask;   // bit i set => can apply codec_id i (in-place delta = bit 2)
-  uint8_t  storage_flags[4]; // byte 0 bit 0 => raw-SD handoff/apply; remaining bytes reserved
+  uint8_t  storage_flags[4]; // byte 0 MOTA_BL_STORAGE_*; remaining bytes reserved
 } mota_bl_info_t;
 
 #endif // OTA_BL_INFO_H_

@@ -20,10 +20,10 @@ __attribute__((used)) const mota_bl_info_t g_mota_bl_info = {
   MOTA_BL_APPLY_ABI,
 #if defined(MOTA_SD_CARD)
   (uint16_t)((1u << 0) | (1u << 2)),   // SD: full images and in-place deltas
-  { 1, 0, 0, 0 },                      // storage flag bit 0 = SD handoff
+  { MOTA_BL_STORAGE_SD, 0, 0, 0 },     // raw-SD handoff
 #else
   (uint16_t)(1u << 2),                 // internal flash: in-place deltas only
-  { 0, 0, 0, 0 },
+  { MOTA_BL_STORAGE_STAGE_CEILING, 0, 0, 0 }, // GPREGRET2 selects the safe staging ceiling
 #endif
 };
 
@@ -39,11 +39,6 @@ static const uint8_t APRV[4]     = { 'A','P','R','V' };
 #define CODEC_FULL        0u
 #define CODEC_INPLACE     2u
 #define PAGE              MOTA_NRF52_FLASH_PAGE
-#if defined(MOTA_SD_CARD)
-  #define APP_LIMIT       MOTA_NRF52_APP_END
-#else
-  #define APP_LIMIT       MOTA_NRF52_FS_START
-#endif
 
 // ---- platform flash / settings / gpregret abstraction --------------------------------------------
 #ifdef OTA_DELTA_HOST_TEST
@@ -52,6 +47,7 @@ static const uint8_t APRV[4]     = { 'A','P','R','V' };
   extern void     otah_write_words(uint32_t addr, const uint32_t* src, uint32_t nwords);
   extern uint32_t otah_gpregret_get(void);
   extern void     otah_gpregret_set(uint32_t v);
+  extern uint32_t otah_gpregret2_get(void);
   extern uint16_t otah_crc16(uint32_t addr, uint32_t len);
   extern void     otah_settings_commit(uint16_t bank0, uint16_t crc, uint32_t size);
   #define APP_BASE        MOTA_NRF52_APP_BASE
@@ -60,6 +56,7 @@ static const uint8_t APRV[4]     = { 'A','P','R','V' };
   static void     fl_write_words(uint32_t a, const uint32_t* s, uint32_t nw) { otah_write_words(a, s, nw); }
   static uint32_t gpregret_get(void)                                 { return otah_gpregret_get(); }
   static void     gpregret_set(uint32_t v)                           { otah_gpregret_set(v); }
+  static uint32_t gpregret2_get(void)                                { return otah_gpregret2_get(); }
   static void     gpregret2_set(uint32_t v)                          { (void)v; }   // diag no-op on host
   static uint16_t crc16_region(uint32_t a, uint32_t len)             { return otah_crc16(a, len); }
 #else
@@ -88,6 +85,7 @@ static const uint8_t APRV[4]     = { 'A','P','R','V' };
   static void     gpregret_set(uint32_t v)                           { NRF_POWER->GPREGRET = v; }
   // Diagnostic: stash an apply bail/progress code in GPREGRET2 (retained across the boot to the app, which
   // reads it back). SD is off in the bootloader, so a direct write is fine.
+  static uint32_t gpregret2_get(void)                                { return NRF_POWER->GPREGRET2; }
   static void     gpregret2_set(uint32_t v)                          { NRF_POWER->GPREGRET2 = v; }
   static uint16_t crc16_region(uint32_t a, uint32_t len)             { return crc16_compute((const uint8_t*)(uintptr_t)a, len, NULL); }
   static void otah_settings_commit(uint16_t bank0, uint16_t crc, uint32_t size) {
@@ -307,14 +305,10 @@ static int dt_geometry_ok(const struct mota_min* m, uint32_t body_len, uint32_t 
   if (body_len > UINT32_MAX - ENDF_LEN || from != body_len + ENDF_LEN) return 0;
   return to == m->image_size && to <= ws_span;
 }
-static int parse_mota_at(uint32_t addr, struct mota_min* o) {
+static int parse_mota_at(uint32_t addr, uint32_t limit, struct mota_min* o) {
   uint8_t b[8 + MOTA_MFL];                          // MAGIC+total + the whole fixed manifest-minus-leaves
-#if defined(MOTA_SD_CARD)
-  if (addr > g_sd_total_size) return 0;
-  uint32_t avail = g_sd_total_size - addr;
-#else
-  uint32_t avail = MOTA_NRF52_FS_START - addr;
-#endif
+  if (addr > limit) return 0;
+  uint32_t avail = limit - addr;
   uint32_t hdr = avail < sizeof(b) ? avail : sizeof(b);
   if (hdr < 8 + MOTA_MFL) return 0;                 // need the whole fixed manifest in `b` (trailer read separately)
   if (!staged_read(addr, b, hdr)) return 0;
@@ -359,20 +353,22 @@ static int parse_mota_at(uint32_t addr, struct mota_min* o) {
   return 1;
 }
 
-// Scan page boundaries for a valid `.mota`, returning the HIGHEST one (closest to FS_START).
+// Scan page boundaries for a valid `.mota`, returning the HIGHEST one below the selected ceiling.
 //
 // Direction matters for safety. The app stages the container bottom-aligned and writes [write_start,
-// FS_START) contiguously (0xFF-padding the tail up to FS_START), so the *current* `.mota` is always the
+// stage_ceiling) contiguously (0xFF-padding the tail), so the *current* `.mota` is always the
 // highest in flash; a leftover from a prior, differently-sized fetch sits strictly BELOW it (a larger
-// new fetch overwrites everything from its lower start up to FS_START). Scanning top-down therefore
+// new fetch overwrites everything from its lower start up to the ceiling). Scanning top-down therefore
 // returns the current container and never stops on a stale one - and the caller's APRV check is applied
 // to THAT (highest) container only, so a stale lower `.mota` is never applied even if it is still
-// approved. (EndF is the mirror image: the app image grows up from APP_BASE, so the current trailer is
+// approved. Exact bottom-alignment also prevents a mismatched ceiling hint from selecting a package.
+// (EndF is the mirror image: the app image grows up from APP_BASE, so the current trailer is
 // the LOWEST valid marker and find_body_len scans bottom-up. Each marker is scanned from the end where
 // the current one is encountered first.)
 #define MOTA_MIN_LEN  (8 + MOTA_MFL + 5)
-static uint32_t scan_mota(struct mota_min* o) {
+static uint32_t scan_mota(struct mota_min* o, uint32_t stage_ceiling) {
 #if defined(MOTA_SD_CARD)
+  (void)stage_ceiling;
   uint8_t handoff[MOTA_SD_SECTOR_SIZE];
   if (!ota_sd_init() || !ota_sd_read_sector(MOTA_SD_HANDOFF_SECTOR, handoff)) return 0;
   if (memcmp(handoff, MOTA_SD_HANDOFF_MAGIC, 8) != 0 ||
@@ -388,15 +384,18 @@ static uint32_t scan_mota(struct mota_min* o) {
       first >= card_sectors || sectors > card_sectors - first) return 0;
   g_sd_first_sector = first;
   g_sd_total_size = total;
-  if (!parse_mota_at(0, o) || o->total != total) return 0;
+  if (!parse_mota_at(0, g_sd_total_size, o) || o->total != total) return 0;
   return 1;                                           // nonzero sentinel; container begins at file offset 0
 #else
-  uint32_t top = (MOTA_NRF52_FS_START - MOTA_MIN_LEN) & ~(PAGE - 1);
+  if (stage_ceiling != MOTA_NRF52_STAGE_CEILING_LEGACY &&
+      stage_ceiling != MOTA_NRF52_STAGE_CEILING_EXPANDED) return 0;
+  uint32_t top = (stage_ceiling - MOTA_MIN_LEN) & ~(PAGE - 1);
   for (uint32_t a = top + PAGE; a > APP_BASE; ) {        // walk page boundaries high -> low
     a -= PAGE;
     inherited_watchdog_feed();
     uint8_t m4[4]; fl_read(a, m4, 4);
-    if (memcmp(m4, MAGIC, 4) == 0 && parse_mota_at(a, o)) return a;
+    if (memcmp(m4, MAGIC, 4) == 0 && parse_mota_at(a, stage_ceiling, o) &&
+        ((stage_ceiling - o->total) & ~(PAGE - 1u)) == a) return a;
   }
   return 0;
 #endif
@@ -411,8 +410,9 @@ static uint32_t scan_mota(struct mota_min* o) {
 // sha256(body) and compares it to the delta's base_hash, so a (vanishingly unlikely) coincidental "EndF"
 // just fails that gate and the update is refused - never misapplied. Byte-by-byte (like the app) so no
 // body_len alignment is assumed; the scan stops at the first match (the current image's trailer).
-static int find_body_len(uint32_t* body_len_out) {
-  for (uint32_t off = 0; off + ENDF_LEN <= APP_LIMIT - APP_BASE; off++) {
+static int find_body_len(uint32_t app_limit, uint32_t* body_len_out) {
+  if (app_limit <= APP_BASE) return 0;
+  for (uint32_t off = 0; off + ENDF_LEN <= app_limit - APP_BASE; off++) {
     if ((off & (PAGE - 1u)) == 0) inherited_watchdog_feed();
     uint8_t e[8];
     fl_read(APP_BASE + off, e, 8);                  // marker(4) + body_len(4)
@@ -453,7 +453,7 @@ static int sha256_staged_region(uint32_t offset, uint32_t len, uint8_t out[32]) 
 static bool apply_full_sd(const struct mota_min* m) {
   if (!m->is_full || m->codec_id != CODEC_FULL ||
       m->image_size == 0 || m->payload_size != m->image_size ||
-      m->image_size > APP_LIMIT - APP_BASE) {
+      m->image_size > MOTA_NRF52_APP_END - APP_BASE) {
     gpregret2_set(0xB3);
     return false;
   }
@@ -515,6 +515,18 @@ bool ota_delta_check_and_apply(void) {
   // and drop it - the running app scans the bootloader flash for it (ota_bl_info.h / OtaBlInfo.h).
   volatile uint8_t keep = *(const volatile uint8_t*)&g_mota_bl_info.magic[0];
   if (keep == 0) return finish_apply(false);        // 'M' (0x4D) != 0, so never taken; keeps the marker live
+  // Read the app's staging-window handoff BEFORE GPREGRET2 becomes our diagnostic result register.
+  // Backward compatibility is deliberately one-way safe: an old app leaves no recognized expanded
+  // marker, so this bootloader scans only below ExtraFS. A new app uses EXPANDED only after finding the
+  // matching capability bit in g_mota_bl_info.
+  const uint32_t stage_handoff = gpregret2_get();
+  const uint32_t stage_ceiling = stage_handoff == GPREGRET2_OTA_STAGE_EXPANDED
+      ? MOTA_NRF52_STAGE_CEILING_EXPANDED : MOTA_NRF52_STAGE_CEILING_LEGACY;
+#if defined(MOTA_SD_CARD)
+  const uint32_t app_limit = MOTA_NRF52_APP_END;
+#else
+  const uint32_t app_limit = stage_ceiling;
+#endif
   // ---- DIAGNOSTIC: stash a bail/progress code in GPREGRET2; the app reads it back into `ota status`.
   // 0xB0 entered (pre-gate) | 0xB1 gate passed (GPREGRET was 0x6A) | 0xB2 no/unapproved mota |
   // 0xB3 bad full/codec | 0xB4 no body_len | 0xB5 base mismatch | 0xB9 bad detools geometry |
@@ -527,7 +539,7 @@ bool ota_delta_check_and_apply(void) {
   gpregret2_set(0xB1);
 
   struct mota_min m;
-  uint32_t mota_addr = scan_mota(&m);
+  uint32_t mota_addr = scan_mota(&m, stage_ceiling);
   if (!mota_addr || !m.approved) { gpregret2_set(0xB2); return finish_apply(false); } // nothing staged / unapproved
 
 #if defined(MOTA_SD_CARD)
@@ -539,14 +551,14 @@ bool ota_delta_check_and_apply(void) {
   uint32_t body_len;
   uint8_t base32[32];
   if (m.is_full || m.codec_id != CODEC_INPLACE ||
-      m.image_size == 0 || m.image_size > APP_LIMIT - APP_BASE) {
+      m.image_size == 0 || m.image_size > app_limit - APP_BASE) {
     gpregret2_set(0xB3); goto reject;
   }
-  if (!find_body_len(&body_len))                { gpregret2_set(0xB4); goto reject; }
+  if (!find_body_len(app_limit, &body_len))     { gpregret2_set(0xB4); goto reject; }
   sha256_region(APP_BASE, body_len, base32);
   if (memcmp(base32, m.base_hash, 8) != 0)      { gpregret2_set(0xB5); goto reject; }   // wrong base
 #if defined(MOTA_SD_CARD)
-  const uint32_t workspace_span = APP_LIMIT - APP_BASE;
+  const uint32_t workspace_span = app_limit - APP_BASE;
 #else
   const uint32_t workspace_span = mota_addr - APP_BASE;
 #endif
@@ -566,7 +578,7 @@ bool ota_delta_check_and_apply(void) {
   c.patch_addr = m.payload_addr; c.patch_len = m.payload_size; c.patch_pos = 0;
   c.ws_lo = APP_BASE;
 #if defined(MOTA_SD_CARD)
-  c.ws_hi = APP_LIMIT;                                  // patch is off-chip; whole app region is workspace
+  c.ws_hi = app_limit;                                  // patch is off-chip; whole app region is workspace
 #else
   c.ws_hi = mota_addr;                                  // workspace stays strictly below internal mota
 #endif

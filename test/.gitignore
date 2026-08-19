@@ -2,6 +2,7 @@
 apply_sim
 apply_sim_lto
 readback_test
+readback_test_v7
 bootloader_image_test
 sd_apply_test
 *.o

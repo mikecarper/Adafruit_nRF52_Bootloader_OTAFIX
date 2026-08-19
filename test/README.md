@@ -3,9 +3,10 @@
 Validates the nRF52 in-place delta apply (`src/ota_delta.c` + the vendored `detools` decoder + `sha256`)
 **on the host, without hardware**. It compiles the real `ota_delta_check_and_apply()` with the
 `OTA_DELTA_HOST_TEST` shims, lays out a RAM "flash" exactly like the device (running image at `APP_BASE`,
-a staged `.mota` bottom-aligned below `FS_START`, `GPREGRET` set), runs the apply, and checks the result
-against the expected new image. Every decision point (EndF scan, `.mota` scan, base check, detools return
-code, post-hash) is printed, so a failing apply is debuggable here instead of via flash-and-pray on a board.
+a staged `.mota` bottom-aligned below its selected ceiling, `GPREGRET`/`GPREGRET2` set), runs the apply,
+and checks the result against the expected new image. Every decision point (EndF scan, `.mota` scan, base
+check, detools return code, post-hash) is printed, so a failing apply is debuggable here instead of via
+flash-and-pray on a board.
 
 ## Run
 
@@ -23,6 +24,10 @@ make apply_sim
 make sd_apply_test
 ./sd_apply_test <base.img> <full-or-delta.mota> <expected_new.img>
 ```
+
+The suite runs the apply against both S140 v6 (`APP_BASE=0x26000`) and S140 v7 (`0x27000`) layouts. It
+also proves that the `0xED000` expanded-window hint works and missing/mismatched hints fail without
+touching the running application.
 
 `base.img` / `expected_new.img` are flat app images (`BODY||EndF`, what lives at `APP_BASE`); for an nRF52
 build you can get one from `firmware.hex` with `intelhex` (`ih.tobinarray(start=ih.minaddr())`). Build the
@@ -49,14 +54,16 @@ bytes, and the apply is silently refused (the old firmware boots). The fix: `fl_
 `volatile` pointer. `-fno-strict-aliasing` does *not* cover it (provenance, not type aliasing).
 
 A plain host run can't reproduce the miscompile - here `otah_read`/`otah_write_words` hit the *same* C
-array, an obvious alias the compiler never gets wrong. So `readback_test` guards it four ways:
+array, an obvious alias the compiler never gets wrong. So `readback_test` guards it five ways:
 
 1. **positive** - coherent readback => the apply succeeds, commits, and matches the expected image.
 2. **negative** - it *injects* the exact failure mode (workspace reads return stale pre-write bytes) and
    asserts the apply **fails safe**: the bank stays invalid, returns false (-> DFU, never a corrupt boot).
 3. **bounds/geometry** - rejects wraparound callback ranges, wrapped container size/leaf arithmetic, and
    impossible detools flash geometry before invalidating settings or modifying the current application.
-4. **source guard** - asserts the device `fl_read` still reads through `volatile`. This is the only check
+4. **staging handoff** - proves expanded and legacy packages apply only with their matching GPREGRET2
+   ceiling hint; missing or mismatched hints leave the running application untouched.
+5. **source guard** - asserts the device `fl_read` still reads through `volatile`. This is the only check
    that catches a "someone reverted the fix" regression (1/2 can't, on the host). Verified: flipping
    `fl_read` back to a plain `memcpy` turns the suite red.
 

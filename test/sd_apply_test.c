@@ -53,6 +53,7 @@ void otah_write_words(uint32_t address, const uint32_t* src, uint32_t word_count
 
 uint32_t otah_gpregret_get(void) { return g_gpregret; }
 void otah_gpregret_set(uint32_t value) { g_gpregret = value; }
+uint32_t otah_gpregret2_get(void) { return 0; }
 uint16_t otah_crc16(uint32_t address, uint32_t len) {
   (void)address;
   (void)len;

@@ -15,7 +15,8 @@
 //   [2] NEGATIVE  inject the exact failure mode (workspace reads return STALE bytes) -> assert the apply
 //                 FAILS SAFE: the bank remains invalid and it returns false (never boots corrupt data).
 //   [3] BOUNDS    malformed detools address/size/header inputs are rejected before touching app flash.
-//   [4] GUARD     assert the device fl_read reads through `volatile` - the one check that catches a
+//   [4] HANDOFF   expanded/legacy GPREGRET2 selection applies only the matching bottom-aligned package.
+//   [5] GUARD     assert the device fl_read reads through `volatile` - the one check that catches a
 //                 "someone reverted the fix" regression, which [1]/[2] cannot on the host.
 //
 // Build/run: see test/Makefile (`make check`). Uses the committed vectors in test/vectors/ by default.
@@ -27,12 +28,12 @@
 #include "ota_layout.h"
 
 // ----- simulated flash + a pre-apply SNAPSHOT used to model the LTO stale read -----
-#define FLASH_LEN  MOTA_NRF52_FS_START
+#define FLASH_LEN  MOTA_NRF52_APP_END
 static uint8_t  FLASH[FLASH_LEN];
 static uint8_t  SNAPSHOT[FLASH_LEN];     // pre-apply copy; served for workspace reads in stale mode
 static int      g_stale = 0;             // 1 => a workspace read returns the snapshot (THE LTO BUG)
 static uint32_t g_ws_lo, g_ws_hi;        // workspace = [APP_BASE, mota_addr); the stale-read window
-static uint32_t g_gpregret;
+static uint32_t g_gpregret, g_gpregret2;
 static uint16_t g_bank0, g_crc; static uint32_t g_size; static int g_committed;
 static int g_settings_writes, g_app_write_while_valid;
 
@@ -59,6 +60,7 @@ void     otah_write_words(uint32_t a, const uint32_t* s, uint32_t nw) {
 }
 uint32_t otah_gpregret_get(void)                           { return g_gpregret; }
 void     otah_gpregret_set(uint32_t v)                     { g_gpregret = v; }
+uint32_t otah_gpregret2_get(void)                          { return g_gpregret2; }
 uint16_t otah_crc16(uint32_t a, uint32_t len)              { (void)a; (void)len; return 0x1234; }
 void otah_settings_commit(uint16_t b, uint16_t c, uint32_t s) {
     g_bank0 = b; g_crc = c; g_size = s; g_committed = (b == 0x01); g_settings_writes++;
@@ -70,6 +72,7 @@ void otah_settings_commit(uint16_t b, uint16_t c, uint32_t s) {
 static uint8_t *g_base, *g_mota, *g_expect;
 static long     g_base_n, g_mota_n, g_exp_n;
 static uint32_t g_write_start;
+static uint32_t g_stage_handoff = GPREGRET2_OTA_STAGE_LEGACY;
 
 static long load(const char* path, uint8_t** out) {
     FILE* f = fopen(path, "rb"); if (!f) { fprintf(stderr, "cannot open %s\n", path); exit(2); }
@@ -85,6 +88,7 @@ static void stage_flash(void) {
     static const uint8_t APRV4[4] = {'A','P','R','V'};
     memcpy(FLASH + g_write_start + 8 + 193, APRV4, 4);             // approval @ manifest offset 193 (APRV)
     g_gpregret = GPREGRET_OTA_APPLY;
+    g_gpregret2 = g_stage_handoff;
     // Model the vulnerable/common UF2 state: valid application with CRC checking disabled.
     g_committed = 1; g_bank0 = 0x01; g_crc = 0; g_size = (uint32_t)g_base_n;
     g_settings_writes = 0; g_app_write_while_valid = 0;
@@ -196,10 +200,10 @@ int main(int argc, char** argv) {
         memcpy(wrapped + sizeof wrapped - 5, "vk496", 5);
         memcpy(FLASH + g_write_start, wrapped, sizeof wrapped);
         struct mota_min wrapped_m;
-        int wrapped_ok = !parse_mota_at(g_write_start, &wrapped_m);
+        int wrapped_ok = !parse_mota_at(g_write_start, MOTA_NRF52_STAGE_CEILING_LEGACY, &wrapped_m);
 
         stage_flash();                                // restore the valid vector for detools geometry test
-        struct mota_min m; uint32_t found = scan_mota(&m);
+        struct mota_min m; uint32_t found = scan_mota(&m, MOTA_NRF52_STAGE_CEILING_LEGACY);
         if (found) FLASH[m.payload_addr + 3] = 0x7F;  // memory_size 0x98000 -> oversized 0xFE000
         bool bad_applied = ota_delta_check_and_apply();
         int app_same = memcmp(FLASH + MOTA_NRF52_APP_BASE, g_base, g_base_n) == 0;
@@ -212,8 +216,59 @@ int main(int argc, char** argv) {
         }
     }
 
-    // [4] GUARD - the device fl_read must stay volatile.
-    printf("[4] source guard (device fl_read is volatile):\n");
+    // [4] The expanded ceiling is selected only by its exact GPREGRET2 marker, and the container must
+    // be bottom-aligned to that same ceiling. A missing/mismatched hint must leave the old app untouched.
+    printf("[4] legacy/expanded staging handoff: ");
+    {
+        const uint32_t legacy_start =
+            (uint32_t)((MOTA_NRF52_STAGE_CEILING_LEGACY - g_mota_n) & ~(MOTA_NRF52_FLASH_PAGE - 1));
+        const uint32_t expanded_start =
+            (uint32_t)((MOTA_NRF52_STAGE_CEILING_EXPANDED - g_mota_n) & ~(MOTA_NRF52_FLASH_PAGE - 1));
+        int c_exp, m_exp, c_nohint, m_nohint, c_mismatch, m_mismatch;
+
+        // Expanded layouts may also carry a running image past 0xD4000. The selected app limit must
+        // find that EndF, while a legacy handoff must never scan into the same range.
+        const uint32_t high_body = MOTA_NRF52_STAGE_CEILING_LEGACY - MOTA_NRF52_APP_BASE + 128u;
+        const uint32_t high_endf = MOTA_NRF52_APP_BASE + high_body;
+        uint32_t found_body = 0;
+        memset(FLASH, 0xFF, FLASH_LEN);
+        memcpy(FLASH + high_endf, "EndF", 4);
+        FLASH[high_endf + 4] = (uint8_t)high_body;
+        FLASH[high_endf + 5] = (uint8_t)(high_body >> 8);
+        FLASH[high_endf + 6] = (uint8_t)(high_body >> 16);
+        FLASH[high_endf + 7] = (uint8_t)(high_body >> 24);
+        int app_limit_ok = !find_body_len(MOTA_NRF52_STAGE_CEILING_LEGACY, &found_body) &&
+                           find_body_len(MOTA_NRF52_STAGE_CEILING_EXPANDED, &found_body) &&
+                           found_body == high_body;
+
+        g_write_start = expanded_start;
+        g_stage_handoff = GPREGRET2_OTA_STAGE_EXPANDED;
+        bool expanded_applied = run_case(0, &c_exp, &m_exp);
+
+        g_stage_handoff = GPREGRET2_OTA_STAGE_LEGACY;
+        bool nohint_applied = run_case(0, &c_nohint, &m_nohint);
+        int nohint_same = memcmp(FLASH + MOTA_NRF52_APP_BASE, g_base, g_base_n) == 0;
+
+        g_write_start = legacy_start;
+        g_stage_handoff = GPREGRET2_OTA_STAGE_EXPANDED;
+        bool mismatch_applied = run_case(0, &c_mismatch, &m_mismatch);
+        int mismatch_same = memcmp(FLASH + MOTA_NRF52_APP_BASE, g_base, g_base_n) == 0;
+
+        if (app_limit_ok && expanded_applied && c_exp && m_exp && !nohint_applied && c_nohint && !m_nohint &&
+            nohint_same && !mismatch_applied && c_mismatch && !m_mismatch && mismatch_same) {
+            printf("PASS - expanded image/apply works; missing/mismatched hints fail safe\n");
+        } else {
+            printf("FAIL - limit=%d expanded=%d/%d/%d nohint=%d/%d/%d/%d mismatch=%d/%d/%d/%d\n",
+                   app_limit_ok, expanded_applied, c_exp, m_exp, nohint_applied, c_nohint, m_nohint, nohint_same,
+                   mismatch_applied, c_mismatch, m_mismatch, mismatch_same);
+            fails++;
+        }
+        g_write_start = legacy_start;
+        g_stage_handoff = GPREGRET2_OTA_STAGE_LEGACY;
+    }
+
+    // [5] GUARD - the device fl_read must stay volatile.
+    printf("[5] source guard (device fl_read is volatile):\n");
     if (!guard_device_flread_is_volatile()) fails++;
 
     printf("\n%s (%d failure%s)\n", fails ? "SUITE FAILED" : "SUITE PASSED", fails, fails == 1 ? "" : "s");
