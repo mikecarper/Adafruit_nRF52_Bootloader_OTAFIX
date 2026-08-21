@@ -1,5 +1,11 @@
 # Adafruit nRF52 Bootloader with Enhanced OTA DFU
 
+## Changes in OTAFIX 2.4.1 preview.15
+
+- No functional source change from preview.14. This forward-version rebuild is
+  the remote candidate used to qualify the corrected monotonic bootloader-update
+  path after locally provisioning preview.14.
+
 ## Changes in OTAFIX 2.4.1 preview.14
 
 - **Correct runtime SoftDevice continuity check**
