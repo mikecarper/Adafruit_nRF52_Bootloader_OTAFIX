@@ -40,6 +40,9 @@ qspi_apply_test: sd_apply_test.c $(SRC)/ota_delta.c $(SRC)/detools/detools.c $(S
 qspi_alignment_test: qspi_alignment_test.c $(SRC)/ota_qspi_alignment.h
 	$(CC) $(CFLAGS) -I $(SRC) qspi_alignment_test.c -o $@
 
+qspi_wake_test: qspi_wake_test.c $(SRC)/ota_qspi_wake.h $(SRC)/ota_qspi.c
+	$(CC) $(CFLAGS) -I $(SRC) qspi_wake_test.c -o $@
+
 usb_wait_test: usb_wait_test.c $(SRC)/usb/usb_wait.c $(SRC)/usb/usb_wait.h
 	$(CC) $(CFLAGS) -DUSB_WAIT_HOST_TEST -I $(SRC)/usb usb_wait_test.c $(SRC)/usb/usb_wait.c -o $@
 
@@ -47,7 +50,7 @@ uf2_write_state_test: uf2_write_state_test.c $(SRC)/usb/uf2/uf2_app_flash.h \
                       $(SRC)/usb/uf2/uf2_transfer_state.h
 	$(CC) $(CFLAGS) -I $(SRC)/usb/uf2 uf2_write_state_test.c -o $@
 
-check: apply_sim readback_test readback_test_v7 bootloader_image_test sd_apply_test qspi_apply_test qspi_alignment_test usb_wait_test uf2_write_state_test
+check: apply_sim readback_test readback_test_v7 bootloader_image_test sd_apply_test qspi_apply_test qspi_alignment_test qspi_wake_test usb_wait_test uf2_write_state_test
 	./apply_sim vectors/base.img vectors/delta.mota vectors/new.img
 	@echo
 	./readback_test
@@ -62,11 +65,13 @@ check: apply_sim readback_test readback_test_v7 bootloader_image_test sd_apply_t
 	@echo
 	./qspi_alignment_test
 	@echo
+	./qspi_wake_test
+	@echo
 	./usb_wait_test
 	@echo
 	./uf2_write_state_test
 
 clean:
-	rm -f apply_sim readback_test readback_test_v7 bootloader_image_test sd_apply_test qspi_apply_test qspi_alignment_test usb_wait_test uf2_write_state_test
+	rm -f apply_sim readback_test readback_test_v7 bootloader_image_test sd_apply_test qspi_apply_test qspi_alignment_test qspi_wake_test usb_wait_test uf2_write_state_test
 
 .PHONY: check clean

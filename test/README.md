@@ -43,6 +43,11 @@ unaligned reads, multi-window reads, end-of-device tails, and the unaligned four
 container offset 201. It also verifies that the read-modify-program path preserves adjacent bytes and
 rejects attempts to change NOR bits from zero back to one.
 
+The QSPI wake test verifies the mode-0 GPIO wake stream reconstructs the opcode-only `0xAB` command,
+retains the conservative 50-us CS-high guards, and occurs before the pins are assigned to QSPI and
+`TASK_ACTIVATE` is issued. This prevents a prior probe's deep-power-down command from deadlocking the
+next QSPI activation.
+
 The apply tests run against both S140 v6 (`APP_BASE=0x26000`) and S140 v7 (`0x27000`) layouts. They
 also prove that the `0xED000` expanded-window hint works and missing/mismatched hints fail without
 touching the running application.

@@ -1,5 +1,6 @@
 #include "ota_qspi.h"
 #include "ota_qspi_alignment.h"
+#include "ota_qspi_wake.h"
 
 #if defined(MOTA_QSPI_FLASH) && !defined(OTA_DELTA_HOST_TEST)
 
@@ -60,6 +61,8 @@ _Static_assert((sizeof(g_bounce) & (OTA_QSPI_DMA_ALIGNMENT - 1u)) == 0,
                "QSPI bounce buffer size must be word aligned");
 _Static_assert(QSPI_DPD_RELEASE_GUARD_US >= 50u,
                "QSPI deep-power-down release guard must retain timing margin");
+_Static_assert(OTA_QSPI_WAKE_GUARD_US >= 50u,
+               "QSPI pre-activation wake guard must retain timing margin");
 _Static_assert(QSPI_PROGRAM_WAIT_STEP_US * QSPI_PROGRAM_WAIT_STEPS >= 100000u,
                "QSPI page-program wait must retain a conservative timeout");
 _Static_assert(QSPI_PROGRAM_WAIT_STEP_US * QSPI_RECOVERY_WAIT_STEPS >= 5000000u,
@@ -152,6 +155,49 @@ static void configure_qspi_pins(bool enable) {
   }
 }
 
+static void wake_flash_gpio(void) {
+  // QSPI ACTIVATE itself talks to the NOR and never becomes READY if a prior
+  // probe left the chip in deep power-down.  Send 0xAB as slow mode-0 GPIO SPI
+  // first.  Preloading every output avoids a CS# pulse or clock edge while
+  // GPIO ownership is established.  IO1 stays an input; connected IO2/IO3 are
+  // held high so WP#/HOLD# remain inactive during the single-line command.
+  QSPI_GPIO_PORT(MOTA_QSPI_CSN_PIN)->OUTSET = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_CSN_PIN);
+  QSPI_GPIO_PORT(MOTA_QSPI_SCK_PIN)->OUTCLR = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_SCK_PIN);
+  QSPI_GPIO_PORT(MOTA_QSPI_IO0_PIN)->OUTSET = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_IO0_PIN);
+  QSPI_GPIO_PORT(MOTA_QSPI_CSN_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_CSN_PIN)] = QSPI_PIN_CNF_OUTPUT_H0H1;
+  QSPI_GPIO_PORT(MOTA_QSPI_SCK_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_SCK_PIN)] = QSPI_PIN_CNF_OUTPUT_H0H1;
+  QSPI_GPIO_PORT(MOTA_QSPI_IO0_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_IO0_PIN)] = QSPI_PIN_CNF_OUTPUT_H0H1;
+  QSPI_GPIO_PORT(MOTA_QSPI_IO1_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_IO1_PIN)] = QSPI_PIN_CNF_H0H1;
+  if (MOTA_QSPI_IO2_PIN != NRF_QSPI_PIN_NOT_CONNECTED) {
+    QSPI_GPIO_PORT(MOTA_QSPI_IO2_PIN)->OUTSET = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_IO2_PIN);
+    QSPI_GPIO_PORT(MOTA_QSPI_IO2_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_IO2_PIN)] = QSPI_PIN_CNF_OUTPUT_H0H1;
+  }
+  if (MOTA_QSPI_IO3_PIN != NRF_QSPI_PIN_NOT_CONNECTED) {
+    QSPI_GPIO_PORT(MOTA_QSPI_IO3_PIN)->OUTSET = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_IO3_PIN);
+    QSPI_GPIO_PORT(MOTA_QSPI_IO3_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_IO3_PIN)] = QSPI_PIN_CNF_OUTPUT_H0H1;
+  }
+
+  nrf_delay_us(OTA_QSPI_WAKE_GUARD_US);
+  QSPI_GPIO_PORT(MOTA_QSPI_CSN_PIN)->OUTCLR = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_CSN_PIN);
+  for (uint8_t bit = 0; bit < OTA_QSPI_WAKE_BITS; bit++) {
+    if (ota_qspi_wake_bit(bit)) {
+      QSPI_GPIO_PORT(MOTA_QSPI_IO0_PIN)->OUTSET = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_IO0_PIN);
+    } else {
+      QSPI_GPIO_PORT(MOTA_QSPI_IO0_PIN)->OUTCLR = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_IO0_PIN);
+    }
+    nrf_delay_us(OTA_QSPI_WAKE_EDGE_US);
+    QSPI_GPIO_PORT(MOTA_QSPI_SCK_PIN)->OUTSET = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_SCK_PIN);
+    nrf_delay_us(OTA_QSPI_WAKE_EDGE_US);
+    QSPI_GPIO_PORT(MOTA_QSPI_SCK_PIN)->OUTCLR = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_SCK_PIN);
+    nrf_delay_us(OTA_QSPI_WAKE_EDGE_US);
+  }
+  QSPI_GPIO_PORT(MOTA_QSPI_CSN_PIN)->OUTSET = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_CSN_PIN);
+  nrf_delay_us(OTA_QSPI_WAKE_GUARD_US);
+
+  // Restore the exact nrfx QSPI pad configuration before assigning PSEL.
+  configure_qspi_pins(true);
+}
+
 static void select_qspi_pins(bool enable) {
   const uint32_t off = NRF_QSPI_PIN_VAL(NRF_QSPI_PIN_NOT_CONNECTED);
   NRF_QSPI->PSEL.SCK = enable ? NRF_QSPI_PIN_VAL(MOTA_QSPI_SCK_PIN) : off;
@@ -183,7 +229,14 @@ bool ota_qspi_init(void) {
   NVIC_DisableIRQ(QSPI_IRQn);
   NVIC_ClearPendingIRQ(QSPI_IRQn);
 
-  configure_qspi_pins(true);
+  wake_flash_gpio();
+  // From this point onward the NOR may be awake or completing an operation
+  // interrupted by reset.  Even if ACTIVATE times out, deinit must not remove
+  // its rail until SR1 proves WIP clear and deep power-down succeeds.
+  g_awake = true;
+  #if defined(MOTA_QSPI_POWER_PIN)
+  g_power_off_safe = false;
+  #endif
   select_qspi_pins(true);
 
   const nrf_qspi_prot_conf_t protocol = {
@@ -210,15 +263,6 @@ bool ota_qspi_init(void) {
     ota_qspi_deinit();
     return false;
   }
-  if (!custom_instruction(0xAB, NRF_QSPI_CINSTR_LEN_1B, NULL)) {
-    ota_qspi_deinit();
-    return false;
-  }
-  g_awake = true;
-  #if defined(MOTA_QSPI_POWER_PIN)
-  g_power_off_safe = false;
-  #endif
-  nrf_delay_us(50);
   if (!wait_memory_ready(QSPI_RECOVERY_WAIT_STEPS)) {
     ota_qspi_deinit();
     return false;

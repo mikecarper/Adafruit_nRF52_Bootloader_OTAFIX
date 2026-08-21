@@ -1,5 +1,13 @@
 # Adafruit nRF52 Bootloader with Enhanced OTA DFU
 
+## Changes in OTAFIX 2.4.1 preview.9
+
+- **Reliable raw-QSPI resume after deep power-down**
+  The bootloader now sends an opcode-only `0xAB` wake as mode-0 GPIO SPI, with conservative CS-high timing guards, before assigning the pins to QSPI and issuing `TASK_ACTIVATE`. This prevents a successful probe or rejected handoff from leaving the NOR asleep and causing the next boot or probe to time out during QSPI activation. Connected QSPI pads are restored to the Nordic high-drive configuration before peripheral handoff; RAK15001 IO2/IO3 remain disconnected.
+
+- **QSPI write and recovery completion hardening**
+  External-NOR page programs and interrupted-operation recovery now poll SR1/WIP to completion before verification, deep power-down, reset, or optional rail removal. Unaligned staging reads and the unaligned approval clear are adapted to the nRF52840 EasyDMA word-alignment rules, and timeout paths keep CS inactive without cutting power from a potentially busy flash.
+
 ## Changes in OTAFIX 2.4.1 preview.8
 
 - **USB-first recovery with automatic BLE fallback**
@@ -141,8 +149,9 @@ Reinstall the matching slot-C MeshCore application after this one-time bootloade
 subsequent canonical slot-C bootloader-update UF2 files can then be used normally.
 
 The direct preview.7 links below are retained for their original board targets, but preview.7 has only a
-brief USB recovery probe and predates raw-QSPI apply support. Use preview.8 or newer—and verify the release
-notes explicitly mention the 30-second USB grace and QSPI mode—when either new behavior is required.
+brief USB recovery probe and predates raw-QSPI apply support. Use preview.8 or newer for the 30-second USB
+recovery grace. Raw-QSPI apply requires preview.9 or newer; verify the release notes explicitly list the
+exact board and QSPI mode.
 
 - [Heltec T1 UF2](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/0.9.2-OTAFIX2.4.1-preview.7/update-heltec_t1_bootloader-0.9.2-OTAFIX2.4.1-preview.7_mbr.uf2)
 - [Heltec T096 UF2](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/0.9.2-OTAFIX2.4.1-preview.7/update-heltec_t096_bootloader-0.9.2-OTAFIX2.4.1-preview.7_mbr.uf2)
