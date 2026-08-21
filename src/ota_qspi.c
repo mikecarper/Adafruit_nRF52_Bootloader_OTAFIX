@@ -9,8 +9,11 @@
   #include "nrf_delay.h"
 
   #define QSPI_APPROVAL_LEN 4u
-  #define QSPI_DPD_ENTER    0xB9u
-  #define QSPI_DPD_T_US     5u
+  #define QSPI_DPD_ENTER            0xB9u
+  // MX25R1635F requires tDP (10 us) plus tDPDD (30 us) with CS# high
+  // before another command may be issued after entering deep power-down.
+  // Keep 10 us of margin and match the application's release guard.
+  #define QSPI_DPD_RELEASE_GUARD_US 50u
   #define QSPI_MAX_CAPACITY 0x01000000u
   #define QSPI_WAIT_STEPS   3000000u
 
@@ -36,6 +39,8 @@ static bool g_powered;
 
 _Static_assert((sizeof(g_bounce) & (OTA_QSPI_DMA_ALIGNMENT - 1u)) == 0,
                "QSPI bounce buffer size must be word aligned");
+_Static_assert(QSPI_DPD_RELEASE_GUARD_US >= 50u,
+               "QSPI deep-power-down release guard must retain timing margin");
 
 static void feed_watchdogs(void) {
   if (NRF_WDT->RUNSTATUS != 0) {
@@ -168,7 +173,7 @@ void ota_qspi_deinit(void) {
     // reset. Balance every completed 0xAB wake with deep power-down, including
     // a later JEDEC validation failure; the next access wakes it again.
     (void)custom_instruction(QSPI_DPD_ENTER, NRF_QSPI_CINSTR_LEN_1B, NULL);
-    nrf_delay_us(QSPI_DPD_T_US);
+    nrf_delay_us(QSPI_DPD_RELEASE_GUARD_US);
   }
   g_awake = false;
   if (g_active) {
