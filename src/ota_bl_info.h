@@ -36,6 +36,8 @@
 #define MOTA_BL_STORAGE_STAGE_CEILING  0x02u // understands the GPREGRET2 staging-ceiling handoff
 #define MOTA_BL_STORAGE_QSPI           0x04u // raw external-QSPI container at offset zero
 #define MOTA_BL_STORAGE_BOOT_UPDATE     0x08u // format-v3 bootloader image install
+#define MOTA_BL_STORAGE_KNOWN          (MOTA_BL_STORAGE_SD | MOTA_BL_STORAGE_STAGE_CEILING | \
+                                        MOTA_BL_STORAGE_QSPI | MOTA_BL_STORAGE_BOOT_UPDATE)
 
 typedef struct {
   uint8_t  magic[8];     // MOTA_BL_MAGIC*

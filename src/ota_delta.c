@@ -5,7 +5,7 @@
 #include "ota_layout.h"
 #include "ota_bl_info.h"
 #if defined(MOTA_SD_CARD)
-  #include "ota_sd_handoff.h"
+  #include "ota_sd_auth.h"
   #include "ota_sd_spi.h"
 #endif
 #if defined(MOTA_SD_BOOTLOADER_UPDATE)
@@ -21,6 +21,10 @@
 #include "detools/detools.h"
 #include <string.h>
 #include <stdint.h>
+
+#if defined(OTA_DELTA_HOST_TEST) && !defined(MOTA_SOFTDEVICE_FAMILY)
+  #define MOTA_SOFTDEVICE_FAMILY 140u
+#endif
 
 #if defined(MOTA_QSPI_BOOTLOADER_UPDATE)
   #define MOTA_QSPI_STORAGE_FLAGS \
@@ -62,7 +66,7 @@ __attribute__((used, aligned(4))) const mota_bl_info_t g_mota_bl_info = {
   MOTA_BL_APPLY_ABI,
 #if defined(MOTA_SD_CARD)
   (uint16_t)((1u << 0) | (1u << 2)), // SD: full images and in-place deltas
-  {MOTA_SD_STORAGE_FLAGS, 0, 0, 0},  // raw-SD handoff
+  {MOTA_SD_STORAGE_FLAGS, 0, 0, 0},  // retained-auth SD source
 #elif defined(MOTA_QSPI_FLASH)
   (uint16_t)((1u << 0) | (1u << 2)), // QSPI: full images and in-place deltas
   {MOTA_QSPI_STORAGE_FLAGS, 0, 0, 0},
@@ -100,8 +104,16 @@ extern uint32_t otah_gpregret2_get(void);
 extern void     otah_gpregret2_set(uint32_t v);
 extern uint16_t otah_crc16(uint32_t addr, uint32_t len);
 extern void     otah_settings_commit(uint16_t bank0, uint16_t crc, uint32_t size);
+#if defined(MOTA_SD_CARD)
+extern void     otah_sd_auth_read(void *dst, uint32_t len);
+extern void     otah_sd_auth_consume(void);
+#endif
 #if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_BOOTLOADER_UPDATE)
 extern int      otah_crc_bound_app_size(uint32_t *size);
+#endif
+#if defined(MOTA_BOOTLOADER_UPDATE_ENABLED)
+extern int      otah_installed_boot_info(bootloader_image_info_t *info);
+extern uint16_t otah_runtime_softdevice_fwid(void);
 #endif
   #define APP_BASE MOTA_NRF52_APP_BASE
 static void fl_read(uint32_t a, void *d, uint32_t n) {
@@ -139,6 +151,7 @@ static uint16_t crc16_region(uint32_t a, uint32_t len) {
   #if defined(MOTA_BOOTLOADER_UPDATE_ENABLED)
     #include "usb/uf2/uf2cfg.h"
     #include "nrf_mbr.h"
+    #include "nrf_sdm.h"
   #endif
   #define APP_BASE           ((uint32_t)DFU_BANK_0_REGION_START)
 // Read flash through a VOLATILE pointer. In-place apply WRITES flash (nrfx_nvmc_words_write) and then
@@ -280,12 +293,41 @@ static uint16_t rd_u16(const uint8_t *p) {
 #if defined(MOTA_SD_CARD)
 static uint32_t g_sd_first_sector;
 static uint32_t g_sd_total_size;
+static mota_sd_auth_t g_sd_auth;
+static int g_sd_auth_loaded;
+
+// Copy the retained authorization into bootloader-owned RAM and consume it
+// before the first access to removable media.  Thus every trigger is one-shot,
+// including invalid records and SD failures.  A reset/power cut cannot retry.
+static int sd_auth_take(uint8_t purpose, uint8_t format_ver) {
+#ifdef OTA_DELTA_HOST_TEST
+  otah_sd_auth_read(&g_sd_auth, sizeof(g_sd_auth));
+  otah_sd_auth_consume();
+#else
+  const volatile uint8_t *src =
+    (const volatile uint8_t *)(uintptr_t)MOTA_SD_AUTH_ADDRESS;
+  uint8_t *dst = (uint8_t *)&g_sd_auth;
+  for (uint32_t i = 0; i < sizeof(g_sd_auth); i++) {
+    dst[i] = src[i];
+  }
+  volatile uint32_t *words =
+    (volatile uint32_t *)(uintptr_t)MOTA_SD_AUTH_ADDRESS;
+  for (uint32_t i = 0; i < sizeof(g_sd_auth) / sizeof(uint32_t); i++) {
+    words[i] = 0u;
+  }
+  __DMB();
+  __DSB();
+#endif
+  g_sd_auth_loaded = mota_sd_auth_valid(&g_sd_auth, purpose, format_ver);
+  return g_sd_auth_loaded;
+}
 
 // In an SD build, patch/container offsets are relative to the first sector
-// named by the handoff. Internal-flash builds continue to use absolute flash
-// addresses, preserving the existing tested path.
+// named by the consumed retained-RAM authorization. Internal-flash builds
+// continue to use absolute flash addresses, preserving the existing path.
 static int staged_read(uint32_t address_or_offset, void *dst, uint32_t len) {
-  if ((uint64_t)address_or_offset + len > g_sd_total_size) {
+  if (address_or_offset > g_sd_total_size ||
+      len > g_sd_total_size - address_or_offset) {
     return 0;
   }
   return ota_sd_read_bytes(g_sd_first_sector, address_or_offset, dst, len) ? 1 : 0;
@@ -674,21 +716,12 @@ static int parse_mota_at(uint32_t addr, uint32_t limit, struct mota_min *o) {
 static uint32_t scan_mota(struct mota_min *o, uint32_t stage_ceiling) {
 #if defined(MOTA_SD_CARD)
   (void)stage_ceiling;
-  uint8_t handoff[MOTA_SD_SECTOR_SIZE];
-  if (!ota_sd_init() || !ota_sd_read_sector(MOTA_SD_HANDOFF_SECTOR, handoff)) {
+  if (!g_sd_auth_loaded || !ota_sd_init()) {
     return 0;
   }
-  if (memcmp(handoff, MOTA_SD_HANDOFF_MAGIC, 8) != 0 || mota_sd_handoff_rd32(handoff + 8) != MOTA_SD_HANDOFF_VERSION ||
-      mota_sd_handoff_crc32(handoff, 32) != mota_sd_handoff_rd32(handoff + 32)) {
-    return 0;
-  }
-  uint32_t first        = mota_sd_handoff_rd32(handoff + 12);
-  uint32_t sectors      = mota_sd_handoff_rd32(handoff + 16);
-  uint32_t total        = mota_sd_handoff_rd32(handoff + 20);
-  uint32_t total_inv    = mota_sd_handoff_rd32(handoff + 24);
-  uint32_t card_sectors = mota_sd_handoff_rd32(handoff + 28);
-  if (first <= MOTA_SD_HANDOFF_SECTOR || sectors == 0 || total < MOTA_MIN_LEN || total_inv != ~total ||
-      (uint64_t)sectors * MOTA_SD_SECTOR_SIZE < total || first >= card_sectors || sectors > card_sectors - first) {
+  const uint32_t first = g_sd_auth.first_sector;
+  const uint32_t total = g_sd_auth.container_total;
+  if (total < MOTA_MIN_LEN) {
     return 0;
   }
   g_sd_first_sector = first;
@@ -805,10 +838,10 @@ bool ota_delta_live_app_fits_below(uint32_t limit) {
 
 static int clear_approval(const struct mota_min *o) {
 #if defined(MOTA_SD_CARD)
-  // This backend has no raw-sector write primitive, so APRV and the checksummed
-  // handoff remain on the card. GPREGRET was consumed before any validation or
-  // scratch erase, which makes the file inert across a normal reset. A running
-  // app may deliberately re-arm it only after authenticating an update command.
+  // This backend has no raw-sector write primitive, so APRV remains on the
+  // card. The retained authorization and GPREGRET were consumed before any
+  // validation or scratch erase, making the file inert across a normal reset.
+  // A running app may re-arm it only after authenticating a new update command.
   (void)o;
   return 1;
 #elif defined(MOTA_QSPI_FLASH)
@@ -847,6 +880,44 @@ static int sha256_staged_region(uint32_t offset, uint32_t len, uint8_t out[32]) 
   }
   sha256_final(&c, out);
   return 1;
+}
+#endif
+
+#if defined(MOTA_SD_CARD)
+// Hash the exact authorized container while normalizing the sole mutable field
+// (approval) to zero.  The application computes the same digest in the pass
+// that authenticates the signed manifest, leaf table, and payload.  Binding
+// this full digest also protects delta bytecode, not only its final image hash.
+static int sd_authorized_container_valid(void) {
+  if (!g_sd_auth_loaded || g_sd_auth.container_total != g_sd_total_size ||
+      g_sd_total_size < MOTA_SD_AUTH_APPROVAL_OFFSET + MOTA_SD_AUTH_APPROVAL_LEN) {
+    return 0;
+  }
+  sha256_ctx_t c;
+  sha256_init(&c);
+  uint8_t buf[256];
+  uint32_t offset = 0;
+  while (offset < g_sd_total_size) {
+    inherited_watchdog_feed();
+    uint32_t n = g_sd_total_size - offset;
+    if (n > sizeof(buf)) {
+      n = sizeof(buf);
+    }
+    if (!staged_read(offset, buf, n)) {
+      return 0;
+    }
+    // APRV is fixed at bytes 201..204, wholly inside the first 256-byte
+    // chunk. The entry bounds above guarantee those bytes exist.
+    if (offset == 0u) {
+      memset(buf + MOTA_SD_AUTH_APPROVAL_OFFSET, 0,
+             MOTA_SD_AUTH_APPROVAL_LEN);
+    }
+    sha256_update(&c, buf, n);
+    offset += n;
+  }
+  uint8_t digest[32];
+  sha256_final(&c, digest);
+  return memcmp(digest, g_sd_auth.container_sha256, sizeof(digest)) == 0;
 }
 #endif
 
@@ -1004,9 +1075,10 @@ static int boot_image_caps_valid(const uint8_t *image) {
   static const uint8_t magic[8] = {MOTA_BL_MAGIC0, MOTA_BL_MAGIC1, MOTA_BL_MAGIC2, MOTA_BL_MAGIC3,
                                    MOTA_BL_MAGIC4, MOTA_BL_MAGIC5, MOTA_BL_MAGIC6, MOTA_BL_MAGIC7};
   // Scan every aligned match: a magic copy in a literal pool must not hide the
-  // real capability marker later in the image. There must be exactly one
-  // structurally valid exact-profile marker; duplicate continuity metadata is
-  // ambiguous and therefore rejected.
+  // real capability marker later in the image. Count every structurally valid
+  // privileged marker before requiring the sole marker to match this build's
+  // exact storage profile; a second valid marker cannot hide behind a
+  // different boot-update backend.
   uint32_t matches = 0;
   for (uint32_t off = 0; off + sizeof(mota_bl_info_t) <= MOTA_NRF52_BL_SIZE; off += 4u) {
     // The internal staged payload begins 365 bytes into its container, so its
@@ -1026,9 +1098,10 @@ static int boot_image_caps_valid(const uint8_t *image) {
     const uint8_t *storage    = candidate + offsetof(mota_bl_info_t, storage_flags);
     if (magic_equal && apply_abi >= 3u && apply_abi != UINT16_MAX &&
         (codec_mask & MOTA_BOOT_UPDATE_CODEC_MASK) == MOTA_BOOT_UPDATE_CODEC_MASK &&
-        storage[0] == MOTA_BOOT_UPDATE_STORAGE_FLAGS &&
-        (storage[1] | storage[2] | storage[3]) == 0) {
-      if (++matches > 1u) {
+        (storage[0] & MOTA_BL_STORAGE_BOOT_UPDATE) != 0u &&
+        (storage[0] & (uint8_t)~MOTA_BL_STORAGE_KNOWN) == 0u &&
+        (storage[1] | storage[2] | storage[3]) == 0u) {
+      if (++matches > 1u || storage[0] != MOTA_BOOT_UPDATE_STORAGE_FLAGS) {
         return 0;
       }
     }
@@ -1036,11 +1109,63 @@ static int boot_image_caps_valid(const uint8_t *image) {
   return matches == 1u;
 }
 
-static int boot_image_metadata_valid_at(uint32_t address) {
+static int installed_boot_info(bootloader_image_info_t *info) {
+#ifdef OTA_DELTA_HOST_TEST
+  return otah_installed_boot_info(info);
+#else
+  extern const bootloader_update_envelope_t bootloaderUpdateManifest;
+  const bootloader_update_extension_t *ext = &bootloaderUpdateManifest.extension;
+  if (!bootloader_extension_validate(ext)) {
+    return 0;
+  }
+  info->boot_version = ext->boot_version;
+  info->softdevice_family = ext->softdevice_family;
+  info->softdevice_fwid = ext->softdevice_fwid;
+  info->app_base = ext->app_base;
+  info->layout_abi = ext->layout_abi;
+  return 1;
+#endif
+}
+
+static uint16_t runtime_softdevice_fwid(void) {
+#ifdef OTA_DELTA_HOST_TEST
+  return otah_runtime_softdevice_fwid();
+#else
+  return SD_FWID_GET(0u);
+#endif
+}
+
+static int boot_image_metadata_valid_at(uint32_t address,
+                                        const struct mota_min *m) {
   const uint8_t *image = boot_image_pointer(address);
-  return image && bootloader_image_validate(image, MOTA_NRF52_BL_START, MOTA_NRF52_BL_SIZE,
-                                            BOOT_UPDATE_BOARD_ID, DEVICE_NAME) &&
-         boot_image_caps_valid(image);
+  bootloader_image_info_t candidate;
+  bootloader_image_info_t installed;
+#ifdef OTA_DELTA_HOST_TEST
+  static const char expected_device_name[BOOTLOADER_UPDATE_DEVICE_NAME_SIZE] = DEVICE_NAME;
+#else
+  extern const bootloader_update_envelope_t bootloaderUpdateManifest;
+  const char *expected_device_name = bootloaderUpdateManifest.manifest.device_name;
+#endif
+  if (!image || !m ||
+      !bootloader_image_info(image, MOTA_NRF52_BL_START, MOTA_NRF52_BL_SIZE,
+                             BOOT_UPDATE_BOARD_ID, expected_device_name, &candidate) ||
+      !boot_image_caps_valid(image) || !installed_boot_info(&installed)) {
+    return 0;
+  }
+  // Remote bootloader replacement cannot migrate the SoftDevice/application
+  // layout.  Such recovery remains an explicit local USB/BLE/SWD operation.
+  // The outer signed package version must describe the bytes themselves, and
+  // every v2-to-v2 remote update is strictly monotonic.
+  return candidate.softdevice_family == installed.softdevice_family &&
+         candidate.softdevice_fwid == installed.softdevice_fwid &&
+         candidate.app_base == installed.app_base &&
+         candidate.layout_abi == installed.layout_abi &&
+         candidate.softdevice_family == MOTA_SOFTDEVICE_FAMILY &&
+         candidate.softdevice_fwid == runtime_softdevice_fwid() &&
+         candidate.app_base == APP_BASE &&
+         candidate.layout_abi == BOOTLOADER_UPDATE_LAYOUT_ABI &&
+         candidate.boot_version == m->fw_version &&
+         candidate.boot_version > installed.boot_version;
 }
 
 static int copy_bootloader_to_raw_source(const struct mota_min *m) {
@@ -1118,11 +1243,28 @@ static bool apply_bootloader_update(void) {
   const uint32_t source = gpregret2_get();
   gpregret_set(0); // consume first: every validation/copy failure is fail-closed
   gpregret2_set(GPREGRET2_BL_GATE);
+#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+  const int sd_authorized =
+    sd_auth_take(MOTA_SD_AUTH_PURPOSE_BOOTLOADER, 3u);
+  if (source != GPREGRET2_OTA_STAGE_SD) {
+    gpregret2_set(GPREGRET2_BL_CONTAINER);
+    return finish_apply(false);
+  }
+  if (!sd_authorized) {
+    gpregret2_set(GPREGRET2_BL_APPROVAL);
+    return finish_apply(false);
+  }
+#endif
   struct mota_min m;
   if (!scan_bootloader_mota(&m, source) || !m.approved) {
     gpregret2_set(GPREGRET2_BL_CONTAINER);
     return finish_apply(false);
   }
+#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+  if (!sd_authorized_container_valid()) {
+    return boot_update_reject(&m, GPREGRET2_BL_APPROVAL);
+  }
+#endif
   if (!boot_update_policy_valid(&m)) {
     return boot_update_reject(&m, GPREGRET2_BL_POLICY);
   }
@@ -1135,7 +1277,7 @@ static bool apply_bootloader_update(void) {
   if (!ota_delta_live_app_fits_below(MOTA_NRF52_INTERNAL_BL_SLOT_START)) {
     return boot_update_reject(&m, GPREGRET2_BL_POLICY);
   }
-  if (!boot_image_metadata_valid_at(m.payload_addr)) {
+  if (!boot_image_metadata_valid_at(m.payload_addr, &m)) {
     return boot_update_reject(&m, GPREGRET2_BL_MANIFEST);
   }
 #elif defined(MOTA_SD_BOOTLOADER_UPDATE)
@@ -1145,9 +1287,9 @@ static bool apply_bootloader_update(void) {
   if (!ota_delta_live_app_fits_below(MOTA_NRF52_BL_SCRATCH_START)) {
     return boot_update_reject(&m, GPREGRET2_BL_POLICY);
   }
-  // APRV and the SD handoff are removable-media metadata. Bind the candidate
-  // bytes to the signed manifest image_hash captured by the app in internal
-  // scratch before the first erase. Copying page zero consumes the token.
+  // APRV is removable-media metadata. Bind the candidate bytes to the signed
+  // manifest image_hash captured by the app in internal scratch before the
+  // first erase. Copying page zero consumes the token.
   if (!sd_boot_authorization_valid(&m)) {
     return boot_update_reject(&m, GPREGRET2_BL_APPROVAL);
   }
@@ -1163,7 +1305,7 @@ static bool apply_bootloader_update(void) {
   // Revalidate the exact embedded board manifest/CRC and continuity capability
   // from the final raw MBR source. A reset before the MBR call boots the
   // unchanged application and old bootloader.
-  if (!boot_image_metadata_valid_at(BOOT_UPDATE_RAW_START)) {
+  if (!boot_image_metadata_valid_at(BOOT_UPDATE_RAW_START, &m)) {
     gpregret2_set(GPREGRET2_BL_MANIFEST);
     return finish_apply(false);
   }
@@ -1306,6 +1448,13 @@ bool ota_delta_check_and_apply(void) {
   gpregret_set(0); // consume the trigger so we never loop
   gpregret2_set(0xB1);
 
+#if defined(MOTA_SD_CARD)
+  if (!sd_auth_take(MOTA_SD_AUTH_PURPOSE_APP, 2u)) {
+    gpregret2_set(0xBD);
+    return finish_apply(false);
+  }
+#endif
+
   struct mota_min m;
   uint32_t        mota_addr = scan_mota(&m, stage_ceiling);
   if (!mota_addr || !m.approved) {
@@ -1320,6 +1469,12 @@ bool ota_delta_check_and_apply(void) {
     gpregret2_set(0xB3);
     goto reject;
   }
+#if defined(MOTA_SD_CARD)
+  if (!sd_authorized_container_valid()) {
+    gpregret2_set(0xBD);
+    goto reject;
+  }
+#endif
 
 #if defined(MOTA_SD_CARD)
   if (m.is_full) {

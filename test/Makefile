@@ -36,7 +36,7 @@ bootloader_image_test: bootloader_image_test.c $(SRC)/usb/uf2/bootloader_image.c
 	$(CC) $(CFLAGS) -I $(SRC) bootloader_image_test.c $(SRC)/usb/uf2/bootloader_image.c -o $@
 
 sd_apply_test: sd_apply_test.c $(SRC)/ota_delta.c $(SRC)/detools/detools.c $(SRC)/sha256.c \
-               $(SRC)/ota_delta.h $(SRC)/ota_layout.h $(SRC)/ota_sd_handoff.h $(SRC)/ota_sd_spi.h
+               $(SRC)/ota_delta.h $(SRC)/ota_layout.h $(SRC)/ota_sd_auth.h $(SRC)/ota_sd_spi.h
 	$(CC) $(CFLAGS) -DOTA_DELTA_HOST_TEST -DMOTA_SD_CARD $(INC) sd_apply_test.c \
 		$(SRC)/detools/detools.c $(SRC)/sha256.c -o $@
 
@@ -64,7 +64,7 @@ bootloader_mota_internal_test: bootloader_mota_test.c $(SRC)/ota_delta.c $(SRC)/
 bootloader_mota_sd_test: bootloader_mota_test.c $(SRC)/ota_delta.c $(SRC)/detools/detools.c \
                          $(SRC)/sha256.c $(SRC)/usb/uf2/bootloader_image.c \
                          $(SRC)/usb/uf2/bootloader_image.h $(SRC)/ota_bl_info.h $(SRC)/ota_layout.h \
-                         $(SRC)/ota_sd_handoff.h $(SRC)/ota_sd_boot_token.h $(SRC)/ota_sd_spi.h
+                         $(SRC)/ota_sd_auth.h $(SRC)/ota_sd_boot_token.h $(SRC)/ota_sd_spi.h
 	$(CC) $(CFLAGS) -DOTA_DELTA_HOST_TEST -DMOTA_SD_CARD -DMOTA_SD_BOOTLOADER_UPDATE \
 		-DUSB_DESC_VID=0x239A -DUSB_DESC_UF2_PID=0x0071 -DDEVICE_NAME='"TOWER_V2_OTA"' $(INC) \
 		bootloader_mota_test.c $(SRC)/detools/detools.c $(SRC)/sha256.c \
@@ -84,6 +84,9 @@ uf2_write_state_test: uf2_write_state_test.c $(SRC)/usb/uf2/uf2_app_flash.h \
 	$(CC) $(CFLAGS) -I $(SRC)/usb/uf2 uf2_write_state_test.c -o $@
 
 check: apply_sim readback_test readback_test_v7 readback_internal_test bootloader_image_test sd_apply_test qspi_apply_test bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test qspi_alignment_test qspi_wake_test usb_wait_test uf2_write_state_test
+	python3 version_derivation_test.py
+	python3 manifest_patcher_test.py
+	python3 cf2_guard_test.py
 	python3 ../tools/check_internal_bootloader_targets.py
 	@echo
 	./apply_sim vectors/base.img vectors/delta.mota vectors/new.img

@@ -14,8 +14,10 @@ MEMORY
   /* MeshCore OTA: the in-place delta applier (detools CRLE in-place + sha256 + ota_delta) and fail-closed
      self-update validation do not fit in the stock 38 KB code region. Reclaim 1.75 KB from the CF2
      bootloaderConfig page and give it to FLASH -> 39.75 KB. This is safe for the curated boards:
-     bootloaderConfig plus the update manifest is exactly 132 B across the build matrix, is compile-time
-     read-only data, and a future board that exceeds the reserved 256 B fails at link time. The
+     bootloaderConfig plus the update manifest is exactly 164 B across the build matrix, is compile-time
+     read-only data, and a future board that exceeds the reserved 176 B fails at link time. The
+     76-byte BLMF+BLM2 envelope is fixed at the end of the raw bootloader image so candidate validation
+     does not need a generic flash scan. Linker assertions prevent the config from colliding with it. The
      bootloader still starts at 0xF4000 (UICR/BOOTLOADER_REGION_START unchanged), and the MBR-params
      (0xFE000) and bootloader-settings (0xFF000) pages remain untouched.
 
@@ -26,15 +28,16 @@ MEMORY
          0x26000  Application  (MeshCore; staged .mota lives just below the filesystem, < 0xD4000)
          ...
          0xF4000  +- bootloader code (FLASH) 39.75 KB -+   stock: 38 KB, ends 0xFD800
-         0xFDF00  +- CF2 config + manifest ---- 256 B --+ (*) stock: 2 KB, starts 0xFD800
+         0xFDF50  +- CF2 config + manifest ---- 176 B --+ (*) stock: 2 KB, starts 0xFD800
+         0xFDFB4  |  fixed BLMF+BLM2 envelope - 76 B   |
          0xFE000  +- MBR params --------------- 4 KB ---+   unchanged
          0xFF000  +- bootloader settings ------ 4 KB ---+   unchanged
         0x100000  +- (end of flash) --------------------+
   */
      
-  FLASH (rx) : ORIGIN = 0xF4000, LENGTH = 0xFE000-0xF4000 - 256 /* 39.75 KB */
+  FLASH (rx) : ORIGIN = 0xF4000, LENGTH = 0xFE000-0xF4000 - 176
 
-  BOOTLOADER_CONFIG (r): ORIGIN = 0xFE000 - 256, LENGTH = 256
+  BOOTLOADER_CONFIG (r): ORIGIN = 0xFE000 - 176, LENGTH = 176
 
   /** Location of mbr params page in flash. */
   MBR_PARAMS_PAGE (rw) : ORIGIN = 0xFE000, LENGTH = 0x1000
@@ -72,8 +75,17 @@ SECTIONS
   .bootloaderConfig :
   {
     KEEP(*(.bootloaderConfig))
+  } > BOOTLOADER_CONFIG
+
+  .bootloaderManifest ORIGIN(BOOTLOADER_CONFIG) + LENGTH(BOOTLOADER_CONFIG) - 76 :
+  {
     KEEP(*(.bootloaderManifest))
   } > BOOTLOADER_CONFIG
+
+  ASSERT(SIZEOF(.bootloaderManifest) == 76,
+         "BLMF+BLM2 envelope must be exactly 76 bytes")
+  ASSERT(ADDR(.bootloaderConfig) + SIZEOF(.bootloaderConfig) <= ADDR(.bootloaderManifest),
+         "bootloaderConfig overlaps fixed BLMF+BLM2 envelope")
 
   /* Place the bootloader settings page in flash. */
   .bootloaderSettings(NOLOAD) :

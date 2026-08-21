@@ -56,8 +56,17 @@ SECTIONS
   .bootloaderConfig :
   {
     KEEP(*(.bootloaderConfig))
+  } > BOOTLOADER_CONFIG
+
+  .bootloaderManifest ORIGIN(BOOTLOADER_CONFIG) + LENGTH(BOOTLOADER_CONFIG) - 76 :
+  {
     KEEP(*(.bootloaderManifest))
   } > BOOTLOADER_CONFIG
+
+  ASSERT(SIZEOF(.bootloaderManifest) == 76,
+         "BLMF+BLM2 envelope must be exactly 76 bytes")
+  ASSERT(ADDR(.bootloaderConfig) + SIZEOF(.bootloaderConfig) <= ADDR(.bootloaderManifest),
+         "bootloaderConfig overlaps fixed BLMF+BLM2 envelope")
 
   /* Place the bootloader settings page in flash. */
   .bootloaderSettings(NOLOAD) :

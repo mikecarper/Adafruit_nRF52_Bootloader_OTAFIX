@@ -10,14 +10,22 @@
 #include <string.h>
 
 #include "ota_layout.h"
+#include "usb/uf2/bootloader_image.h"
+#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+  #include "ota_sd_auth.h"
+#endif
 
 #define FLASH_LEN        0x00100000u
 #define QSPI_LEN         (2u * 1024u * 1024u)
 #define SD_FIRST_SECTOR  128u
 #define SD_CARD_SECTORS  (QSPI_LEN / 512u)
-#define MANIFEST_OFFSET  0x00009E00u
+#define MANIFEST_OFFSET  (MOTA_NRF52_BL_SIZE - sizeof(bootloader_update_envelope_t))
 #define CAPS_OFFSET      0x00000300u
 #define TEST_BLOCK_LOG2  10u
+#define TEST_INSTALLED_BOOT_VERSION 0x0204010Bu
+#define TEST_CANDIDATE_BOOT_VERSION 0x0204010Cu
+#define TEST_SOFTDEVICE_FAMILY      140u
+#define TEST_SOFTDEVICE_FWID        0x00B6u
 
 #if defined(MOTA_SD_BOOTLOADER_UPDATE)
   #define TEST_BOARD_ID       0x239A0071u
@@ -62,6 +70,11 @@ static int      g_settings_writes, g_mbr_calls, g_mbr_success;
 static uint32_t g_mbr_source, g_mbr_words, g_corrupt_write_address;
 static uint16_t g_bank0, g_bank0_crc;
 static uint32_t g_bank0_size;
+static bootloader_image_info_t g_installed_boot_info;
+static uint16_t g_runtime_fwid;
+#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+static mota_sd_auth_t SD_AUTH;
+#endif
 #if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_BOOTLOADER_UPDATE)
 static jmp_buf  g_power_cut_env;
 static int      g_power_cut_armed, g_power_cut_after_page;
@@ -131,6 +144,15 @@ int otah_crc_bound_app_size(uint32_t *size) {
   return g_bank0 == 0x01u && g_bank0_crc != 0u;
 }
 
+int otah_installed_boot_info(bootloader_image_info_t *info) {
+  *info = g_installed_boot_info;
+  return 1;
+}
+
+uint16_t otah_runtime_softdevice_fwid(void) {
+  return g_runtime_fwid;
+}
+
 bool ota_qspi_init(void) {
   g_qspi_init_calls++;
   return true;
@@ -161,6 +183,12 @@ bool ota_qspi_write(uint32_t offset, const void *src, uint32_t len) {
 }
 
 #if defined(MOTA_SD_BOOTLOADER_UPDATE)
+void otah_sd_auth_read(void *dst, uint32_t len) {
+  memcpy(dst, &SD_AUTH, len);
+}
+void otah_sd_auth_consume(void) {
+  memset(&SD_AUTH, 0, sizeof(SD_AUTH));
+}
 bool ota_sd_init(void) {
   g_qspi_init_calls++;
   return true;
@@ -211,7 +239,8 @@ static void sha_bytes(const uint8_t *data, uint32_t len, uint8_t out[32]) {
 }
 
 static void fix_image_crc(uint8_t *image) {
-  bootloader_update_manifest_t *m = (void *)(image + MANIFEST_OFFSET);
+  bootloader_update_manifest_t *m =
+    &((bootloader_update_envelope_t *)(void *)(image + MANIFEST_OFFSET))->manifest;
   m->crc32 = 0;
   m->crc32 = bootloader_image_crc32(image, MOTA_NRF52_BL_SIZE,
                                     MANIFEST_OFFSET + offsetof(bootloader_update_manifest_t, crc32));
@@ -237,8 +266,10 @@ static uint8_t *make_boot_image(uint32_t board_id, uint16_t abi, uint8_t storage
   caps->storage_flags[0] = storage_flags;
   memset(caps->storage_flags + 1, 0, 3);
 
-  bootloader_update_manifest_t *m = (void *)(image + MANIFEST_OFFSET);
-  memset(m, 0, sizeof(*m));
+  bootloader_update_envelope_t *envelope =
+    (void *)(image + MANIFEST_OFFSET);
+  memset(envelope, 0, sizeof(*envelope));
+  bootloader_update_manifest_t *m = &envelope->manifest;
   m->magic0      = BOOTLOADER_UPDATE_MANIFEST_MAGIC0;
   m->magic1      = BOOTLOADER_UPDATE_MANIFEST_MAGIC1;
   m->version     = BOOTLOADER_UPDATE_MANIFEST_VERSION;
@@ -247,6 +278,15 @@ static uint8_t *make_boot_image(uint32_t board_id, uint16_t abi, uint8_t storage
   m->image_size  = MOTA_NRF52_BL_SIZE;
   m->board_id    = board_id;
   memcpy(m->device_name, TEST_DEVICE_NAME, sizeof(TEST_DEVICE_NAME) - 1u);
+  envelope->extension.magic0 = BOOTLOADER_UPDATE_EXTENSION_MAGIC0;
+  envelope->extension.magic1 = BOOTLOADER_UPDATE_EXTENSION_MAGIC1;
+  envelope->extension.version = BOOTLOADER_UPDATE_EXTENSION_VERSION;
+  envelope->extension.header_size = sizeof(envelope->extension);
+  envelope->extension.boot_version = TEST_CANDIDATE_BOOT_VERSION;
+  envelope->extension.softdevice_family = TEST_SOFTDEVICE_FAMILY;
+  envelope->extension.softdevice_fwid = TEST_SOFTDEVICE_FWID;
+  envelope->extension.app_base = MOTA_NRF52_APP_BASE;
+  envelope->extension.layout_abi = BOOTLOADER_UPDATE_LAYOUT_ABI;
   fix_image_crc(image);
   return image;
 }
@@ -270,7 +310,7 @@ static uint8_t *make_mota(const uint8_t *image, uint32_t image_len, uint8_t form
   manifest[1]       = flags;
   manifest[2]       = 0x12u;
   wr32(manifest + 3, target_id);
-  wr32(manifest + 7, 0x02040100u);
+  wr32(manifest + 7, TEST_CANDIDATE_BOOT_VERSION);
   wr32(manifest + 11, image_len);
   wr32(manifest + 15, image_len);
   manifest[19] = TEST_BLOCK_LOG2;
@@ -353,6 +393,9 @@ static void reset_device(void) {
   }
   memcpy(OLD_BL_SNAPSHOT, FLASH + MOTA_NRF52_BL_START, sizeof(OLD_BL_SNAPSHOT));
   memset(QSPI, 0xFF, sizeof(QSPI));
+#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+  memset(&SD_AUTH, 0, sizeof(SD_AUTH));
+#endif
   g_gpregret              = GPREGRET_BOOTLOADER_APPLY;
   g_gpregret2             = TEST_SOURCE;
   g_qspi_init_calls       = 0;
@@ -367,6 +410,12 @@ static void reset_device(void) {
   g_bank0                  = 0x01u;
   g_bank0_crc              = 0u;
   g_bank0_size             = TEST_PRESERVE_END - MOTA_NRF52_APP_BASE;
+  g_installed_boot_info.boot_version = TEST_INSTALLED_BOOT_VERSION;
+  g_installed_boot_info.softdevice_family = TEST_SOFTDEVICE_FAMILY;
+  g_installed_boot_info.softdevice_fwid = TEST_SOFTDEVICE_FWID;
+  g_installed_boot_info.app_base = MOTA_NRF52_APP_BASE;
+  g_installed_boot_info.layout_abi = BOOTLOADER_UPDATE_LAYOUT_ABI;
+  g_runtime_fwid = TEST_SOFTDEVICE_FWID;
 #if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_BOOTLOADER_UPDATE)
   g_power_cut_armed       = 0;
   g_power_cut_after_page  = 0;
@@ -380,6 +429,26 @@ static void reset_device(void) {
   g_qspi_total_size = 0;
 #endif
 }
+
+#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+static void authorize_sd(const uint8_t *mota, uint32_t total,
+                         uint8_t purpose, uint8_t format_ver) {
+  const uint32_t sectors = (total + MOTA_SD_SECTOR_SIZE - 1u) /
+                           MOTA_SD_SECTOR_SIZE;
+  sha256_ctx_t ctx;
+  uint8_t container_hash[32];
+  static const uint8_t zero_approval[MOTA_SD_AUTH_APPROVAL_LEN];
+  sha256_init(&ctx);
+  sha256_update(&ctx, mota, MOTA_SD_AUTH_APPROVAL_OFFSET);
+  sha256_update(&ctx, zero_approval, sizeof(zero_approval));
+  sha256_update(&ctx, mota + MOTA_SD_AUTH_APPROVAL_OFFSET +
+                MOTA_SD_AUTH_APPROVAL_LEN,
+                total - MOTA_SD_AUTH_APPROVAL_OFFSET - MOTA_SD_AUTH_APPROVAL_LEN);
+  sha256_final(&ctx, container_hash);
+  mota_sd_auth_encode(&SD_AUTH, purpose, format_ver, SD_FIRST_SECTOR,
+                      sectors, total, SD_CARD_SECTORS, container_hash);
+}
+#endif
 
 static void stage(const uint8_t *mota, uint32_t total) {
 #if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
@@ -395,16 +464,7 @@ static void stage(const uint8_t *mota, uint32_t total) {
     exit(2);
   }
   memcpy(QSPI + SD_FIRST_SECTOR * MOTA_SD_SECTOR_SIZE, mota, total);
-  uint8_t *handoff = QSPI + MOTA_SD_HANDOFF_SECTOR * MOTA_SD_SECTOR_SIZE;
-  memset(handoff, 0xFF, MOTA_SD_SECTOR_SIZE);
-  memcpy(handoff, MOTA_SD_HANDOFF_MAGIC, sizeof(MOTA_SD_HANDOFF_MAGIC));
-  wr32(handoff + 8u, MOTA_SD_HANDOFF_VERSION);
-  wr32(handoff + 12u, SD_FIRST_SECTOR);
-  wr32(handoff + 16u, sectors);
-  wr32(handoff + 20u, total);
-  wr32(handoff + 24u, ~total);
-  wr32(handoff + 28u, SD_CARD_SECTORS);
-  wr32(handoff + 32u, mota_sd_handoff_crc32(handoff, 32u));
+  authorize_sd(mota, total, MOTA_SD_AUTH_PURPOSE_BOOTLOADER, 3u);
   uint8_t token[MOTA_SD_BOOT_TOKEN_LEN];
   mota_sd_boot_token_encode(token, total, mota + 8u + 24u);
   memcpy(FLASH + MOTA_NRF52_BL_SCRATCH_START, token, sizeof(token));
@@ -423,6 +483,15 @@ static int rejected_with(uint8_t *mota, uint32_t total, uint32_t result) {
   bool applied = ota_delta_check_and_apply();
   return !applied && g_gpregret == 0 && g_gpregret2 == result && g_mbr_calls == 0 &&
          g_settings_writes == 0 && app_unchanged() && old_bootloader_unchanged();
+}
+
+static int accepted_with(uint8_t *mota, uint32_t total) {
+  reset_device();
+  stage(mota, total);
+  g_mbr_success = 1;
+  const bool applied = ota_delta_check_and_apply();
+  return applied && g_gpregret2 == GPREGRET2_BL_MBR_HANDOFF && g_mbr_calls == 1 &&
+         app_unchanged();
 }
 
 static void report(const char *name, int ok, int *failures) {
@@ -456,8 +525,7 @@ int main(void) {
 #elif defined(MOTA_SD_BOOTLOADER_UPDATE)
            g_qspi_init_calls == 1 && g_qspi_deinit_calls == 1 && g_qspi_writes == 0 &&
            memcmp(QSPI + SD_FIRST_SECTOR * MOTA_SD_SECTOR_SIZE + 201u, APRV, sizeof(APRV)) == 0 &&
-           memcmp(QSPI + MOTA_SD_HANDOFF_SECTOR * MOTA_SD_SECTOR_SIZE,
-                  MOTA_SD_HANDOFF_MAGIC, sizeof(MOTA_SD_HANDOFF_MAGIC)) == 0 &&
+           memcmp(&SD_AUTH, &(mota_sd_auth_t){0}, sizeof(SD_AUTH)) == 0 &&
 #else
            g_qspi_init_calls == 1 && g_qspi_deinit_calls == 1 && g_qspi_writes == 1 &&
 #endif
@@ -638,13 +706,71 @@ int main(void) {
   report("zero firmware version is rejected", rejected_with(bad, total, GPREGRET2_BL_POLICY), &failures);
   free(bad);
 
+  bad = make_mota(image, MOTA_NRF52_BL_SIZE, 3,
+                  MFLAG_FULL | MFLAG_SIGNED | MFLAG_BOOTLOADER,
+                  TEST_TARGET_ID, TEST_HW_ID, &total);
+  wr32(bad + 8u + 7u, TEST_CANDIDATE_BOOT_VERSION + 1u);
+  report("outer package version must equal embedded boot version",
+         rejected_with(bad, total, GPREGRET2_BL_MANIFEST), &failures);
+  free(bad);
+
+  uint8_t *bad_image = make_boot_image(board_base, 3, required_caps);
+  bootloader_update_envelope_t *bad_envelope =
+    (void *)(bad_image + MANIFEST_OFFSET);
+  bad_envelope->extension.boot_version = TEST_INSTALLED_BOOT_VERSION;
+  fix_image_crc(bad_image);
+  bad = make_mota(bad_image, MOTA_NRF52_BL_SIZE, 3,
+                  MFLAG_FULL | MFLAG_SIGNED | MFLAG_BOOTLOADER,
+                  TEST_TARGET_ID, TEST_HW_ID, &total);
+  wr32(bad + 8u + 7u, TEST_INSTALLED_BOOT_VERSION);
+  report("equal-version/downgrade candidate is rejected",
+         rejected_with(bad, total, GPREGRET2_BL_MANIFEST), &failures);
+  free(bad);
+  free(bad_image);
+
+  bad_image = make_boot_image(board_base, 3, required_caps);
+  bad_envelope = (void *)(bad_image + MANIFEST_OFFSET);
+  bad_envelope->extension.softdevice_fwid ^= 1u;
+  fix_image_crc(bad_image);
+  bad = make_mota(bad_image, MOTA_NRF52_BL_SIZE, 3,
+                  MFLAG_FULL | MFLAG_SIGNED | MFLAG_BOOTLOADER,
+                  TEST_TARGET_ID, TEST_HW_ID, &total);
+  report("candidate SoftDevice FWID mismatch is rejected",
+         rejected_with(bad, total, GPREGRET2_BL_MANIFEST), &failures);
+  free(bad);
+  free(bad_image);
+
+  bad_image = make_boot_image(board_base, 3, required_caps);
+  bad_envelope = (void *)(bad_image + MANIFEST_OFFSET);
+  bad_envelope->extension.app_base += MOTA_NRF52_FLASH_PAGE;
+  fix_image_crc(bad_image);
+  bad = make_mota(bad_image, MOTA_NRF52_BL_SIZE, 3,
+                  MFLAG_FULL | MFLAG_SIGNED | MFLAG_BOOTLOADER,
+                  TEST_TARGET_ID, TEST_HW_ID, &total);
+  report("candidate application-base mismatch is rejected",
+         rejected_with(bad, total, GPREGRET2_BL_MANIFEST), &failures);
+  free(bad);
+  free(bad_image);
+
+  bad_image = make_boot_image(board_base, 3, required_caps);
+  bad_envelope = (void *)(bad_image + MANIFEST_OFFSET);
+  bad_envelope->extension.layout_abi++;
+  fix_image_crc(bad_image);
+  bad = make_mota(bad_image, MOTA_NRF52_BL_SIZE, 3,
+                  MFLAG_FULL | MFLAG_SIGNED | MFLAG_BOOTLOADER,
+                  TEST_TARGET_ID, TEST_HW_ID, &total);
+  report("candidate layout ABI mismatch is rejected",
+         rejected_with(bad, total, GPREGRET2_BL_MANIFEST), &failures);
+  free(bad);
+  free(bad_image);
+
   bad = make_mota(image, MOTA_NRF52_BL_SIZE, 3, MFLAG_FULL | MFLAG_SIGNED | MFLAG_BOOTLOADER,
                   TEST_TARGET_ID, TEST_HW_ID, &total);
   bad[8u + 24u] ^= 1u;
   report("bad payload image hash is rejected", rejected_with(bad, total, GPREGRET2_BL_INTEGRITY), &failures);
   free(bad);
 
-  uint8_t *bad_image = make_boot_image(board_base, 3, required_caps);
+  bad_image = make_boot_image(board_base, 3, required_caps);
   ((bootloader_update_manifest_t *)(bad_image + MANIFEST_OFFSET))->crc32 ^= 1u;
   bad = make_mota(bad_image, MOTA_NRF52_BL_SIZE, 3, MFLAG_FULL | MFLAG_SIGNED | MFLAG_BOOTLOADER,
                   TEST_TARGET_ID, TEST_HW_ID, &total);
@@ -720,6 +846,72 @@ int main(void) {
   free(bad);
   free(bad_image);
 
+  bad_image = make_boot_image(board_base, 3, MOTA_BL_STORAGE_BOOT_UPDATE);
+  fix_image_crc(bad_image);
+  bad = make_mota(bad_image, MOTA_NRF52_BL_SIZE, 3,
+                  MFLAG_FULL | MFLAG_SIGNED | MFLAG_BOOTLOADER,
+                  TEST_TARGET_ID, TEST_HW_ID, &total);
+  report("bare boot-update capability without a backend is rejected",
+         rejected_with(bad, total, GPREGRET2_BL_MANIFEST), &failures);
+  free(bad);
+  free(bad_image);
+
+  bad_image = make_boot_image(board_base, 3, required_caps);
+  memcpy(bad_image + CAPS_OFFSET + sizeof(mota_bl_info_t), bad_image + CAPS_OFFSET,
+         sizeof(mota_bl_info_t));
+  ((mota_bl_info_t *)(bad_image + CAPS_OFFSET + sizeof(mota_bl_info_t)))
+    ->storage_flags[0] = MOTA_BL_STORAGE_BOOT_UPDATE;
+  fix_image_crc(bad_image);
+  bad = make_mota(bad_image, MOTA_NRF52_BL_SIZE, 3,
+                  MFLAG_FULL | MFLAG_SIGNED | MFLAG_BOOTLOADER,
+                  TEST_TARGET_ID, TEST_HW_ID, &total);
+  report("exact plus bare boot-update capability is ambiguous",
+         rejected_with(bad, total, GPREGRET2_BL_MANIFEST), &failures);
+  free(bad);
+  free(bad_image);
+
+  const uint8_t other_profile =
+    required_caps == (MOTA_BL_STORAGE_SD | MOTA_BL_STORAGE_BOOT_UPDATE)
+      ? (MOTA_BL_STORAGE_STAGE_CEILING | MOTA_BL_STORAGE_BOOT_UPDATE)
+      : (MOTA_BL_STORAGE_SD | MOTA_BL_STORAGE_BOOT_UPDATE);
+  bad_image = make_boot_image(board_base, 3, required_caps);
+  memcpy(bad_image + CAPS_OFFSET + sizeof(mota_bl_info_t), bad_image + CAPS_OFFSET,
+         sizeof(mota_bl_info_t));
+  ((mota_bl_info_t *)(bad_image + CAPS_OFFSET + sizeof(mota_bl_info_t)))
+    ->storage_flags[0] = other_profile;
+  fix_image_crc(bad_image);
+  bad = make_mota(bad_image, MOTA_NRF52_BL_SIZE, 3,
+                  MFLAG_FULL | MFLAG_SIGNED | MFLAG_BOOTLOADER,
+                  TEST_TARGET_ID, TEST_HW_ID, &total);
+  report("exact plus another valid backend capability is ambiguous",
+         rejected_with(bad, total, GPREGRET2_BL_MANIFEST), &failures);
+  free(bad);
+  free(bad_image);
+
+  bad_image = make_boot_image(board_base, 3, required_caps);
+  memcpy(bad_image + CAPS_OFFSET + sizeof(mota_bl_info_t), bad_image + CAPS_OFFSET,
+         sizeof(mota_bl_info_t));
+  ((mota_bl_info_t *)(bad_image + CAPS_OFFSET + sizeof(mota_bl_info_t)))
+    ->storage_flags[1] = 1u;
+  fix_image_crc(bad_image);
+  bad = make_mota(bad_image, MOTA_NRF52_BL_SIZE, 3,
+                  MFLAG_FULL | MFLAG_SIGNED | MFLAG_BOOTLOADER,
+                  TEST_TARGET_ID, TEST_HW_ID, &total);
+  report("malformed reserved-byte decoy does not hide the exact capability",
+         accepted_with(bad, total), &failures);
+  free(bad);
+  free(bad_image);
+
+  bad_image = make_boot_image(board_base, 0x0100u, required_caps);
+  fix_image_crc(bad_image);
+  bad = make_mota(bad_image, MOTA_NRF52_BL_SIZE, 3,
+                  MFLAG_FULL | MFLAG_SIGNED | MFLAG_BOOTLOADER,
+                  TEST_TARGET_ID, TEST_HW_ID, &total);
+  report("capability ABI is parsed as little-endian u16",
+         accepted_with(bad, total), &failures);
+  free(bad);
+  free(bad_image);
+
   bad_image = make_boot_image(board_base, 3, required_caps);
   memcpy(bad_image + CAPS_OFFSET - sizeof(mota_bl_info_t), bad_image + CAPS_OFFSET,
          sizeof(mota_bl_info_t));
@@ -776,6 +968,9 @@ int main(void) {
 #else
   g_gpregret2 = TEST_SOURCE;
 #endif
+#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+  authorize_sd(mota, total, MOTA_SD_AUTH_PURPOSE_APP, 2u);
+#endif
   applied     = ota_delta_check_and_apply();
   report("ordinary app trigger rejects format-v3/bootloader payload", !applied && g_gpregret2 == 0xB3u &&
            g_mbr_calls == 0
@@ -791,6 +986,7 @@ int main(void) {
                   "APP_TEST", &total);
   reset_device();
   stage(bad, total);
+  authorize_sd(bad, total, MOTA_SD_AUTH_PURPOSE_APP, 2u);
   g_gpregret  = GPREGRET_OTA_APPLY;
   g_gpregret2 = TEST_SOURCE;
   applied     = ota_delta_check_and_apply();

@@ -131,11 +131,27 @@ STATIC_ASSERT(FAT_ENTRIES_PER_SECTOR                       ==       256); // FAT
 #define STR0(x) #x
 #define STR(x) STR0(x)
 
-char infoUf2File[256] =
-    "UF2 Bootloader " UF2_VERSION "\r\n"
-    "Model: " UF2_PRODUCT_NAME "\r\n"
-    "Board-ID: " UF2_BOARD_ID "\r\n"
-    "Date: " __DATE__ "\r\n";
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_QSPI_BOOTLOADER_UPDATE) || \
+    defined(MOTA_SD_BOOTLOADER_UPDATE)
+  // Self-update builds use the build-bound SoftDevice label already exposed by
+  // BLE DIS. This avoids carrying a runtime decimal formatter and oversized
+  // mutable suffix buffer in the flash-constrained, fail-closed bootloader.
+  #define INFO_UF2_INITIAL_CONTENT \
+    "UF2 Bootloader " BLEDIS_FW_VERSION "\r\n" \
+    "Model: " UF2_PRODUCT_NAME "\r\n" \
+    "Board-ID: " UF2_BOARD_ID "\r\n" \
+    "Date: " __DATE__ "\r\n"
+const char infoUf2File[] = INFO_UF2_INITIAL_CONTENT;
+#else
+  #define INFO_UF2_INITIAL_CONTENT \
+    "UF2 Bootloader " UF2_VERSION "\r\n" \
+    "Model: " UF2_PRODUCT_NAME "\r\n" \
+    "Board-ID: " UF2_BOARD_ID "\r\n" \
+    "Date: " __DATE__ "\r\n"
+
+  // Keep enough room for the runtime "SoftDevice: S<id> x.y.z" suffix.
+  char infoUf2File[sizeof(INFO_UF2_INITIAL_CONTENT) + 48] = INFO_UF2_INITIAL_CONTENT;
+#endif
 
 const char indexFile[] =
     "<!doctype html>\n"
@@ -255,6 +271,8 @@ static inline bool in_uicr_space(uint32_t addr)
 
 void uf2_init(void)
 {
+#if !defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) && !defined(MOTA_QSPI_BOOTLOADER_UPDATE) && \
+    !defined(MOTA_SD_BOOTLOADER_UPDATE)
   strcat(infoUf2File, "SoftDevice: ");
 
   if ( is_sd_existed() )
@@ -289,6 +307,7 @@ void uf2_init(void)
   {
     strcat(infoUf2File, "not found\r\n");
   }
+#endif
 }
 
 /*------------------------------------------------------------------*/
@@ -570,9 +589,11 @@ int write_block(uint32_t block_no, uint8_t* data, WriteState* state) {
       flash_nrf5x_flush(false);
       uint32_t const expected_board_id = ((uint32_t)USB_DESC_VID << 16) | USB_DESC_UF2_PID;
       uint8_t const* staged_image = (uint8_t const*)(uintptr_t)BOOTLOADER_ADDR_NEW_RECEIVED;
+      extern const bootloader_update_envelope_t bootloaderUpdateManifest;
       if (!state->has_uicr || !state->bootloaderStagingErased ||
           !bootloader_image_validate(staged_image, BOOTLOADER_ADDR_START, DFU_BL_IMAGE_MAX_SIZE,
-                                     expected_board_id, DEVICE_NAME)) {
+                                     expected_board_id,
+                                     bootloaderUpdateManifest.manifest.device_name)) {
         PRINTF("Bootloader image validation failed\r\n");
         state->aborted = true;
       }

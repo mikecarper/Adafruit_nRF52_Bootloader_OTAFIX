@@ -389,9 +389,53 @@ endif()
 #----------------------------------
 # Get UF2 version from git
 #----------------------------------
-execute_process(COMMAND git describe --dirty --always --tags OUTPUT_VARIABLE GIT_VERSION)
-string(STRIP ${GIT_VERSION} GIT_VERSION)
+execute_process(
+  COMMAND git describe --dirty --always --tags
+  WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+  OUTPUT_VARIABLE GIT_VERSION)
+string(STRIP "${GIT_VERSION}" GIT_VERSION)
 string(REGEX REPLACE "-[0-9]+-g[0-9a-f]+(-dirty)?$" "" GIT_VERSION_BASE "${GIT_VERSION}")
+
+execute_process(
+  COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/tools/derive_otafix_version.py
+          "${GIT_VERSION}" --hex
+  RESULT_VARIABLE MOTA_VERSION_RESULT
+  OUTPUT_VARIABLE MOTA_BOOTLOADER_VERSION
+  ERROR_VARIABLE MOTA_VERSION_ERROR
+  OUTPUT_STRIP_TRAILING_WHITESPACE)
+if(DEFINED MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE)
+  if(NOT MOTA_BOOTLOADER_TEST_BUILD)
+    message(FATAL_ERROR "MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE requires MOTA_BOOTLOADER_TEST_BUILD=ON")
+  endif()
+  set(MOTA_BOOTLOADER_VERSION ${MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE})
+  string(APPEND GIT_VERSION "-test-version-${MOTA_BOOTLOADER_VERSION}")
+elseif(NOT MOTA_VERSION_RESULT EQUAL 0 OR MOTA_BOOTLOADER_VERSION STREQUAL "")
+  message(FATAL_ERROR "Cannot derive OTAFIX X.Y.Z[-preview.N] from '${GIT_VERSION}': ${MOTA_VERSION_ERROR}")
+endif()
+execute_process(
+  COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/tools/softdevice_fwid.py
+          "${SD_HEX}" --app-base
+  RESULT_VARIABLE MOTA_APP_BASE_RESULT
+  OUTPUT_VARIABLE MOTA_APP_BASE
+  ERROR_VARIABLE MOTA_APP_BASE_ERROR
+  OUTPUT_STRIP_TRAILING_WHITESPACE)
+if(NOT MOTA_APP_BASE_RESULT EQUAL 0 OR MOTA_APP_BASE STREQUAL "")
+  message(FATAL_ERROR "Cannot derive application base from '${SD_HEX}': ${MOTA_APP_BASE_ERROR}")
+endif()
+
+if(NOT SD_NAME MATCHES "^s([0-9]+)$")
+  message(FATAL_ERROR "Cannot derive SoftDevice family from SD_NAME='${SD_NAME}'")
+endif()
+set(MOTA_SOFTDEVICE_FAMILY ${CMAKE_MATCH_1})
+execute_process(
+  COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/tools/softdevice_fwid.py "${SD_HEX}"
+  RESULT_VARIABLE MOTA_FWID_RESULT
+  OUTPUT_VARIABLE MOTA_SOFTDEVICE_FWID
+  ERROR_VARIABLE MOTA_FWID_ERROR
+  OUTPUT_STRIP_TRAILING_WHITESPACE)
+if(NOT MOTA_FWID_RESULT EQUAL 0 OR MOTA_SOFTDEVICE_FWID STREQUAL "")
+  message(FATAL_ERROR "Cannot derive SoftDevice FWID from '${SD_HEX}': ${MOTA_FWID_ERROR}")
+endif()
 
 # Extract semantic version numbers (MAJOR.MINOR.PATCH) from GIT_VERSION.
 # Supports tags like:
@@ -417,6 +461,10 @@ target_compile_definitions(bootloader PUBLIC
   UF2_VERSION="${GIT_VERSION}"
   BLEDIS_FW_VERSION="${GIT_VERSION} ${SD_NAME} ${SD_VERSION}"
   MK_BOOTLOADER_VERSION=${MK_BOOTLOADER_VERSION}
+  MOTA_BOOTLOADER_VERSION=${MOTA_BOOTLOADER_VERSION}
+  MOTA_SOFTDEVICE_FAMILY=${MOTA_SOFTDEVICE_FAMILY}
+  MOTA_SOFTDEVICE_FWID=${MOTA_SOFTDEVICE_FWID}
+  MOTA_APP_BASE=${MOTA_APP_BASE}
   )
 
 # Add bin/hex output. For USB-capable targets the manifest patcher also emits a
@@ -431,6 +479,8 @@ if (MCU_VARIANT STREQUAL "nrf52")
     $<TARGET_FILE:bootloader>
     $<TARGET_FILE_DIR:bootloader>/bootloader.bin
     )
+  set(BOOTLOADER_VERIFY_COMMAND ${CMAKE_COMMAND} -E true)
+  set(BOOTLOADER_MERGED_VERIFY_COMMAND ${CMAKE_COMMAND} -E true)
 else ()
   set(BOOTLOADER_BIN_COMMAND
     ${Python_EXECUTABLE}
@@ -439,12 +489,29 @@ else ()
     --bin-out
     $<TARGET_FILE_DIR:bootloader>/bootloader.bin
     )
+  set(BOOTLOADER_VERIFY_COMMAND
+    ${Python_EXECUTABLE}
+    ${CMAKE_CURRENT_LIST_DIR}/tools/patch_bootloader_manifest.py
+    $<TARGET_FILE_DIR:bootloader>/bootloader.hex
+    --verify
+    )
+  set(BOOTLOADER_MERGED_VERIFY_COMMAND
+    ${Python_EXECUTABLE}
+    ${CMAKE_CURRENT_LIST_DIR}/tools/patch_bootloader_manifest.py
+    $<TARGET_FILE_DIR:bootloader>/bootloader_mbr.hex
+    --verify
+    )
 endif ()
 
 add_custom_command(TARGET bootloader POST_BUILD
   COMMAND ${CMAKE_OBJCOPY} -Oihex $<TARGET_FILE:bootloader> $<TARGET_FILE_DIR:bootloader>/bootloader.hex
   COMMAND ${BOOTLOADER_BIN_COMMAND}
-  COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/tools/hexmerge.py --overlap=replace -o $<TARGET_FILE_DIR:bootloader>/bootloader_mbr.hex $<TARGET_FILE_DIR:bootloader>/bootloader.hex ${MBR_HEX}
+  COMMAND ${BOOTLOADER_VERIFY_COMMAND}
+  # Slicing each Intel HEX input from address zero discards incompatible
+  # execution-start records while retaining the default fail-on-data-overlap
+  # merge policy.
+  COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/tools/hexmerge.py -o $<TARGET_FILE_DIR:bootloader>/bootloader_mbr.hex $<TARGET_FILE_DIR:bootloader>/bootloader.hex:0: ${MBR_HEX}:0:
+  COMMAND ${BOOTLOADER_MERGED_VERIFY_COMMAND}
   COMMAND ${Python_EXECUTABLE} ${UF2CONV_PY} -f ${UF2_FAMILY_ID_BOOTLOADER} -c -o $<TARGET_FILE_DIR:bootloader>/bootloader_mbr.uf2 $<TARGET_FILE_DIR:bootloader>/bootloader_mbr.hex
   VERBATIM)
 
@@ -457,7 +524,7 @@ endif()
 
 add_custom_target(flash-bootloader
   DEPENDS bootloader
-  COMMAND ${NRFJPROG} --program $<TARGET_FILE:bootloader> --verify --sectoranduicrerase -f nrf52 --reset
+  COMMAND ${NRFJPROG} --program $<TARGET_FILE_DIR:bootloader>/bootloader.hex --verify --sectoranduicrerase -f nrf52 --reset
   )
 
 add_custom_target(flash-uf2
@@ -481,7 +548,7 @@ add_custom_target(flash-erase
 add_custom_target(flash-all
   DEPENDS bootloader flash-erase
   COMMAND ${NRFJPROG} --program ${SD_HEX} --verify --sectorerase -f nrf52
-  COMMAND ${NRFJPROG} --program $<TARGET_FILE:bootloader> --verify --sectoranduicrerase -f nrf52 --reset
+  COMMAND ${NRFJPROG} --program $<TARGET_FILE_DIR:bootloader>/bootloader.hex --verify --sectoranduicrerase -f nrf52 --reset
   )
 
 # flash skip crc magic ( app valid = 0x0001, crc = 0x0000 )

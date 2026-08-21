@@ -13,7 +13,7 @@
 
 #include "ota_layout.h"
 #if defined(MOTA_SD_CARD)
-  #include "ota_sd_handoff.h"
+  #include "ota_sd_auth.h"
 #endif
 
 #define FLASH_LEN       MOTA_NRF52_APP_END
@@ -25,6 +25,7 @@ static const char TEST_HW_ID[] = "Heltec_tower_v2_sdcard";
 static uint8_t    FLASH[FLASH_LEN];
 #if defined(MOTA_SD_CARD)
 static uint8_t SD_CARD[SD_CARD_SECTORS * MOTA_SD_SECTOR_SIZE];
+static mota_sd_auth_t SD_AUTH;
   #define STORE_NAME "SD"
 #elif defined(MOTA_QSPI_FLASH)
 static uint8_t QSPI_FLASH[2u * 1024u * 1024u];
@@ -95,6 +96,14 @@ void otah_settings_commit(uint16_t bank0, uint16_t crc, uint32_t size) {
 }
 
 #if defined(MOTA_SD_CARD)
+void otah_sd_auth_read(void *dst, uint32_t len) {
+  memcpy(dst, &SD_AUTH, len);
+}
+
+void otah_sd_auth_consume(void) {
+  memset(&SD_AUTH, 0, sizeof(SD_AUTH));
+}
+
 bool ota_sd_init(void) {
   g_sd_init_calls++;
   return true;
@@ -305,6 +314,7 @@ static void reset_device(const uint8_t *base, uint32_t base_len) {
   }
 #if defined(MOTA_SD_CARD)
   memset(SD_CARD, 0xFF, sizeof(SD_CARD));
+  memset(&SD_AUTH, 0, sizeof(SD_AUTH));
 #else
   memset(QSPI_FLASH, 0xFF, sizeof(QSPI_FLASH));
 #endif
@@ -339,17 +349,19 @@ static int stage_external_mota(const uint8_t *mota, uint32_t total) {
   }
   memcpy(SD_CARD + SD_FIRST_SECTOR * MOTA_SD_SECTOR_SIZE, mota, total);
   memcpy(SD_CARD + SD_FIRST_SECTOR * MOTA_SD_SECTOR_SIZE + 8u + 193u, APRV, sizeof(APRV));
-
-  uint8_t *handoff = SD_CARD + MOTA_SD_HANDOFF_SECTOR * MOTA_SD_SECTOR_SIZE;
-  memset(handoff, 0xFF, MOTA_SD_SECTOR_SIZE);
-  memcpy(handoff, MOTA_SD_HANDOFF_MAGIC, sizeof(MOTA_SD_HANDOFF_MAGIC));
-  wr32(handoff + 8, MOTA_SD_HANDOFF_VERSION);
-  wr32(handoff + 12, SD_FIRST_SECTOR);
-  wr32(handoff + 16, sectors);
-  wr32(handoff + 20, total);
-  wr32(handoff + 24, ~total);
-  wr32(handoff + 28, SD_CARD_SECTORS);
-  wr32(handoff + 32, mota_sd_handoff_crc32(handoff, 32));
+  sha256_ctx_t ctx;
+  uint8_t digest[32];
+  static const uint8_t zero_approval[MOTA_SD_AUTH_APPROVAL_LEN];
+  sha256_init(&ctx);
+  sha256_update(&ctx, SD_CARD + SD_FIRST_SECTOR * MOTA_SD_SECTOR_SIZE,
+                MOTA_SD_AUTH_APPROVAL_OFFSET);
+  sha256_update(&ctx, zero_approval, sizeof(zero_approval));
+  sha256_update(&ctx, SD_CARD + SD_FIRST_SECTOR * MOTA_SD_SECTOR_SIZE +
+                MOTA_SD_AUTH_APPROVAL_OFFSET + MOTA_SD_AUTH_APPROVAL_LEN,
+                total - MOTA_SD_AUTH_APPROVAL_OFFSET - MOTA_SD_AUTH_APPROVAL_LEN);
+  sha256_final(&ctx, digest);
+  mota_sd_auth_encode(&SD_AUTH, MOTA_SD_AUTH_PURPOSE_APP, 2u,
+                      SD_FIRST_SECTOR, sectors, total, SD_CARD_SECTORS, digest);
   return 1;
 #else
   if (total > sizeof(QSPI_FLASH)) {
@@ -481,7 +493,7 @@ int main(int argc, char **argv) {
     return 2;
   }
 #if defined(MOTA_SD_CARD)
-  SD_CARD[MOTA_SD_HANDOFF_SECTOR * MOTA_SD_SECTOR_SIZE + 32] ^= 1u;
+  SD_AUTH.crc32 ^= 1u;
 #else
   QSPI_FLASH[0] ^= 1u;
 #endif
@@ -493,6 +505,59 @@ int main(int argc, char **argv) {
     printf("FAIL applied=%d bank=0x%X settings=%d\n", applied, g_bank0, g_settings_writes);
     failures++;
   }
+
+#if defined(MOTA_SD_CARD)
+  printf("[4] noncanonical SD sector geometry is rejected before card access: ");
+  reset_device(base, (uint32_t)base_len);
+  if (!stage_external_mota(delta, (uint32_t)delta_len)) {
+    return 2;
+  }
+  SD_AUTH.sector_count++;
+  SD_AUTH.crc32 = mota_sd_auth_crc32((const uint8_t *)&SD_AUTH,
+                                     offsetof(mota_sd_auth_t, crc32));
+  SD_AUTH.crc32_inv = ~SD_AUTH.crc32;
+  applied = ota_delta_check_and_apply();
+  if (!applied && g_sd_init_calls == 0 && g_settings_writes == 0 &&
+      memcmp(&SD_AUTH, &(mota_sd_auth_t){0}, sizeof(SD_AUTH)) == 0 &&
+      memcmp(FLASH + MOTA_NRF52_APP_BASE, base, (size_t)base_len) == 0) {
+    printf("PASS\n");
+  } else {
+    printf("FAIL applied=%d sd_init=%d settings=%d\n",
+           applied, g_sd_init_calls, g_settings_writes);
+    failures++;
+  }
+
+  printf("[5] SD A->B removable-media swap is non-destructive: ");
+  reset_device(base, (uint32_t)base_len);
+  if (!stage_external_mota(full, full_len)) {
+    return 2;
+  }
+  // Retained authorization still binds signed A. Replace it with a different
+  // self-consistent, approved full-image B of identical geometry.
+  uint8_t *swap_image = malloc(large_len);
+  memcpy(swap_image, large, large_len);
+  swap_image[large_len / 2u] ^= 1u;
+  uint32_t swap_total = 0;
+  uint8_t *swap_mota = make_full_mota(swap_image, large_len, &swap_total);
+  if (swap_total != full_len) {
+    return 2;
+  }
+  memcpy(SD_CARD + SD_FIRST_SECTOR * MOTA_SD_SECTOR_SIZE, swap_mota,
+         swap_total);
+  free(swap_mota);
+  free(swap_image);
+  applied = ota_delta_check_and_apply();
+  if (!applied && g_gpregret2 == 0xBDu && g_bank0 == BANK_VALID_APP_V &&
+      g_settings_writes == 0 && g_app_write_while_valid == 0 &&
+      memcmp(FLASH + MOTA_NRF52_APP_BASE, base, (size_t)base_len) == 0 &&
+      memcmp(&SD_AUTH, &(mota_sd_auth_t){0}, sizeof(SD_AUTH)) == 0) {
+    printf("PASS\n");
+  } else {
+    printf("FAIL applied=%d result=0x%X bank=0x%X settings=%d\n",
+           applied, g_gpregret2, g_bank0, g_settings_writes);
+    failures++;
+  }
+#endif
 
 #if defined(MOTA_QSPI_FLASH)
   printf("[4] QSPI approval write failure leaves application valid: ");

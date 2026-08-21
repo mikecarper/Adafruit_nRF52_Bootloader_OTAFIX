@@ -69,8 +69,14 @@ Each board lives in `src/boards/{board_name}/` with:
 - `pinconfig.c` - CF2 bootloader configuration (flash/RAM size, UF2 family ID)
 
 ### Memory Layout (linker scripts in `linker/`)
-- The nRF52840 executable FLASH region is 40,704 bytes at `0xF4000..0xFDF00`; the board-bound
-  bootloader configuration occupies the following 256-byte region at `0xFDF00..0xFE000`
+- The nRF52840 executable FLASH region is 40,784 bytes at `0xF4000..0xFDF50`; the board-bound
+  88-byte CF2 configuration starts at `0xFDF50`, followed by a 12-byte reserved gap and the fixed
+  76-byte BLMF+BLM2 envelope at `0xFDFB4..0xFE000`. CF2 consumers locate the configuration by its
+  magic rather than a fixed address; linker assertions prevent either section from overflowing.
+- Released bootloader images are board-bound and are not post-build CF2-patchable. Any CF2 mutation
+  invalidates the whole-image BLMF CRC, and expanding the generic CF2 record can overwrite the fixed
+  envelope. Use `tools/otafix_cf2.py` for read-only inspection; it refuses protected mutations before
+  invoking the bundled patcher. Change `pinconfig.c`, rebuild, and regenerate the manifest CRC instead.
 - No heap (`__HEAP_SIZE=0`), static allocation only
 - Special sections: double-reset detection word, bond info for OTA, MBR params, bootloader settings
 

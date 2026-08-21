@@ -75,11 +75,16 @@ else
 endif
 
 GIT_VERSION := $(shell git describe --dirty --always --tags)
-# This OTAFIX fork is released as tags of the form 0.9.2-OTAFIX<major>.<minor>. An untagged
-# build makes `git describe` fall back to a bare commit hash, which the MK_BOOTLOADER_VERSION
-# parser below cannot split into major.minor.patch - substitute the release string instead.
-ifeq (,$(findstring OTAFIX,$(GIT_VERSION)))
-GIT_VERSION := 0.9.2-OTAFIX2.4
+MOTA_BOOTLOADER_VERSION := $(shell $(PYTHON) tools/derive_otafix_version.py "$(GIT_VERSION)" --hex 2>$(NULL_DEVICE))
+ifneq ($(MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE),)
+  ifneq ($(MOTA_BOOTLOADER_TEST_BUILD),1)
+    $(error MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE requires MOTA_BOOTLOADER_TEST_BUILD=1)
+  endif
+  MOTA_BOOTLOADER_VERSION := $(MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE)
+  GIT_VERSION := $(GIT_VERSION)-test-version-$(MOTA_BOOTLOADER_VERSION)
+endif
+ifeq ($(MOTA_BOOTLOADER_VERSION),)
+  $(error Cannot derive OTAFIX X.Y.Z[-preview.N] from GIT_VERSION='$(GIT_VERSION)')
 endif
 GIT_SUBMODULE_VERSIONS := $(shell git submodule status | cut -d" " -f3,4 | paste -s -d" " -)
 GIT_VERSION_BASE := $(shell echo "$(GIT_VERSION)" | sed -E 's/-[0-9]+-g[0-9a-f]+(-dirty)?$$//')
@@ -170,6 +175,15 @@ endif
 
 SD_NAME_UPPER = $(subst s,S,${SD_NAME})
 CFLAGS += -D$(SD_NAME_UPPER)
+MOTA_SOFTDEVICE_FAMILY := $(patsubst s%,%,$(SD_NAME))
+MOTA_SOFTDEVICE_FWID := $(shell $(PYTHON) tools/softdevice_fwid.py "$(SD_HEX)" 2>$(NULL_DEVICE))
+MOTA_APP_BASE := $(shell $(PYTHON) tools/softdevice_fwid.py "$(SD_HEX)" --app-base 2>$(NULL_DEVICE))
+ifeq ($(MOTA_SOFTDEVICE_FWID),)
+  $(error Cannot derive SoftDevice FWID from '$(SD_HEX)')
+endif
+ifeq ($(MOTA_APP_BASE),)
+  $(error Cannot derive application base from '$(SD_HEX)')
+endif
 
 #----------------------------------
 # ANT_LICENSE_KEY handling
@@ -405,6 +419,10 @@ CFLAGS += -DUF2_VERSION_BASE='"$(GIT_VERSION_BASE)"'
 CFLAGS += -DUF2_VERSION='"$(GIT_VERSION)"'
 CFLAGS += -DBLEDIS_FW_VERSION='"$(GIT_VERSION) $(SD_NAME) $(SD_VERSION)"'
 CFLAGS += -DDFU_USB_ENUMERATION_TIMEOUT_MS=$(DFU_USB_ENUMERATION_TIMEOUT_MS)
+CFLAGS += -DMOTA_BOOTLOADER_VERSION=$(MOTA_BOOTLOADER_VERSION)
+CFLAGS += -DMOTA_SOFTDEVICE_FAMILY=$(MOTA_SOFTDEVICE_FAMILY)
+CFLAGS += -DMOTA_SOFTDEVICE_FWID=$(MOTA_SOFTDEVICE_FWID)
+CFLAGS += -DMOTA_APP_BASE=$(MOTA_APP_BASE)
 
 ifeq ($(SIGNED_FW), 1)
 CFLAGS += -DSIGNED_FW
@@ -544,13 +562,17 @@ $(BUILD)/$(OUT_NAME).hex: $(BUILD)/$(OUT_NAME).out tools/patch_bootloader_manife
 	@$(OBJCOPY) -O ihex $< $@
 ifneq ($(MCU_SUB_VARIANT),nrf52)
 	@$(PYTHON) tools/patch_bootloader_manifest.py $@
+	@$(PYTHON) tools/patch_bootloader_manifest.py $@ --verify
 endif
 
 # MBR + bootloader hex. The old `_nosd` name meant "no SoftDevice", but was
 # easily mistaken for "no SD card support"; `_mbr` names what is present.
 $(BUILD)/$(OUT_NAME)_mbr.hex: $(BUILD)/$(OUT_NAME).hex
 	@echo Create $(notdir $@)
-	@$(PYTHON) tools/hexmerge.py --overlap=replace -o $@ $< $(MBR_HEX)
+	@$(PYTHON) tools/hexmerge.py -o $@ $<:0: $(MBR_HEX):0:
+ifneq ($(MCU_SUB_VARIANT),nrf52)
+	@$(PYTHON) tools/patch_bootloader_manifest.py $@ --verify
+endif
 
 # Bootloader self-update UF2 containing the MBR + bootloader.
 $(BUILD)/update-$(OUT_NAME)_mbr.uf2: $(BUILD)/$(OUT_NAME)_mbr.hex

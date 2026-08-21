@@ -49,14 +49,28 @@ destination pages, proving the application and installed bootloader stay byte-id
 untouched, the trigger is consumed, and a partial slot cannot retry.
 
 The SD bootloader test pins the MeshTower V2 identity, exact `0x09` (`SD|BOOT_UPDATE`) capability, and
-distinct `GPREGRET2=0x53` handoff. Because the SD backend is read-only, it also proves that `APRV` and
-the checksummed handoff remain on the card while the consumed `GPREGRET=0x6B` trigger keeps them inert
-on a normal reset. A 64-byte internal token binds the signed manifest's full `image_hash`, so the suite
-also rejects a removable-media swap before the first scratch erase and proves page zero consumes the token.
+distinct `GPREGRET2=0x53` source marker. It supplies the exact 72-byte `MOTASDA2` retained-RAM record,
+proves the record is zero-consumed before any SD access, and rejects wrong purpose/format, geometry,
+CRC, normalized full-container hash, and a self-consistent A-to-B removable-media swap. Because the SD
+backend is read-only, `APRV` remains on the card, but the consumed RAM authorization and
+`GPREGRET=0x6B` make the file inert on a normal reset. A separate 64-byte internal token binds the signed
+manifest's full `image_hash` for format-3 bootloader updates and page zero consumes that token.
 It checks the independently hashed live `EndF` and CRC-bound bank-size boundary before every possible
 scratch erase, both full and in-place successor codecs, readback/full-image verification, all ten page-level
 power cuts, and preservation of ordinary SD application updates through `0xED000` even though bootloader
 scratch begins at `0xE0000`.
+
+The bootloader-image tests require the authoritative `BLMF`+`BLM2` envelope in the final 76 bytes of the
+raw image, reject a relocated-only envelope and a 75-byte undersized input, and prove decoy bytes cannot
+override the fixed record. The format-3 suites additionally reject outer/embedded version disagreement,
+equal-version and downgrade candidates, SoftDevice FWID, application-base, and layout mismatch, invalid
+version channels, and loss of either required successor codec. `manifest_patcher_test.py` independently
+enforces the same fixed offset in the HEX post-link tool.
+
+`cf2_guard_test.py` exercises the supported OTAFIX CF2 wrapper with raw BIN and UF2 images using the
+production `0x9F50` CF2 / `0x9FB4` manifest layout. It preserves read-only inspection, refuses
+BLMF-protected mutation without changing the file, exercises legacy mutation through the transactional
+Node `fs` shim, and rejects growth beyond the pre-existing zero-padded CF2 span.
 
 The suite also exercises the no-valid-image USB recovery wait: no VBUS falls through to BLE without any
 delay, a USB host has the full 30-second default grace period to enumerate, enumeration at the deadline

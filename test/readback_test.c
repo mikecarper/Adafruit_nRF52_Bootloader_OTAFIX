@@ -91,6 +91,18 @@ int otah_mbr_copy_bl(uint32_t source, uint32_t word_count) {
 
 #include "ota_delta.c"   // unit under test (its static page-cache g_cache_page/g_cache_dirty are visible here)
 
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+int otah_installed_boot_info(bootloader_image_info_t *info) {
+    info->boot_version = 0x0204010Cu;
+    info->softdevice_family = 140u;
+    info->softdevice_fwid = 0x00B6u;
+    info->app_base = MOTA_NRF52_APP_BASE;
+    info->layout_abi = BOOTLOADER_UPDATE_LAYOUT_ABI;
+    return 1;
+}
+uint16_t otah_runtime_softdevice_fwid(void) { return 0x00B6u; }
+#endif
+
 // ----- vector loading + flash layout (mirrors apply_sim.c) -----
 static uint8_t *g_base, *g_mota, *g_expect;
 static long     g_base_n, g_mota_n, g_exp_n;

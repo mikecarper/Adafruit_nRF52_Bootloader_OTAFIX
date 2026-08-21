@@ -1,0 +1,2 @@
+Makefile whitespace=cr-at-eol
+linker/*.ld whitespace=cr-at-eol
