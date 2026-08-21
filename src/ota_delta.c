@@ -11,7 +11,7 @@
 #if defined(MOTA_QSPI_FLASH)
   #include "ota_qspi.h"
 #endif
-#if defined(MOTA_QSPI_BOOTLOADER_UPDATE)
+#if defined(MOTA_QSPI_BOOTLOADER_UPDATE) || defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
   #include "usb/uf2/bootloader_image.h"
 #endif
 #include "detools/detools.h"
@@ -23,6 +23,18 @@
     (MOTA_BL_STORAGE_QSPI | MOTA_BL_STORAGE_STAGE_CEILING | MOTA_BL_STORAGE_BOOT_UPDATE)
 #else
   #define MOTA_QSPI_STORAGE_FLAGS (MOTA_BL_STORAGE_QSPI | MOTA_BL_STORAGE_STAGE_CEILING)
+#endif
+
+#if defined(MOTA_QSPI_BOOTLOADER_UPDATE) || defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+  #define MOTA_BOOTLOADER_UPDATE_ENABLED 1
+#endif
+
+#if defined(MOTA_QSPI_BOOTLOADER_UPDATE)
+  #define MOTA_BOOT_UPDATE_STORAGE_FLAGS MOTA_QSPI_STORAGE_FLAGS
+#elif defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+  // No backend bit means the normal internal staging window. GPREGRET 0x6A vs
+  // 0x6B selects an application vs bootloader package in that shared window.
+  #define MOTA_BOOT_UPDATE_STORAGE_FLAGS (MOTA_BL_STORAGE_STAGE_CEILING | MOTA_BL_STORAGE_BOOT_UPDATE)
 #endif
 
 // Capability marker the running MeshCore app scans for (see ota_bl_info.h). `used` + the reference in
@@ -37,6 +49,9 @@ __attribute__((used, aligned(4))) const mota_bl_info_t g_mota_bl_info = {
 #elif defined(MOTA_QSPI_FLASH)
   (uint16_t)((1u << 0) | (1u << 2)), // QSPI: full images and in-place deltas
   {MOTA_QSPI_STORAGE_FLAGS, 0, 0, 0},
+#elif defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+  (uint16_t)((1u << 0) | (1u << 2)), // internal staging: bootloader full image + app in-place delta
+  {MOTA_BOOT_UPDATE_STORAGE_FLAGS, 0, 0, 0},
 #else
   (uint16_t)(1u << 2),                      // internal flash: in-place deltas only
   {MOTA_BL_STORAGE_STAGE_CEILING, 0, 0, 0}, // GPREGRET2 selects the safe staging ceiling
@@ -101,7 +116,7 @@ static uint16_t crc16_region(uint32_t a, uint32_t len) {
   #include "bootloader_types.h"
   #include "bootloader_settings.h"
   #include "dfu_types.h"
-  #if defined(MOTA_QSPI_BOOTLOADER_UPDATE)
+  #if defined(MOTA_BOOTLOADER_UPDATE_ENABLED)
     #include "usb/uf2/uf2cfg.h"
     #include "nrf_mbr.h"
   #endif
@@ -158,6 +173,25 @@ static void otah_settings_commit(uint16_t bank0, uint16_t crc, uint32_t size) {
   #define BANK_INVALID_APP_V 0xFFu
 #endif
 
+#if defined(MOTA_QSPI_BOOTLOADER_UPDATE) && defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+  #error "Select exactly one bootloader-update staging backend"
+#endif
+
+#if defined(MOTA_BOOTLOADER_UPDATE_ENABLED)
+  #if !defined(USB_DESC_VID) || !defined(USB_DESC_UF2_PID) || !defined(DEVICE_NAME)
+    #error "Bootloader update requires USB_DESC_VID, USB_DESC_UF2_PID, and DEVICE_NAME identity"
+  #endif
+  #if !defined(OTA_DELTA_HOST_TEST) && !defined(NRF52840_XXAA)
+    #error "App-preserving bootloader update requires the nRF52840 1 MiB flash layout"
+  #endif
+  #define BOOT_UPDATE_BOARD_ID (((uint32_t)USB_DESC_VID << 16) | USB_DESC_UF2_PID)
+  #if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+    #define APP_APPLY_END MOTA_NRF52_APP_END
+  #else
+    #define APP_APPLY_END MOTA_NRF52_BL_SCRATCH_START
+  #endif
+#endif
+
 #if defined(MOTA_QSPI_BOOTLOADER_UPDATE)
   #if !defined(MOTA_QSPI_FLASH)
     #error "MOTA_QSPI_BOOTLOADER_UPDATE requires MOTA_QSPI_FLASH"
@@ -166,8 +200,10 @@ static void otah_settings_commit(uint16_t bank0, uint16_t crc, uint32_t size) {
     (!defined(USB_DESC_UF2_PID) || (USB_DESC_UF2_PID != 0x0044 && USB_DESC_UF2_PID != 0x0045))
     #error "MOTA_QSPI_BOOTLOADER_UPDATE is supported only on XIAO nRF52840 / Sense"
   #endif
-  #define BOOT_UPDATE_BOARD_ID (((uint32_t)USB_DESC_VID << 16) | USB_DESC_UF2_PID)
-  #define APP_APPLY_END        MOTA_NRF52_BL_SCRATCH_START
+#elif defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+  #if defined(MOTA_QSPI_FLASH) || defined(MOTA_SD_CARD)
+    #error "MOTA_INTERNAL_BOOTLOADER_UPDATE requires internal-only OTA storage"
+  #endif
 #else
   #define APP_APPLY_END MOTA_NRF52_APP_END
 #endif
@@ -208,6 +244,12 @@ static void inherited_watchdog_feed(void) {
 static uint32_t rd_u32(const uint8_t *p) {
   return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
+
+#if defined(MOTA_BOOTLOADER_UPDATE_ENABLED)
+static uint16_t rd_u16(const uint8_t *p) {
+  return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
+}
+#endif
 
 #if defined(MOTA_SD_CARD)
 static uint32_t g_sd_first_sector;
@@ -537,7 +579,7 @@ static int parse_mota_at(uint32_t addr, uint32_t limit, struct mota_min *o) {
   br_skip(&r, 4 + 4); // MAGIC + MOTA_TOTAL_SIZE (already validated above)
   o->format_ver = br_u8(&r);
   if (o->format_ver != 2
-#if defined(MOTA_QSPI_BOOTLOADER_UPDATE)
+#if defined(MOTA_BOOTLOADER_UPDATE_ENABLED)
       && o->format_ver != 3
 #endif
   ) {
@@ -696,6 +738,25 @@ static int find_body_len(uint32_t app_limit, uint32_t *body_len_out) {
   return 0;
 }
 
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+// A shared internal slot is safe only when the live application ends before
+// it. Do not trust a marker-shaped byte sequence alone: bind the first EndF to
+// the body by recomputing its truncated SHA-256 before any staged page is
+// erased or rewritten.
+bool ota_delta_live_app_fits_below(uint32_t limit) {
+  uint32_t body_len;
+  if (limit <= APP_BASE + ENDF_LEN || !find_body_len(limit, &body_len) || body_len == 0 ||
+      body_len > limit - APP_BASE - ENDF_LEN) {
+    return 0;
+  }
+  uint8_t expected[8];
+  uint8_t actual[32];
+  fl_read(APP_BASE + body_len + 8u, expected, sizeof(expected));
+  sha256_region(APP_BASE, body_len, actual);
+  return memcmp(actual, expected, sizeof(expected)) == 0;
+}
+#endif
+
 static int clear_approval(const struct mota_min *o) {
 #if defined(MOTA_SD_CARD)
   // The trigger was already consumed from GPREGRET. The app invalidates sector
@@ -720,9 +781,9 @@ static int clear_approval(const struct mota_min *o) {
 #endif
 }
 
-#if defined(MOTA_SD_CARD) || defined(MOTA_QSPI_FLASH)
 static bool finish_apply(bool result);
 
+#if defined(MOTA_SD_CARD) || defined(MOTA_QSPI_FLASH) || defined(MOTA_BOOTLOADER_UPDATE_ENABLED)
 static int sha256_staged_region(uint32_t offset, uint32_t len, uint8_t out[32]) {
   sha256_ctx_t c;
   sha256_init(&c);
@@ -740,12 +801,44 @@ static int sha256_staged_region(uint32_t offset, uint32_t len, uint8_t out[32]) 
   sha256_final(&c, out);
   return 1;
 }
+#endif
 
-#if defined(MOTA_QSPI_BOOTLOADER_UPDATE)
-#if USB_DESC_UF2_PID == 0x0044
+#if defined(MOTA_BOOTLOADER_UPDATE_ENABLED)
+#if defined(MOTA_QSPI_BOOTLOADER_UPDATE) && USB_DESC_UF2_PID == 0x0044
 static const uint8_t BOOT_UPDATE_HW_ID[32] = "XIAO_BL_28860044";
-#else
+#elif defined(MOTA_QSPI_BOOTLOADER_UPDATE)
 static const uint8_t BOOT_UPDATE_HW_ID[32] = "XIAO_BL_28860045";
+#endif
+
+#define BOOT_UPDATE_BLOCK_COUNT    40u
+#define BOOT_UPDATE_PAYLOAD_OFFSET (8u + MOTA_MFL + (BOOT_UPDATE_BLOCK_COUNT * 4u))
+#define BOOT_UPDATE_PACKAGE_SIZE   (BOOT_UPDATE_PAYLOAD_OFFSET + MOTA_NRF52_BL_SIZE + sizeof(TRAILER))
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+  #define BOOT_UPDATE_RAW_START MOTA_NRF52_INTERNAL_BL_SLOT_START
+#else
+  #define BOOT_UPDATE_RAW_START MOTA_NRF52_BL_SCRATCH_START
+#endif
+
+typedef char boot_update_raw_start_must_be_page_aligned
+  [((BOOT_UPDATE_RAW_START & (MOTA_NRF52_FLASH_PAGE - 1u)) == 0) ? 1 : -1];
+typedef char boot_update_raw_image_must_end_before_bootloader
+  [((BOOT_UPDATE_RAW_START + MOTA_NRF52_BL_SIZE) <= MOTA_NRF52_BL_START) ? 1 : -1];
+typedef char boot_update_device_name_must_fit_manifest
+  [(sizeof(DEVICE_NAME) <= BOOTLOADER_UPDATE_DEVICE_NAME_SIZE) ? 1 : -1];
+
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+typedef char boot_update_internal_slot_end_must_be_page_aligned
+  [((MOTA_NRF52_INTERNAL_BL_SLOT_END & (MOTA_NRF52_FLASH_PAGE - 1u)) == 0) ? 1 : -1];
+typedef char boot_update_internal_package_must_bottom_align_at_slot_start
+  [(((MOTA_NRF52_INTERNAL_BL_SLOT_END - BOOT_UPDATE_PACKAGE_SIZE) &
+     ~(MOTA_NRF52_FLASH_PAGE - 1u)) == MOTA_NRF52_INTERNAL_BL_SLOT_START) ? 1 : -1];
+typedef char boot_update_internal_raw_must_fit_shared_slot
+  [((MOTA_NRF52_INTERNAL_BL_SLOT_START + MOTA_NRF52_BL_SIZE) <= MOTA_NRF52_INTERNAL_BL_SLOT_END) ? 1 : -1];
+typedef char boot_update_internal_compaction_offset_must_fit_one_page
+  [(BOOT_UPDATE_PAYLOAD_OFFSET > 0u && BOOT_UPDATE_PAYLOAD_OFFSET < MOTA_NRF52_FLASH_PAGE) ? 1 : -1];
+typedef char boot_update_internal_source_must_fit_shared_slot
+  [((MOTA_NRF52_INTERNAL_BL_SLOT_START + BOOT_UPDATE_PAYLOAD_OFFSET + MOTA_NRF52_BL_SIZE) <=
+    MOTA_NRF52_INTERNAL_BL_SLOT_END) ? 1 : -1];
 #endif
 
 #ifndef OTA_DELTA_HOST_TEST
@@ -753,9 +846,47 @@ typedef char boot_update_start_must_match_dfu
   [(BOOTLOADER_ADDR_START == MOTA_NRF52_BL_START) ? 1 : -1];
 typedef char boot_update_size_must_match_dfu
   [(DFU_BL_IMAGE_MAX_SIZE == MOTA_NRF52_BL_SIZE) ? 1 : -1];
+#if defined(MOTA_QSPI_BOOTLOADER_UPDATE)
 typedef char boot_update_scratch_must_match_dfu
   [(BOOTLOADER_ADDR_NEW_RECEIVED == MOTA_NRF52_BL_SCRATCH_START) ? 1 : -1];
 #endif
+#endif
+
+static int boot_update_expected_identity(uint8_t hw_id[32], uint32_t *target_id) {
+#if defined(MOTA_QSPI_BOOTLOADER_UPDATE)
+  memcpy(hw_id, BOOT_UPDATE_HW_ID, sizeof(BOOT_UPDATE_HW_ID));
+  *target_id = BOOT_UPDATE_BOARD_ID;
+  return 1;
+#else
+  static const uint8_t prefix[7] = {'N', 'R', 'F', '_', 'B', 'L', '_'};
+  static const char    hex[16]   = "0123456789ABCDEF";
+  static const char    name[]    = DEVICE_NAME;
+  const uint32_t       name_len  = sizeof(name) - 1u;
+  if (BOOT_UPDATE_BOARD_ID == 0 || BOOT_UPDATE_BOARD_ID == UINT32_MAX || name_len == 0 || name_len > 15u) {
+    return 0;
+  }
+  memset(hw_id, 0, 32);
+  memcpy(hw_id, prefix, sizeof(prefix));
+  for (uint32_t i = 0; i < 8u; i++) {
+    hw_id[7u + i] = (uint8_t)hex[(BOOT_UPDATE_BOARD_ID >> (28u - 4u * i)) & 0x0Fu];
+  }
+  hw_id[15] = '_';
+  for (uint32_t i = 0; i < name_len; i++) {
+    const uint8_t ch = (uint8_t)name[i];
+    if (ch < 0x21u || ch > 0x7Eu) {
+      return 0;
+    }
+    hw_id[16u + i] = ch;
+  }
+  uint8_t hash[32];
+  sha256_ctx_t ctx;
+  sha256_init(&ctx);
+  sha256_update(&ctx, hw_id, 32);
+  sha256_final(&ctx, hash);
+  *target_id = rd_u32(hash);
+  return *target_id != 0 && *target_id != UINT32_MAX;
+#endif
+}
 
 static int boot_vectors_valid(const uint8_t vectors[8]) {
   const uint32_t initial_sp = rd_u32(vectors);
@@ -783,11 +914,17 @@ static int boot_payload_integrity_valid(const struct mota_min *m) {
 
 static int boot_update_policy_valid(const struct mota_min *m) {
   static const uint8_t zeros[8];
+  uint8_t              expected_hw_id[32];
+  uint32_t             expected_target_id;
+  if (!boot_update_expected_identity(expected_hw_id, &expected_target_id)) {
+    return 0;
+  }
   return m->format_ver == 3 && m->flags == (MFLAG_FULL | MFLAG_SIGNED | MFLAG_BOOTLOADER) &&
          m->hash_algo == 0x12u && m->is_full && m->codec_id == CODEC_FULL &&
-         m->target_id == BOOT_UPDATE_BOARD_ID && m->fw_version != 0 &&
-         memcmp(m->hw_id, BOOT_UPDATE_HW_ID, sizeof(m->hw_id)) == 0 &&
-         memcmp(m->base_hash, zeros, sizeof(zeros)) == 0 && m->block_size_log2 == 10u && m->block_count == 40u &&
+         m->target_id == expected_target_id && m->fw_version != 0 &&
+         memcmp(m->hw_id, expected_hw_id, sizeof(m->hw_id)) == 0 &&
+         memcmp(m->base_hash, zeros, sizeof(zeros)) == 0 && m->block_size_log2 == 10u &&
+         m->block_count == BOOT_UPDATE_BLOCK_COUNT &&
          m->image_size == MOTA_NRF52_BL_SIZE && m->payload_size == MOTA_NRF52_BL_SIZE;
 }
 
@@ -796,47 +933,73 @@ extern const uint8_t *otah_flash_pointer(uint32_t address, uint32_t len);
 extern int            otah_mbr_copy_bl(uint32_t source, uint32_t word_count);
 #endif
 
-static const uint8_t *boot_scratch_pointer(void) {
+static const uint8_t *boot_image_pointer(uint32_t address) {
 #ifdef OTA_DELTA_HOST_TEST
-  return otah_flash_pointer(MOTA_NRF52_BL_SCRATCH_START, MOTA_NRF52_BL_SIZE);
+  return otah_flash_pointer(address, MOTA_NRF52_BL_SIZE);
 #else
-  return (const uint8_t *)(uintptr_t)MOTA_NRF52_BL_SCRATCH_START;
+  return (const uint8_t *)(uintptr_t)address;
 #endif
 }
 
-static int boot_scratch_caps_valid(const uint8_t *image) {
+static int boot_image_caps_valid(const uint8_t *image) {
   static const uint8_t magic[8] = {MOTA_BL_MAGIC0, MOTA_BL_MAGIC1, MOTA_BL_MAGIC2, MOTA_BL_MAGIC3,
                                    MOTA_BL_MAGIC4, MOTA_BL_MAGIC5, MOTA_BL_MAGIC6, MOTA_BL_MAGIC7};
   // Scan every aligned match: a magic copy in a literal pool must not hide the
-  // real capability marker later in the image.
+  // real capability marker later in the image. There must be exactly one
+  // structurally valid exact-profile marker; duplicate continuity metadata is
+  // ambiguous and therefore rejected.
+  uint32_t matches = 0;
   for (uint32_t off = 0; off + sizeof(mota_bl_info_t) <= MOTA_NRF52_BL_SIZE; off += 4u) {
-    const mota_bl_info_t *caps = (const void *)(image + off);
-    if (memcmp(caps->magic, magic, sizeof(magic)) == 0 && caps->apply_abi >= 3u &&
-        caps->apply_abi != UINT16_MAX &&
-        (caps->codec_mask & (1u << CODEC_FULL)) != 0 &&
-        (caps->storage_flags[0] & (MOTA_BL_STORAGE_QSPI | MOTA_BL_STORAGE_BOOT_UPDATE)) ==
-          (MOTA_BL_STORAGE_QSPI | MOTA_BL_STORAGE_BOOT_UPDATE) &&
-        (caps->storage_flags[0] & 0xF0u) == 0 &&
-        (caps->storage_flags[1] | caps->storage_flags[2] | caps->storage_flags[3]) == 0) {
-      return 1;
+    // The internal staged payload begins 365 bytes into its container, so its
+    // base is deliberately unaligned even though marker offsets within the
+    // raw image are 4-byte aligned. Read every field as bytes: even an enabled
+    // Cortex-M UNALIGN_TRP cannot fault this validation path.
+    const uint8_t *candidate = image + off;
+    int magic_equal = 1;
+    for (uint32_t i = 0; i < sizeof(magic); i++) {
+      if (candidate[i] != magic[i]) {
+        magic_equal = 0;
+        break;
+      }
+    }
+    const uint16_t apply_abi  = rd_u16(candidate + offsetof(mota_bl_info_t, apply_abi));
+    const uint16_t codec_mask = rd_u16(candidate + offsetof(mota_bl_info_t, codec_mask));
+    const uint8_t *storage    = candidate + offsetof(mota_bl_info_t, storage_flags);
+    if (magic_equal && apply_abi >= 3u && apply_abi != UINT16_MAX &&
+        (codec_mask & (1u << CODEC_FULL)) != 0 && storage[0] == MOTA_BOOT_UPDATE_STORAGE_FLAGS &&
+        (storage[1] | storage[2] | storage[3]) == 0) {
+      if (++matches > 1u) {
+        return 0;
+      }
     }
   }
-  return 0;
+  return matches == 1u;
 }
 
-static int copy_bootloader_to_scratch(const struct mota_min *m) {
+static int boot_image_metadata_valid_at(uint32_t address) {
+  const uint8_t *image = boot_image_pointer(address);
+  return image && bootloader_image_validate(image, MOTA_NRF52_BL_START, MOTA_NRF52_BL_SIZE,
+                                            BOOT_UPDATE_BOARD_ID, DEVICE_NAME) &&
+         boot_image_caps_valid(image);
+}
+
+static int copy_bootloader_to_raw_source(const struct mota_min *m) {
   uint8_t readback[256];
   for (uint32_t off = 0; off < MOTA_NRF52_BL_SIZE; off += PAGE) {
     inherited_watchdog_feed();
+    // Internal staging deliberately overlaps the destination. The payload is
+    // BOOT_UPDATE_PAYLOAD_OFFSET bytes ahead (365 for the exact v3 profile).
+    // Read the complete source page into RAM before erasing the lower
+    // destination page; all future source bytes are above that page.
     if (!staged_read(m->payload_addr + off, g_cache, PAGE)) {
       return 0;
     }
-    fl_erase(MOTA_NRF52_BL_SCRATCH_START + off);
+    fl_erase(BOOT_UPDATE_RAW_START + off);
     inherited_watchdog_feed();
-    fl_write_words(MOTA_NRF52_BL_SCRATCH_START + off, (const uint32_t *)g_cache, PAGE / 4u);
+    fl_write_words(BOOT_UPDATE_RAW_START + off, (const uint32_t *)g_cache, PAGE / 4u);
     for (uint32_t page_off = 0; page_off < PAGE; page_off += sizeof(readback)) {
       inherited_watchdog_feed();
-      fl_read(MOTA_NRF52_BL_SCRATCH_START + off + page_off, readback, sizeof(readback));
+      fl_read(BOOT_UPDATE_RAW_START + off + page_off, readback, sizeof(readback));
       if (memcmp(readback, g_cache + page_off, sizeof(readback)) != 0) {
         return 0;
       }
@@ -844,24 +1007,17 @@ static int copy_bootloader_to_scratch(const struct mota_min *m) {
   }
 
   uint8_t hash[32];
-  sha256_region(MOTA_NRF52_BL_SCRATCH_START, MOTA_NRF52_BL_SIZE, hash);
+  sha256_region(BOOT_UPDATE_RAW_START, MOTA_NRF52_BL_SIZE, hash);
   return memcmp(hash, m->image_hash, sizeof(hash)) == 0;
-}
-
-static int boot_scratch_metadata_valid(void) {
-  const uint8_t *scratch = boot_scratch_pointer();
-  return scratch && bootloader_image_validate(scratch, MOTA_NRF52_BL_START, MOTA_NRF52_BL_SIZE,
-                                              BOOT_UPDATE_BOARD_ID, DEVICE_NAME) &&
-         boot_scratch_caps_valid(scratch);
 }
 
 static int mbr_copy_bootloader(void) {
 #ifdef OTA_DELTA_HOST_TEST
-  return otah_mbr_copy_bl(MOTA_NRF52_BL_SCRATCH_START, MOTA_NRF52_BL_SIZE / 4u);
+  return otah_mbr_copy_bl(BOOT_UPDATE_RAW_START, MOTA_NRF52_BL_SIZE / 4u);
 #else
   sd_mbr_command_t command = {
     .command = SD_MBR_COMMAND_COPY_BL,
-    .params.copy_bl.bl_src = (uint32_t *)MOTA_NRF52_BL_SCRATCH_START,
+    .params.copy_bl.bl_src = (uint32_t *)BOOT_UPDATE_RAW_START,
     .params.copy_bl.bl_len = MOTA_NRF52_BL_SIZE / 4u,
   };
   (void)sd_mbr_command(&command); // success does not return
@@ -877,17 +1033,28 @@ static bool boot_update_reject(const struct mota_min *m, uint32_t result) {
   return finish_apply(false);
 }
 
-static bool apply_bootloader_external(void) {
+static uint32_t scan_bootloader_mota(struct mota_min *m, uint32_t source) {
+#if defined(MOTA_QSPI_BOOTLOADER_UPDATE)
+  if (source != GPREGRET2_OTA_STAGE_QSPI) {
+    return 0;
+  }
+  g_qspi_source = 1;
+  return scan_mota(m, APP_APPLY_END);
+#else
+  if (source != GPREGRET2_OTA_STAGE_EXPANDED) {
+    return 0;
+  }
+  const uint32_t address = scan_mota(m, MOTA_NRF52_INTERNAL_BL_SLOT_END);
+  return address == MOTA_NRF52_INTERNAL_BL_SLOT_START ? address : 0;
+#endif
+}
+
+static bool apply_bootloader_update(void) {
   const uint32_t source = gpregret2_get();
   gpregret_set(0); // consume first: every validation/copy failure is fail-closed
   gpregret2_set(GPREGRET2_BL_GATE);
-  if (source != GPREGRET2_OTA_STAGE_QSPI) {
-    gpregret2_set(GPREGRET2_BL_CONTAINER);
-    return finish_apply(false);
-  }
-  g_qspi_source = 1;
   struct mota_min m;
-  if (!scan_mota(&m, APP_APPLY_END) || !m.approved) {
+  if (!scan_bootloader_mota(&m, source) || !m.approved) {
     gpregret2_set(GPREGRET2_BL_CONTAINER);
     return finish_apply(false);
   }
@@ -897,26 +1064,38 @@ static bool apply_bootloader_external(void) {
   if (!staged_vectors_valid(m.payload_addr) || !boot_payload_integrity_valid(&m)) {
     return boot_update_reject(&m, GPREGRET2_BL_INTEGRITY);
   }
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+  // Validate both sides of the safety boundary while the exact staged package
+  // is still intact. Neither check relies on the application's approval.
+  if (!ota_delta_live_app_fits_below(MOTA_NRF52_INTERNAL_BL_SLOT_START)) {
+    return boot_update_reject(&m, GPREGRET2_BL_POLICY);
+  }
+  if (!boot_image_metadata_valid_at(m.payload_addr)) {
+    return boot_update_reject(&m, GPREGRET2_BL_MANIFEST);
+  }
+#endif
   if (!clear_approval(&m)) {
     gpregret2_set(GPREGRET2_BL_APPROVAL);
     return finish_apply(false);
   }
-  if (!copy_bootloader_to_scratch(&m)) {
+  if (!copy_bootloader_to_raw_source(&m)) {
     gpregret2_set(GPREGRET2_BL_COPY);
     return finish_apply(false);
   }
-  // Scratch is outside the application and old bootloader. Validate the exact
-  // embedded board manifest/CRC and continuity capability before the MBR sees
-  // it; a reset before this point simply boots the unchanged old image.
-  if (!boot_scratch_metadata_valid()) {
+  // Revalidate the exact embedded board manifest/CRC and continuity capability
+  // from the final raw MBR source. A reset before the MBR call boots the
+  // unchanged application and old bootloader.
+  if (!boot_image_metadata_valid_at(BOOT_UPDATE_RAW_START)) {
     gpregret2_set(GPREGRET2_BL_MANIFEST);
     return finish_apply(false);
   }
 
-  // The external flash is no longer needed. Finish its pending operations and
-  // enter deep power-down before asking the MBR to replace this bootloader.
+  // External QSPI is no longer needed after the scratch copy. Finish pending
+  // operations and enter deep power-down before handing control to the MBR.
+#if defined(MOTA_QSPI_BOOTLOADER_UPDATE)
   ota_qspi_deinit();
   g_qspi_source = 0;
+#endif
   gpregret2_set(GPREGRET2_BL_MBR_HANDOFF);
   if (mbr_copy_bootloader()) {
     return true; // host-only success model; hardware success never returns
@@ -924,8 +1103,9 @@ static bool apply_bootloader_external(void) {
   gpregret2_set(GPREGRET2_BL_MBR_RETURNED);
   return false;
 }
-#endif // MOTA_QSPI_BOOTLOADER_UPDATE
+#endif // MOTA_BOOTLOADER_UPDATE_ENABLED
 
+#if defined(MOTA_SD_CARD) || defined(MOTA_QSPI_FLASH)
 static bool apply_full_external(const struct mota_min *m) {
   if (!m->is_full || m->codec_id != CODEC_FULL || m->image_size == 0 || m->payload_size != m->image_size ||
       m->image_size > APP_APPLY_END - APP_BASE) {
@@ -1005,9 +1185,9 @@ bool ota_delta_check_and_apply(void) {
   // report after the reset. Do not replace it during the normal post-apply
   // boot; only an explicit apply trigger starts a new diagnostic lifecycle.
   const uint32_t trigger = gpregret_get();
-#if defined(MOTA_QSPI_BOOTLOADER_UPDATE)
+#if defined(MOTA_BOOTLOADER_UPDATE_ENABLED)
   if (trigger == GPREGRET_BOOTLOADER_APPLY) {
-    return apply_bootloader_external();
+    return apply_bootloader_update();
   }
 #endif
   if (trigger != GPREGRET_OTA_APPLY) {
@@ -1033,6 +1213,8 @@ bool ota_delta_check_and_apply(void) {
   const uint32_t app_limit = APP_APPLY_END;
 #elif defined(MOTA_QSPI_FLASH)
   const uint32_t app_limit = g_qspi_source ? APP_APPLY_END : stage_ceiling;
+#elif defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+  const uint32_t app_limit = APP_APPLY_END;
 #else
   const uint32_t app_limit = stage_ceiling;
 #endif
@@ -1090,6 +1272,8 @@ bool ota_delta_check_and_apply(void) {
   const uint32_t workspace_span = app_limit - APP_BASE;
 #elif defined(MOTA_QSPI_FLASH)
   const uint32_t workspace_span = g_qspi_source ? app_limit - APP_BASE : mota_addr - APP_BASE;
+#elif defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+  const uint32_t workspace_span = (mota_addr < app_limit ? mota_addr : app_limit) - APP_BASE;
 #else
   const uint32_t workspace_span = mota_addr - APP_BASE;
 #endif
@@ -1119,6 +1303,11 @@ bool ota_delta_check_and_apply(void) {
   c.ws_hi = app_limit; // patch is off-chip; whole app region is workspace
 #elif defined(MOTA_QSPI_FLASH)
   c.ws_hi = g_qspi_source ? app_limit : mota_addr;
+#elif defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+  // Application deltas and bootloader packages share the ED000 staging
+  // ceiling. For an ordinary delta, detools workspace stops at the actual
+  // bottom-aligned source so decoding can never erase its own container.
+  c.ws_hi = mota_addr < app_limit ? mota_addr : app_limit;
 #else
   c.ws_hi = mota_addr; // workspace stays strictly below internal mota
 #endif

@@ -138,6 +138,7 @@ extern const uint8_t fileLogo[];
 extern const uint8_t pendriveLogo[];
 extern const uint8_t arrowLogo[];
 
+#if !defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
 //--------------------------------------------------------------------+
 //
 //--------------------------------------------------------------------+
@@ -238,6 +239,7 @@ static void print_centered(int y, int color, const char *text, int size) {
   const int x     = (DISPLAY_WIDTH - TEXT_WIDTH(size, count)) / 2;
   print(x >= 0 ? x : 0, y, color, text, size);
 }
+#endif
 
 //--------------------------------------------------------------------+
 //
@@ -282,6 +284,7 @@ void screen_draw_drag(void) {
   draw_bar(SCREEN_BAR2_Y, SCREEN_BAR2_H, COLOR_BLUE);
   draw_bar(SCREEN_BAR3_Y, SCREEN_BAR3_H, COLOR_ORANGE);
 
+#if !defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
   print_centered(SCREEN_TITLE_Y, COLOR_WHITE, DISPLAY_TITLE, SCREEN_LARGE_FONT_SIZE);
   print_centered(SCREEN_VERSION_Y, COLOR_PURPLE, UF2_VERSION_BASE, 1);
   print_centered(SCREEN_BANNER_Y, COLOR_WHITE, BANNER_TEXT, 1);
@@ -293,11 +296,20 @@ void screen_draw_drag(void) {
   print(22, SCREEN_DRAG_Y - 12, COLOR_WHITE, "firmware.uf2", 1);
   print(160, SCREEN_DRAG_Y - 12, COLOR_WHITE, UF2_VOLUME_LABEL, 1);
   #endif
+#endif
 
   draw_screen(frame_buf);
 }
 
 void screen_draw_ble(void) {
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+  // App-preserving bootloader support consumes the last safe flash margin on
+  // display boards. Keep an unambiguous low-cost BLE pattern while omitting
+  // the font/icon renderer; the board LED continues to report DFU progress.
+  draw_bar(SCREEN_BAR1_Y, SCREEN_BAR1_H, COLOR_BLUE);
+  draw_bar(SCREEN_BAR2_Y, SCREEN_BAR2_H, COLOR_GREEN);
+  draw_bar(SCREEN_BAR3_Y, SCREEN_BAR3_H, COLOR_PURPLE);
+#else
   draw_bar(SCREEN_BAR1_Y, SCREEN_BAR1_H, COLOR_GREEN);
   draw_bar(SCREEN_BAR2_Y, SCREEN_BAR2_H, COLOR_BLUE);
   draw_bar(SCREEN_BAR3_Y, SCREEN_BAR3_H, COLOR_ORANGE);
@@ -306,6 +318,7 @@ void screen_draw_ble(void) {
   print_centered(SCREEN_VERSION_Y, COLOR_PURPLE, UF2_VERSION_BASE, 1);
   print_centered(SCREEN_BLE_OTA_Y, COLOR_WHITE, "BLE OTA", SCREEN_LARGE_FONT_SIZE);
   print_centered(SCREEN_BANNER_Y, COLOR_WHITE, BANNER_TEXT, 1);
+#endif
 
   draw_screen(frame_buf);
 }

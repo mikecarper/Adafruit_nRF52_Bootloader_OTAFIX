@@ -30,6 +30,10 @@
 #include "uf2_app_flash.h"
 #include "uf2_transfer_state.h"
 #include "bootloader_image.h"
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+  #include "ota_delta.h"
+  #include "ota_layout.h"
+#endif
 #include "configkeys.h"
 #include "flash_nrf5x.h"
 #include <string.h>
@@ -410,6 +414,19 @@ static bool erase_bootloader_staging(WriteState* state) {
   if (state->bootloaderStagingErased) {
     return true;
   }
+
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+  // Legacy/manual UF2 receives a bootloader at the fixed E0000 scratch range.
+  // Generic LoRa updates no longer reserve that range, so a valid application
+  // may extend into it. Refuse before the first erase unless its hash-bound
+  // EndF proves the complete live image is below the fixed scratch start. A
+  // recovery device with no valid app may still receive a bootloader UF2.
+  if (state->bootloaderEraseOffset == 0 && bootloader_app_is_valid() &&
+      !ota_delta_live_app_fits_below(MOTA_NRF52_BL_SCRATCH_START)) {
+    state->aborted = true;
+    return false;
+  }
+#endif
 
   flash_nrf5x_erase(BOOTLOADER_ADDR_NEW_RECEIVED + state->bootloaderEraseOffset, CODE_PAGE_SIZE);
   state->bootloaderEraseOffset += CODE_PAGE_SIZE;

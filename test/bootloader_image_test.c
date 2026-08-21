@@ -60,6 +60,12 @@ int main(void) {
   make_valid_image();
   assert(bootloader_image_validate(image, IMAGE_START, IMAGE_SIZE, EXPECTED_BOARD_ID,
                                    EXPECTED_DEVICE_NAME));
+  // Internal shared-slot packages place the raw payload at container+365.
+  // Validation must not require an aligned base pointer.
+  static uint8_t unaligned_storage[IMAGE_SIZE + 1U];
+  memcpy(unaligned_storage + 1U, image, sizeof(image));
+  assert(bootloader_image_validate(unaligned_storage + 1U, IMAGE_START, IMAGE_SIZE,
+                                   EXPECTED_BOARD_ID, EXPECTED_DEVICE_NAME));
 
   image[1234] ^= 0x80;
   assert(!bootloader_image_validate(image, IMAGE_START, IMAGE_SIZE, EXPECTED_BOARD_ID,

@@ -111,6 +111,16 @@ if (MOTA_QSPI_BOOTLOADER_UPDATE)
   target_compile_definitions(bootloader PUBLIC MOTA_QSPI_BOOTLOADER_UPDATE=1)
 endif ()
 
+if (MOTA_INTERNAL_BOOTLOADER_UPDATE)
+  if (MOTA_QSPI_FLASH OR MOTA_SD_CARD)
+    message(FATAL_ERROR "MOTA_INTERNAL_BOOTLOADER_UPDATE requires internal-only OTA storage")
+  endif ()
+  if (NOT MCU_VARIANT STREQUAL "nrf52840")
+    message(FATAL_ERROR "MOTA_INTERNAL_BOOTLOADER_UPDATE requires the nRF52840 1 MiB flash layout")
+  endif ()
+  target_compile_definitions(bootloader PUBLIC MOTA_INTERNAL_BOOTLOADER_UPDATE=1)
+endif ()
+
 if (DUALBANK_FW)
   target_sources(bootloader PUBLIC
     ${SDK11_DIR}/libraries/bootloader_dfu/dfu_dual_bank.c

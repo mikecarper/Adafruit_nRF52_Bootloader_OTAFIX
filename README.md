@@ -1,5 +1,18 @@
 # Adafruit nRF52 Bootloader with Enhanced OTA DFU
 
+## Changes in OTAFIX 2.4.1 preview.11
+
+- **Internal-flash, application-preserving bootloader self-update**
+  Eligible internal-only nRF52840 targets can install an exact-board raw 40 KiB bootloader image without replacing the running application. This path is nRF52840-only: smaller nRF52 flash geometries cannot provide the 11-page shared window needed to hold the exact 41,330-byte package and then its 40 KiB raw form while retaining a usable application, and the build rejects other MCUs. Internal targets use the transport-neutral storage flags `0x0A` (`STAGE_CEILING|BOOT_UPDATE`) and the normal expanded handoff `GPREGRET2=0xED`; absence of the SD/QSPI bits means internal staging. Their signed hardware identity is the exact 32-byte NUL-padded field `NRF_BL_%08X_<DEVICE_NAME>`, and the package target is the little-endian first 32 bits of SHA-256 over that complete field. The embedded bootloader manifest must still match the installed board ID and all 16 device-name bytes exactly. Format 3 deliberately makes older/v2 application installers reject a bootloader package instead of treating its payload as an application.
+
+  Application deltas and bootloader packages mutually exclusively reuse the normal internal window below `0xED000`; there is no second reserved raw-image bank. `GPREGRET=0x6A` selects an ordinary format-2 application delta, bottom-aligned dynamically below `0xED000`, and detools workspace ends at the actual container start. `GPREGRET=0x6B` selects the exact format-3 bootloader package. Its fixed 41,330-byte geometry bottom-aligns at `0xE2000`; the 40 KiB payload begins 365 bytes later. The bootloader reads each complete source page before erasing the lower destination page, compacting the payload forward in place to the page-aligned MBR source `0xE2000..0xEC000`. It independently requires a hash-valid live `EndF`, inclusive application end at or below `0xE2000`, and exact package geometry before the first compaction erase.
+
+  The running application authenticates the package signature and writes `APRV`; the bootloader rechecks the source, target/identity/geometry, vector table, complete payload SHA-256, board-bound embedded manifest/CRC, and exactly one valid incoming `MOTABLDR` continuity marker before modifying the slot. It consumes the trigger and clears approval first, verifies every compacted page, the complete raw SHA-256, and the embedded metadata again, then asks the Nordic MBR to replace the bootloader. A reset before MBR can damage only the staged package: the application and installed bootloader remain byte-identical, and the consumed trigger prevents retry. Retained results are: `C1` gate entered, `C2` source/container/approval missing, `C3` package policy, identity, or live-app boundary rejected, `C4` vectors/payload integrity rejected, `C5` embedded manifest/CRC or continuity capability rejected, `C6` approval clear failed, `C7` in-place compaction/readback failed, `C8` MBR handoff has begun, and `C9` MBR unexpectedly returned.
+
+  This shared-slot LoRa path is separate from legacy/manual bootloader UF2 reception, whose Nordic-defined fixed staging address remains `0xE0000`. On an internal-update build, manual UF2 now refuses before its first staging erase when a valid application's hash-bound `EndF` extends into that fixed range. Recovery with no valid application remains available. Thus the LoRa feature does not falsely make legacy UF2 staging application-preserving for larger applications.
+
+  Internal bootloader updates are enabled only for nRF52840 targets whose Make and CMake definitions prove the fixed layout and do not enable SD or QSPI storage: Heltec Mesh Pocket, MeshTower V2, T096, T1, T114, Keepteen LT1, MinewSemi MX25LE01, ProMicro nRF52840, T1000-E, ThinkNode M3, RAK3401, ordinary RAK4631, and WisMesh Tag. `tools/check_internal_bootloader_targets.py` validates the inventory, canonical identities, and derived-target collision freedom. Boards with populated onboard flash are deliberately not switched to internal staging: Mesh Solar (MX25R1635F), Nano G2 Ultra (W25Q16JV), T-Impulse+ (MX25R6435F), ThinkNode M8 (MX25R1635F), T-Echo Lite/Card (ZD25WQ32CEIGR; some Lite revisions use MX25R1635F), and MeshTracker X1 (GD25Q64C/WM1110). Use the QSPI path where an exact OTAFIX target is available; otherwise these boards remain excluded from application-preserving bootloader updates until one is provided and verified.
+
 ## Changes in OTAFIX 2.4.1 preview.10
 
 - **LoRa-delivered XIAO bootloader self-update**
@@ -108,7 +121,9 @@
   - **Heltec T114** -> `T114_DFU`
   - **Heltec T096** -> `T096_DFU`
   - **Heltec T1** -> `T1_DFU`
+  - **Heltec Mesh Pocket** -> `MESH_POCKET_OTA`
   - **Heltec MeshTower V2 / V2H** -> `TOWER_V2_OTA`
+  - **Keepteen LT1** -> `KeepteenLT1_OTA`
   - **LILYGO T-Echo** -> `LGTE_DFU`
   - **Minewsemi MX25LE01** -> `MX25_DFU`
   - **ProMicro NRF52840** -> `PROM_DFU`
@@ -129,7 +144,9 @@
 - Heltec Automation Mesh Node T114 / HT-nRF5262
 - Heltec Automation Mesh Node T096 / HT-n5262G
 - Heltec Automation Mesh Node T1
+- Heltec Automation Mesh Pocket
 - Heltec Automation MeshTower V2 / V2H
+- Keepteen LT1
 - LilyGO T-Echo
 - Minewsemi MX25LE01
 - Nologo ProMicro NRF52840 (aka SuperMini NRF52840)
@@ -151,9 +168,9 @@ If there is another nRF52840-based board you would like to see supported please 
 **IMPORTANT:** If you are running a MeshCore companion firmware or Ripple firmware on your device **you will need to run an erase after flashing a new bootloader**. Use the MeshCore web flasher to do the erase, it will guide you to the correct erase firmware for your device. Other erase firmwares will not work, they will not erase the ExtraFS area.
 
 The recommended way to install the bootloader is using the UF2 file.  
-Download the UF2 file for your board (they can be found in the releases with filenames beginning with `update-` and ending in `_mbr.uf2`), enter UF2 mode (usually by double pressing the reset button within 0.5s) and copy the UF2 file across. The `_mbr` artifact contains the MBR and bootloader; SD-card and QSPI apply support are determined by the exact board target. Packages ending in `_s140_<version>.zip` additionally contain the SoftDevice.
+Download the UF2 file for your board (they can be found in the releases with filenames beginning with `update-` and ending in `_mbr.uf2`), enter UF2 mode (usually by double pressing the reset button within 0.5s) and copy the UF2 file across. The `_mbr` artifact contains the MBR and bootloader; internal, SD-card, and QSPI apply support are determined by the exact board target. Packages ending in `_s140_<version>.zip` additionally contain the SoftDevice.
 
-See the [OTAFIX releases](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases) and use a release whose notes explicitly list your exact board and required SD or QSPI apply mode.
+See the [OTAFIX releases](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases) and use a release whose notes explicitly list your exact board and required internal, SD, or QSPI apply mode.
 
 When migrating a RAK4631 from the ordinary `wiscore_rak4631_board` bootloader to
 `wiscore_rak4631_board_rak15001_slot_c`, do **not** use the canonical slot-C
@@ -169,7 +186,9 @@ subsequent canonical slot-C bootloader-update UF2 files can then be used normall
 The direct preview.7 links below are retained for their original board targets, but preview.7 has only a
 brief USB recovery probe and predates raw-QSPI apply support. Use preview.8 or newer for the 30-second USB
 recovery grace. Raw-QSPI apply requires preview.9 or newer; verify the release notes explicitly list the
-exact board and QSPI mode.
+exact board and QSPI mode. XIAO QSPI bootloader `.mota` updates require preview.10 or newer; generic
+internal-flash bootloader updates require preview.11 or newer. Both require a matching MeshCore build
+with the exact storage/identity profile.
 
 - [Heltec T1 UF2](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/0.9.2-OTAFIX2.4.1-preview.7/update-heltec_t1_bootloader-0.9.2-OTAFIX2.4.1-preview.7_mbr.uf2)
 - [Heltec T096 UF2](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/0.9.2-OTAFIX2.4.1-preview.7/update-heltec_t096_bootloader-0.9.2-OTAFIX2.4.1-preview.7_mbr.uf2)

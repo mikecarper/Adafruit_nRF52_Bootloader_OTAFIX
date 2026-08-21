@@ -27,7 +27,22 @@ make sd_apply_test
 # Exercise raw external-QSPI staging with the same full/delta checks.
 make qspi_apply_test
 ./qspi_apply_test <base.img> <full-or-delta.mota> <expected_new.img>
+
+# Exercise generic internal staging and signed bootloader-package validation.
+make readback_internal_test bootloader_mota_internal_test
+./readback_internal_test
+./bootloader_mota_internal_test
 ```
+
+The internal tests exercise one shared `0xED000` staging ceiling. An ordinary `0x6A/0xED` delta is
+bottom-aligned dynamically, and every detools write remains below its actual container start. This
+includes a large valid delta, an overlapping detools geometry that must fail before invalidation, and
+the ordinary-path full-image firewall. The signed bootloader test requires the exact 41,330-byte
+format-3 container at `0xE2000`, validates its hash-bound live-app boundary and exact `0x0A` continuity
+capability, then forward-compacts the payload from `+365` in the same slot to the raw 40 KiB MBR source
+`0xE2000..0xEC000`. It verifies every page/readback and simulates power loss after each of the ten
+destination pages, proving the application and installed bootloader stay byte-identical, settings are
+untouched, the trigger is consumed, and a partial slot cannot retry.
 
 The suite also exercises the no-valid-image USB recovery wait: no VBUS falls through to BLE without any
 delay, a USB host has the full 30-second default grace period to enumerate, enumeration at the deadline

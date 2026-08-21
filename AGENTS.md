@@ -69,7 +69,8 @@ Each board lives in `src/boards/{board_name}/` with:
 - `pinconfig.c` - CF2 bootloader configuration (flash/RAM size, UF2 family ID)
 
 ### Memory Layout (linker scripts in `linker/`)
-- Bootloader occupies a 39KB code region near the end of nRF52840 flash (0xF4000-0xFDC00)
+- The nRF52840 executable FLASH region is 40,704 bytes at `0xF4000..0xFDF00`; the board-bound
+  bootloader configuration occupies the following 256-byte region at `0xFDF00..0xFE000`
 - No heap (`__HEAP_SIZE=0`), static allocation only
 - Special sections: double-reset detection word, bond info for OTA, MBR params, bootloader settings
 

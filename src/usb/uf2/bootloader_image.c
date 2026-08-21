@@ -3,6 +3,24 @@
 #include <stddef.h>
 #include <string.h>
 
+static uint16_t read_le16(uint8_t const* p) {
+  return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
+}
+
+static uint32_t read_le32(uint8_t const* p) {
+  return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+         ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static bool bytes_equal(uint8_t const* a, uint8_t const* b, size_t size) {
+  for (size_t i = 0; i < size; i++) {
+    if (a[i] != b[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 uint32_t bootloader_image_crc32(uint8_t const* image, size_t image_size, size_t crc_offset) {
   uint32_t crc = UINT32_MAX;
 
@@ -50,24 +68,31 @@ bool bootloader_image_validate(uint8_t const* image, uint32_t image_start, uint3
   bool found = false;
   for (size_t offset = 0; offset + sizeof(bootloader_update_manifest_t) <= image_size;
        offset += sizeof(uint32_t)) {
-    bootloader_update_manifest_t const* manifest = (void const*)(image + offset);
-    if (manifest->magic0 != BOOTLOADER_UPDATE_MANIFEST_MAGIC0 ||
-        manifest->magic1 != BOOTLOADER_UPDATE_MANIFEST_MAGIC1) {
+    uint8_t const* manifest = image + offset;
+    if (read_le32(manifest + offsetof(bootloader_update_manifest_t, magic0)) !=
+          BOOTLOADER_UPDATE_MANIFEST_MAGIC0 ||
+        read_le32(manifest + offsetof(bootloader_update_manifest_t, magic1)) !=
+          BOOTLOADER_UPDATE_MANIFEST_MAGIC1) {
       continue;
     }
 
-    if (manifest->version != BOOTLOADER_UPDATE_MANIFEST_VERSION ||
-        manifest->header_size != sizeof(bootloader_update_manifest_t) ||
-        manifest->image_start != image_start || manifest->image_size != image_size ||
-        manifest->board_id != expected_board_id ||
-        memcmp(manifest->device_name, expected_name, sizeof(expected_name)) != 0) {
+    if (read_le16(manifest + offsetof(bootloader_update_manifest_t, version)) !=
+          BOOTLOADER_UPDATE_MANIFEST_VERSION ||
+        read_le16(manifest + offsetof(bootloader_update_manifest_t, header_size)) !=
+          sizeof(bootloader_update_manifest_t) ||
+        read_le32(manifest + offsetof(bootloader_update_manifest_t, image_start)) != image_start ||
+        read_le32(manifest + offsetof(bootloader_update_manifest_t, image_size)) != image_size ||
+        read_le32(manifest + offsetof(bootloader_update_manifest_t, board_id)) != expected_board_id ||
+        !bytes_equal(manifest + offsetof(bootloader_update_manifest_t, device_name),
+                     (uint8_t const*)expected_name, sizeof(expected_name))) {
       // Ignore magic words emitted in a literal pool; the real manifest must
       // also have the complete, self-consistent header.
       continue;
     }
 
     size_t const crc_offset = offset + offsetof(bootloader_update_manifest_t, crc32);
-    if (bootloader_image_crc32(image, image_size, crc_offset) != manifest->crc32) {
+    if (bootloader_image_crc32(image, image_size, crc_offset) !=
+        read_le32(manifest + offsetof(bootloader_update_manifest_t, crc32))) {
       continue;
     }
     if (found) {

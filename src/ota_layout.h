@@ -18,7 +18,11 @@
 #define MOTA_NRF52_APP_END     0x000ED000u   // Primary InternalFS begins here
 #define MOTA_NRF52_BL_START    0x000F4000u   // production nRF52840 bootloader region
 #define MOTA_NRF52_BL_SIZE     0x0000A000u   // raw padded region copied by the MBR
-#define MOTA_NRF52_BL_SCRATCH_START 0x000E0000u // reserved 40 KiB MBR COPY_BL source
+#define MOTA_NRF52_INTERNAL_BL_SLOT_START 0x000E2000u // shared internal .mota/raw MBR source
+#define MOTA_NRF52_INTERNAL_BL_SLOT_END   MOTA_NRF52_APP_END
+// Fixed raw MBR source used by the established XIAO QSPI path and by legacy/manual UF2 DFU.
+// The generic internal-LoRa path does not reserve or write this range independently.
+#define MOTA_NRF52_BL_SCRATCH_START 0x000E0000u
 #define MOTA_NRF52_STAGE_CEILING_LEGACY   MOTA_NRF52_EXTRAFS_START
 #define MOTA_NRF52_STAGE_CEILING_EXPANDED MOTA_NRF52_APP_END
 // Compatibility name for the legacy lower boundary. New staging/workspace code uses one of the two
@@ -29,8 +33,8 @@
 // GPREGRET value MeshCore writes (then resets) to ask the bootloader to apply a staged `.mota`.
 // Distinct from the Adafruit DFU magics (0x57 UF2, 0x4E serial, 0xA8 OTA-BLE) so it never enters DFU.
 #define GPREGRET_OTA_APPLY     0x6Au
-// Distinct, XIAO-only request to install a validated bootloader image from the
-// raw QSPI OTA store. Keeping this separate from GPREGRET_OTA_APPLY guarantees
+// Distinct request to install a validated bootloader image from the storage
+// selected by GPREGRET2. Keeping this separate from GPREGRET_OTA_APPLY guarantees
 // that a bootloader package can never enter the application-update path.
 #define GPREGRET_BOOTLOADER_APPLY 0x6Bu
 // GPREGRET2 tells the bootloader which bottom-aligned staging window the app used. An older app leaves
