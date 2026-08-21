@@ -10,12 +10,31 @@
 
   #define QSPI_APPROVAL_LEN 4u
   #define QSPI_DPD_ENTER            0xB9u
+  #define QSPI_READ_STATUS          0x05u
+  #define QSPI_STATUS_WIP           0x01u
   // MX25R1635F requires tDP (10 us) plus tDPDD (30 us) with CS# high
   // before another command may be issued after entering deep power-down.
   // Keep 10 us of margin and match the application's release guard.
   #define QSPI_DPD_RELEASE_GUARD_US 50u
   #define QSPI_MAX_CAPACITY 0x01000000u
   #define QSPI_WAIT_STEPS   3000000u
+  // READY after WRITESTART only means that the QSPI peripheral transferred
+  // the page-program command and data. The serial NOR can remain busy for
+  // milliseconds afterward, so poll its status before verifying or sleeping.
+  #define QSPI_PROGRAM_WAIT_STEP_US 10u
+  #define QSPI_PROGRAM_WAIT_STEPS   10000u
+  // A reset can hand control to the bootloader while a staging sector erase
+  // started by the application is still in progress. Allow substantially
+  // longer than the worst sector-erase time of the supported NOR parts.
+  #define QSPI_RECOVERY_WAIT_STEPS 500000u
+  #define QSPI_PIN_CNF_DEFAULT \
+    (GPIO_PIN_CNF_INPUT_Disconnect << GPIO_PIN_CNF_INPUT_Pos)
+  #define QSPI_PIN_CNF_H0H1 \
+    (QSPI_PIN_CNF_DEFAULT | (GPIO_PIN_CNF_DRIVE_H0H1 << GPIO_PIN_CNF_DRIVE_Pos))
+  #define QSPI_PIN_CNF_OUTPUT_H0H1 \
+    (QSPI_PIN_CNF_H0H1 | (GPIO_PIN_CNF_DIR_Output << GPIO_PIN_CNF_DIR_Pos))
+  #define QSPI_GPIO_PORT(pin) (((pin) & 32u) != 0 ? NRF_P1 : NRF_P0)
+  #define QSPI_GPIO_INDEX(pin) ((pin) & 31u)
 
   #ifndef MOTA_QSPI_SCK_FREQ
     #define MOTA_QSPI_SCK_FREQ NRF_QSPI_FREQ_32MDIV2
@@ -28,19 +47,28 @@
     #error "Define all three MOTA_QSPI_JEDEC_* bytes or none of them"
   #endif
 
-static bool     g_initialized;
 static bool     g_active;
 static bool     g_awake;
 static uint32_t g_capacity;
 static uint8_t  g_bounce[256] __attribute__((aligned(4)));
 #if defined(MOTA_QSPI_POWER_PIN)
 static bool g_powered;
+static bool g_power_off_safe;
 #endif
 
 _Static_assert((sizeof(g_bounce) & (OTA_QSPI_DMA_ALIGNMENT - 1u)) == 0,
                "QSPI bounce buffer size must be word aligned");
 _Static_assert(QSPI_DPD_RELEASE_GUARD_US >= 50u,
                "QSPI deep-power-down release guard must retain timing margin");
+_Static_assert(QSPI_PROGRAM_WAIT_STEP_US * QSPI_PROGRAM_WAIT_STEPS >= 100000u,
+               "QSPI page-program wait must retain a conservative timeout");
+_Static_assert(QSPI_PROGRAM_WAIT_STEP_US * QSPI_RECOVERY_WAIT_STEPS >= 5000000u,
+               "QSPI recovery wait must cover an interrupted sector erase");
+_Static_assert(MOTA_QSPI_SCK_PIN != NRF_QSPI_PIN_NOT_CONNECTED &&
+                 MOTA_QSPI_CSN_PIN != NRF_QSPI_PIN_NOT_CONNECTED &&
+                 MOTA_QSPI_IO0_PIN != NRF_QSPI_PIN_NOT_CONNECTED &&
+                 MOTA_QSPI_IO1_PIN != NRF_QSPI_PIN_NOT_CONNECTED,
+               "QSPI SCK, CSN, IO0, and IO1 pins must be connected");
 
 static void feed_watchdogs(void) {
   if (NRF_WDT->RUNSTATUS != 0) {
@@ -69,12 +97,12 @@ static bool wait_ready(void) {
 }
 
 static bool custom_instruction(uint8_t opcode, nrf_qspi_cinstr_len_t length, uint8_t *rx) {
-  nrf_qspi_cinstr_conf_t config;
-  memset(&config, 0, sizeof(config));
-  config.opcode    = opcode;
-  config.length    = length;
-  config.io2_level = true;
-  config.io3_level = true;
+  nrf_qspi_cinstr_conf_t config = {
+    .opcode = opcode,
+    .length = length,
+    .io2_level = true,
+    .io3_level = true,
+  };
   nrf_qspi_event_clear(NRF_QSPI, NRF_QSPI_EVENT_READY);
   nrf_qspi_cinstr_transfer_start(NRF_QSPI, &config);
   if (!wait_ready()) {
@@ -86,8 +114,56 @@ static bool custom_instruction(uint8_t opcode, nrf_qspi_cinstr_len_t length, uin
   return true;
 }
 
+static __attribute__((noinline)) bool wait_memory_ready(uint32_t max_steps) {
+  uint8_t status[4] __attribute__((aligned(4))) = {0, 0, 0, 0};
+  for (uint32_t step = 0; step < max_steps; step++) {
+    if (!custom_instruction(QSPI_READ_STATUS, NRF_QSPI_CINSTR_LEN_2B, status)) {
+      return false;
+    }
+    if ((status[0] & QSPI_STATUS_WIP) == 0) {
+      return true;
+    }
+    if ((step & 0x3Fu) == 0) {
+      feed_watchdogs();
+    }
+    nrf_delay_us(QSPI_PROGRAM_WAIT_STEP_US);
+  }
+  return false;
+}
+
+static void configure_qspi_pins(bool enable) {
+  const uint32_t pin_cnf = enable ? QSPI_PIN_CNF_H0H1 : QSPI_PIN_CNF_DEFAULT;
+  if (enable) {
+    // Preload benign SPI mode-0 levels before PSEL gives QSPI ownership.
+    QSPI_GPIO_PORT(MOTA_QSPI_CSN_PIN)->OUTSET = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_CSN_PIN);
+    QSPI_GPIO_PORT(MOTA_QSPI_SCK_PIN)->OUTCLR = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_SCK_PIN);
+  }
+  // Match current nrfx: QSPI owns direction while active; connected pads
+  // remain GPIO inputs with disconnected input buffers and H0H1 drive.
+  QSPI_GPIO_PORT(MOTA_QSPI_SCK_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_SCK_PIN)] = pin_cnf;
+  QSPI_GPIO_PORT(MOTA_QSPI_CSN_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_CSN_PIN)] = pin_cnf;
+  QSPI_GPIO_PORT(MOTA_QSPI_IO0_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_IO0_PIN)] = pin_cnf;
+  QSPI_GPIO_PORT(MOTA_QSPI_IO1_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_IO1_PIN)] = pin_cnf;
+  if (MOTA_QSPI_IO2_PIN != NRF_QSPI_PIN_NOT_CONNECTED) {
+    QSPI_GPIO_PORT(MOTA_QSPI_IO2_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_IO2_PIN)] = pin_cnf;
+  }
+  if (MOTA_QSPI_IO3_PIN != NRF_QSPI_PIN_NOT_CONNECTED) {
+    QSPI_GPIO_PORT(MOTA_QSPI_IO3_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_IO3_PIN)] = pin_cnf;
+  }
+}
+
+static void select_qspi_pins(bool enable) {
+  const uint32_t off = NRF_QSPI_PIN_VAL(NRF_QSPI_PIN_NOT_CONNECTED);
+  NRF_QSPI->PSEL.SCK = enable ? NRF_QSPI_PIN_VAL(MOTA_QSPI_SCK_PIN) : off;
+  NRF_QSPI->PSEL.CSN = enable ? NRF_QSPI_PIN_VAL(MOTA_QSPI_CSN_PIN) : off;
+  NRF_QSPI->PSEL.IO0 = enable ? NRF_QSPI_PIN_VAL(MOTA_QSPI_IO0_PIN) : off;
+  NRF_QSPI->PSEL.IO1 = enable ? NRF_QSPI_PIN_VAL(MOTA_QSPI_IO1_PIN) : off;
+  NRF_QSPI->PSEL.IO2 = enable ? NRF_QSPI_PIN_VAL(MOTA_QSPI_IO2_PIN) : off;
+  NRF_QSPI->PSEL.IO3 = enable ? NRF_QSPI_PIN_VAL(MOTA_QSPI_IO3_PIN) : off;
+}
+
 bool ota_qspi_init(void) {
-  if (g_initialized) {
+  if (g_capacity != 0) {
     return true;
   }
   g_capacity = 0;
@@ -96,23 +172,19 @@ bool ota_qspi_init(void) {
   #if defined(MOTA_QSPI_POWER_PIN)
   nrf_gpio_cfg_output(MOTA_QSPI_POWER_PIN);
   nrf_gpio_pin_write(MOTA_QSPI_POWER_PIN, MOTA_QSPI_POWER_ACTIVE);
-  g_powered = true;
-  nrf_delay_ms(2);
+  if (!g_powered) {
+    g_powered = true;
+    g_power_off_safe = true;
+    nrf_delay_ms(2);
+  }
   #endif
 
   nrf_qspi_int_disable(NRF_QSPI, 0xFFFFFFFFu);
   NVIC_DisableIRQ(QSPI_IRQn);
   NVIC_ClearPendingIRQ(QSPI_IRQn);
 
-  const nrf_qspi_pins_t pins = {
-    .sck_pin = MOTA_QSPI_SCK_PIN,
-    .csn_pin = MOTA_QSPI_CSN_PIN,
-    .io0_pin = MOTA_QSPI_IO0_PIN,
-    .io1_pin = MOTA_QSPI_IO1_PIN,
-    .io2_pin = MOTA_QSPI_IO2_PIN,
-    .io3_pin = MOTA_QSPI_IO3_PIN,
-  };
-  nrf_qspi_pins_set(NRF_QSPI, &pins);
+  configure_qspi_pins(true);
+  select_qspi_pins(true);
 
   const nrf_qspi_prot_conf_t protocol = {
     .readoc    = NRF_QSPI_READOC_FASTREAD,
@@ -143,7 +215,14 @@ bool ota_qspi_init(void) {
     return false;
   }
   g_awake = true;
+  #if defined(MOTA_QSPI_POWER_PIN)
+  g_power_off_safe = false;
+  #endif
   nrf_delay_us(50);
+  if (!wait_memory_ready(QSPI_RECOVERY_WAIT_STEPS)) {
+    ota_qspi_deinit();
+    return false;
+  }
 
   uint8_t jedec[4] __attribute__((aligned(4))) = {0, 0, 0, 0};
   if (!custom_instruction(0x9F, NRF_QSPI_CINSTR_LEN_4B, jedec) || jedec[0] == 0 || jedec[0] == 0xFF || jedec[2] < 20 ||
@@ -163,39 +242,56 @@ bool ota_qspi_init(void) {
     ota_qspi_deinit();
     return false;
   }
-  g_initialized = true;
   return true;
 }
 
 void ota_qspi_deinit(void) {
-  if (g_awake && g_active) {
+  if (!g_active) {
+    return;
+  }
+  bool flash_released = !g_awake;
+  if (g_awake) {
     // The application may run immediately after a rejected handoff without a
     // reset. Balance every completed 0xAB wake with deep power-down, including
-    // a later JEDEC validation failure; the next access wakes it again.
-    (void)custom_instruction(QSPI_DPD_ENTER, NRF_QSPI_CINSTR_LEN_1B, NULL);
-    nrf_delay_us(QSPI_DPD_RELEASE_GUARD_US);
+    // a later JEDEC validation failure. Never sleep or remove power while an
+    // interrupted application program/erase is still in progress.
+    if (wait_memory_ready(QSPI_RECOVERY_WAIT_STEPS) &&
+        custom_instruction(QSPI_DPD_ENTER, NRF_QSPI_CINSTR_LEN_1B, NULL)) {
+      nrf_delay_us(QSPI_DPD_RELEASE_GUARD_US);
+      #if defined(MOTA_QSPI_POWER_PIN)
+      g_power_off_safe = true;
+      #endif
+      flash_released = true;
+    }
   }
   g_awake = false;
-  if (g_active) {
-    nrf_qspi_event_clear(NRF_QSPI, NRF_QSPI_EVENT_READY);
-    nrf_qspi_task_trigger(NRF_QSPI, NRF_QSPI_TASK_DEACTIVATE);
-    nrf_qspi_disable(NRF_QSPI);
-    nrf_qspi_event_clear(NRF_QSPI, NRF_QSPI_EVENT_READY);
-  }
+  nrf_qspi_event_clear(NRF_QSPI, NRF_QSPI_EVENT_READY);
+  nrf_qspi_task_trigger(NRF_QSPI, NRF_QSPI_TASK_DEACTIVATE);
+  nrf_qspi_disable(NRF_QSPI);
+  nrf_qspi_event_clear(NRF_QSPI, NRF_QSPI_EVENT_READY);
   g_active = false;
-  g_initialized = false;
+  select_qspi_pins(false);
+  configure_qspi_pins(false);
+  if (!flash_released) {
+    // If status could not prove the NOR idle, keep CS# asserted high even
+    // after releasing the QSPI peripheral. This lets an in-flight internal
+    // operation finish safely without relying on a board-level pull-up.
+    QSPI_GPIO_PORT(MOTA_QSPI_CSN_PIN)->OUTSET = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_CSN_PIN);
+    QSPI_GPIO_PORT(MOTA_QSPI_CSN_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_CSN_PIN)] = QSPI_PIN_CNF_OUTPUT_H0H1;
+  }
   g_capacity = 0;
 
   #if defined(MOTA_QSPI_POWER_PIN)
-  if (g_powered) {
+  if (g_powered && g_power_off_safe) {
     nrf_gpio_pin_write(MOTA_QSPI_POWER_PIN, MOTA_QSPI_POWER_ACTIVE ? 0u : 1u);
     g_powered = false;
+    g_power_off_safe = false;
   }
   #endif
 }
 
 uint32_t ota_qspi_capacity(void) {
-  return g_initialized ? g_capacity : 0;
+  return g_capacity;
 }
 
 static bool read_aligned(uint32_t offset, uint8_t *dst, uint32_t len) {
@@ -221,11 +317,11 @@ static bool write_aligned(uint32_t offset, const uint8_t *src, uint32_t len) {
   nrf_qspi_write_buffer_set(NRF_QSPI, src, len, offset);
   nrf_qspi_event_clear(NRF_QSPI, NRF_QSPI_EVENT_READY);
   nrf_qspi_task_trigger(NRF_QSPI, NRF_QSPI_TASK_WRITESTART);
-  return wait_ready();
+  return wait_ready() && wait_memory_ready(QSPI_PROGRAM_WAIT_STEPS);
 }
 
 bool ota_qspi_read(uint32_t offset, void *dst, uint32_t len) {
-  if (!g_initialized || dst == NULL || (uint64_t)offset + len > g_capacity) {
+  if (g_capacity == 0 || dst == NULL || (uint64_t)offset + len > g_capacity) {
     return false;
   }
   uint8_t *out = (uint8_t *)dst;
@@ -246,7 +342,7 @@ bool ota_qspi_read(uint32_t offset, void *dst, uint32_t len) {
 bool ota_qspi_write(uint32_t offset, const void *src, uint32_t len) {
   // The bootloader only clears the four-byte approval word. Keep this helper
   // purpose-specific instead of carrying a general NOR writer.
-  if (!g_initialized || src == NULL || len != QSPI_APPROVAL_LEN || (offset & 255u) + len > 256u ||
+  if (g_capacity == 0 || src == NULL || len != QSPI_APPROVAL_LEN || (offset & 255u) + len > 256u ||
       (uint64_t)offset + len > g_capacity) {
     return false;
   }
