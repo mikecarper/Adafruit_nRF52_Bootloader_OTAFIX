@@ -152,6 +152,7 @@ static uint16_t crc16_region(uint32_t a, uint32_t len) {
     #include "usb/uf2/uf2cfg.h"
     #include "nrf_mbr.h"
     #include "nrf_sdm.h"
+    #include "ota_softdevice_fwid.h"
   #endif
   #define APP_BASE           ((uint32_t)DFU_BANK_0_REGION_START)
 // Read flash through a VOLATILE pointer. In-place apply WRITES flash (nrfx_nvmc_words_write) and then
@@ -1131,7 +1132,7 @@ static uint16_t runtime_softdevice_fwid(void) {
 #ifdef OTA_DELTA_HOST_TEST
   return otah_runtime_softdevice_fwid();
 #else
-  return SD_FWID_GET(0u);
+  return mota_runtime_softdevice_fwid_get();
 #endif
 }
 

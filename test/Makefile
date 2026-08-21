@@ -70,6 +70,9 @@ bootloader_mota_sd_test: bootloader_mota_test.c $(SRC)/ota_delta.c $(SRC)/detool
 		bootloader_mota_test.c $(SRC)/detools/detools.c $(SRC)/sha256.c \
 		$(SRC)/usb/uf2/bootloader_image.c -o $@
 
+softdevice_fwid_test: softdevice_fwid_test.c $(SRC)/ota_softdevice_fwid.h
+	$(CC) $(CFLAGS) -I $(SRC) softdevice_fwid_test.c -o $@
+
 qspi_alignment_test: qspi_alignment_test.c $(SRC)/ota_qspi_alignment.h
 	$(CC) $(CFLAGS) -I $(SRC) qspi_alignment_test.c -o $@
 
@@ -83,7 +86,7 @@ uf2_write_state_test: uf2_write_state_test.c $(SRC)/usb/uf2/uf2_app_flash.h \
                       $(SRC)/usb/uf2/uf2_transfer_state.h
 	$(CC) $(CFLAGS) -I $(SRC)/usb/uf2 uf2_write_state_test.c -o $@
 
-check: apply_sim readback_test readback_test_v7 readback_internal_test bootloader_image_test sd_apply_test qspi_apply_test bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test qspi_alignment_test qspi_wake_test usb_wait_test uf2_write_state_test
+check: apply_sim readback_test readback_test_v7 readback_internal_test bootloader_image_test sd_apply_test qspi_apply_test bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test softdevice_fwid_test qspi_alignment_test qspi_wake_test usb_wait_test uf2_write_state_test
 	python3 version_derivation_test.py
 	python3 manifest_patcher_test.py
 	python3 cf2_guard_test.py
@@ -109,6 +112,8 @@ check: apply_sim readback_test readback_test_v7 readback_internal_test bootloade
 	@echo
 	./bootloader_mota_sd_test
 	@echo
+	./softdevice_fwid_test
+	@echo
 	./qspi_alignment_test
 	@echo
 	./qspi_wake_test
@@ -118,6 +123,6 @@ check: apply_sim readback_test readback_test_v7 readback_internal_test bootloade
 	./uf2_write_state_test
 
 clean:
-	rm -f apply_sim readback_test readback_test_v7 readback_internal_test bootloader_image_test sd_apply_test qspi_apply_test bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test qspi_alignment_test qspi_wake_test usb_wait_test uf2_write_state_test
+	rm -f apply_sim readback_test readback_test_v7 readback_internal_test bootloader_image_test sd_apply_test qspi_apply_test bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test softdevice_fwid_test qspi_alignment_test qspi_wake_test usb_wait_test uf2_write_state_test
 
 .PHONY: check clean

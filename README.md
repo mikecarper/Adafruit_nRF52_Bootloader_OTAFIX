@@ -2,9 +2,13 @@
 
 ## Changes in OTAFIX 2.4.1 preview.14
 
-- No functional source change from preview.13. This forward-version rebuild is the
-  first candidate used to qualify the signed, monotonic bootloader-update path on
-  physical hardware after locally provisioning preview.13.
+- **Correct runtime SoftDevice continuity check**
+  Read the installed FWID with Nordic's required `SD_FWID_GET(MBR_SIZE)` base.
+  Preview.13 incorrectly used a zero base, reading the instruction halfword at
+  `0x200C` instead of the S140 information field at `0x300C`; remote bootloader
+  updates therefore failed closed with `C5` after a successful verified copy.
+  An exact-package host regression now reproduces that failure and proves the
+  corrected path reaches the MBR handoff.
 
 ## Changes in OTAFIX 2.4.1 preview.13
 
@@ -12,7 +16,7 @@
   New SD-capable bootloaders do not read or write a sector-1 handoff. Before resetting, the authenticated application writes one 72-byte `MOTASDA2` record at retained RAM `0x20006008` (inside an 80-byte application `PERSISTENT_RAM` region beginning at `0x20006000`). The record binds purpose and format, first LBA, the exact `ceil(container_length/512)` sector count, exact container length, application-observed card capacity, and SHA-256 of the complete container with only `APRV` bytes 201..204 normalized to zero; CRC32 and its complement cover bytes 0..63. OTAFIX copies and zero-consumes this record before its first SD access. The compact boot SPI reader bounds every access against the authenticated LBA/count/capacity geometry and the card itself, but does not issue a second CSD-capacity query; a replacement card with incompatible capacity therefore fails on the first out-of-range/card read, while identical authorized bytes on another card are not a substitution. Missing, stale, wrong-purpose, corrupt, power-cycled, or geometrically inconsistent records fail closed without SD access or application writes. Both ordinary format-2 SD application updates and format-3 SD bootloader updates require this authorization, so a removable card/controller cannot swap authenticated container A for self-consistent container B across reset. The format-3 path additionally retains the `MOTASDBL` internal-flash payload token at `0xE0000` as defense in depth before scratch compaction.
 
 - **Machine-bound bootloader compatibility and monotonic versions**
-  Every new 40 KiB raw bootloader ends with an authoritative 76-byte envelope at raw offset `0x9FB4` (`0xFDFB4` in flash). Bytes 0..43 remain the preview.12-compatible `BLMF` record and whole-image CRC; adjacent bytes 44..75 are `BLM2`/`SOFT` v2 metadata containing the true packed boot version, SoftDevice family/FWID, application base, layout ABI, zero compatibility flags, and zero reserved bytes. Linker assertions fix this envelope at the image end and prevent the 88-byte CF2 configuration from overlapping it. Remote bootloader updates require the signed outer version to equal the embedded version, exact runtime/installed SoftDevice and layout compatibility, and a version strictly newer than the installed v2 bootloader. There is no signed remote rollback/migration flag; incompatible recovery remains an explicit local USB/BLE/SWD operation.
+  Every new 40 KiB raw bootloader ends with an authoritative 76-byte envelope at raw offset `0x9FB4` (`0xFDFB4` in flash). Bytes 0..43 remain the preview.12-compatible `BLMF` record and whole-image CRC; adjacent bytes 44..75 are `BLM2`/`SOFT` v2 metadata containing the true packed boot version, SoftDevice family/FWID, application base, layout ABI, zero compatibility flags, and zero reserved bytes. Linker assertions fix this envelope at the image end and prevent the 88-byte CF2 configuration from overlapping it. Remote bootloader updates require the signed outer version to equal the embedded version, exact runtime/installed SoftDevice and layout compatibility, and a version strictly newer than the installed v2 bootloader. The running bootloader reads the installed FWID with Nordic's required `SD_FWID_GET(MBR_SIZE)` base; using a zero base reads `0x200C` rather than the actual SoftDevice information field at `0x300C`. There is no signed remote rollback/migration flag; incompatible recovery remains an explicit local USB/BLE/SWD operation.
 
   Released images are board-bound and must not be modified afterward with the generic CF2 patcher. Any CF2 mutation invalidates the whole-image CRC, and expanding the record can overwrite the fixed envelope. `tools/otafix_cf2.py IMAGE` is the supported read-only inspector and refuses protected mutation before invoking the bundled tool; direct bundled-patcher writes are unsupported. Board configuration changes belong in `pinconfig.c` before rebuilding and repatching the manifest CRC.
 

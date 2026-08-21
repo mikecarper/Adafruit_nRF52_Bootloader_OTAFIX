@@ -477,6 +477,38 @@ static void stage(const uint8_t *mota, uint32_t total) {
 #endif
 }
 
+#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+static uint8_t *load_exact_mota(const char *path, uint32_t *total_out) {
+  FILE *file = fopen(path, "rb");
+  if (!file) {
+    fprintf(stderr, "cannot open exact package: %s\n", path);
+    exit(2);
+  }
+  if (fseek(file, 0, SEEK_END) != 0) {
+    fprintf(stderr, "cannot seek exact package: %s\n", path);
+    fclose(file);
+    exit(2);
+  }
+  const long length = ftell(file);
+  if (length <= 0 || (uint64_t)length > UINT32_MAX ||
+      fseek(file, 0, SEEK_SET) != 0) {
+    fprintf(stderr, "invalid exact package length: %s\n", path);
+    fclose(file);
+    exit(2);
+  }
+  uint8_t *data = malloc((size_t)length);
+  if (!data || fread(data, 1, (size_t)length, file) != (size_t)length) {
+    fprintf(stderr, "cannot read exact package: %s\n", path);
+    fclose(file);
+    free(data);
+    exit(2);
+  }
+  fclose(file);
+  *total_out = (uint32_t)length;
+  return data;
+}
+#endif
+
 static int rejected_with(uint8_t *mota, uint32_t total, uint32_t result) {
   reset_device();
   stage(mota, total);
@@ -549,6 +581,61 @@ int main(void) {
   report("normal post-MBR boot preserves C8 and does not retry",
          !applied && g_gpregret2 == GPREGRET2_BL_MBR_HANDOFF && g_mbr_calls == calls_before,
          &failures);
+#endif
+
+#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+  const char *exact_path = getenv("MOTA_EXACT_PACKAGE");
+  if (exact_path && exact_path[0] != 0) {
+    uint32_t exact_total;
+    uint8_t *exact = load_exact_mota(exact_path, &exact_total);
+    if (exact_total != BOOT_UPDATE_PACKAGE_SIZE ||
+        rd_u32(exact + 4u) != exact_total ||
+        BOOT_UPDATE_PAYLOAD_OFFSET != 365u) {
+      fprintf(stderr, "exact package is not the fixed 41,330-byte +365 format-3 profile\n");
+      free(exact);
+      return 2;
+    }
+    const uint32_t exact_version = rd_u32(exact + 8u + 7u);
+    if (exact_version <= 1u) {
+      fprintf(stderr, "exact package has no predecessor version for the test\n");
+      free(exact);
+      return 2;
+    }
+    // Model the application's authenticated approval write. The retained
+    // authorization deliberately hashes these bytes normalized to zero.
+    memcpy(exact + MOTA_SD_AUTH_APPROVAL_OFFSET, APRV, sizeof(APRV));
+
+    reset_device();
+    stage(exact, exact_total);
+    g_installed_boot_info.boot_version = exact_version - 1u;
+    g_runtime_fwid = 0xE002u; // exact erroneous SD_FWID_GET(0) S140 value
+    applied = ota_delta_check_and_apply();
+    report("exact +365 package reproduces zero-base runtime FWID C5",
+           !applied && g_gpregret2 == GPREGRET2_BL_MANIFEST &&
+             g_raw_pages_written == (int)(MOTA_NRF52_BL_SIZE / MOTA_NRF52_FLASH_PAGE) &&
+             g_mbr_calls == 0 &&
+             memcmp(FLASH + TEST_RAW_START,
+                    exact + BOOT_UPDATE_PAYLOAD_OFFSET,
+                    MOTA_NRF52_BL_SIZE) == 0 &&
+             app_unchanged() && old_bootloader_unchanged(),
+           &failures);
+
+    reset_device();
+    stage(exact, exact_total);
+    g_installed_boot_info.boot_version = exact_version - 1u;
+    g_runtime_fwid = TEST_SOFTDEVICE_FWID;
+    g_mbr_success = 1;
+    applied = ota_delta_check_and_apply();
+    report("exact +365 package reaches C8 with MBR-relative runtime FWID",
+           applied && g_gpregret2 == GPREGRET2_BL_MBR_HANDOFF &&
+             g_mbr_calls == 1 &&
+             memcmp(FLASH + TEST_RAW_START,
+                    exact + BOOT_UPDATE_PAYLOAD_OFFSET,
+                    MOTA_NRF52_BL_SIZE) == 0 &&
+             app_unchanged(),
+           &failures);
+    free(exact);
+  }
 #endif
 
   reset_device();

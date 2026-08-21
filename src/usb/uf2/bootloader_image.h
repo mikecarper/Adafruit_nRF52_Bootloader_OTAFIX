@@ -42,7 +42,7 @@ typedef struct {
   uint16_t header_size;
   uint32_t boot_version;       // MAJOR<<24 | MINOR<<16 | PATCH<<8 | preview
   uint16_t softdevice_family;  // 140 for S140, 132 for S132
-  uint16_t softdevice_fwid;    // exact runtime SD_FWID_GET(0)
+  uint16_t softdevice_fwid;    // exact runtime SD_FWID_GET(MBR_SIZE)
   uint32_t app_base;
   uint16_t layout_abi;
   uint16_t compat_flags;       // must be zero; no remote migration override

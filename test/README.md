@@ -36,6 +36,10 @@ make readback_internal_test bootloader_mota_internal_test
 # Exercise signed MeshTower V2 microSD bootloader-package validation.
 make bootloader_mota_sd_test
 ./bootloader_mota_sd_test
+
+# Reproduce the complete SD handoff against an exact signed release package.
+# The harness models APRV, retained authorization/token, and raw payload +365.
+MOTA_EXACT_PACKAGE=/path/to/exact-bootloader.mota ./bootloader_mota_sd_test
 ```
 
 The internal tests exercise one shared `0xED000` staging ceiling. An ordinary `0x6A/0xED` delta is
