@@ -49,6 +49,7 @@ SOFTWARE.
 #define UF2_FLAG_FAMILYID 0x00002000
 
 #define MAX_BLOCKS (CFG_UF2_FLASH_SIZE / 256 + 100)
+#define UF2_APP_PAGE_COUNT ((USER_FLASH_END - USER_FLASH_START) / CODE_PAGE_SIZE)
 
 enum {
     UF2_UPDATE_KIND_NONE = 0,
@@ -65,8 +66,10 @@ typedef struct {
     bool aborted;
     bool has_uicr;
     bool bootloaderStagingErased;
+    bool appSettingsInvalidated;
 
     uint8_t writtenMask[MAX_BLOCKS / 8 + 1];
+    uint8_t appErasedMask[(UF2_APP_PAGE_COUNT + 7) / 8];
 } WriteState;
 
 typedef struct {
@@ -88,5 +91,6 @@ typedef struct {
 } UF2_Block;
 
 void uf2_init(void);
+void uf2_write_session_reset(void);
 
 #endif

@@ -11,9 +11,11 @@
 # - DUALBANK_FW        : If bootloader will implement a dual bank feature to allow autorecover from failed
 # - FORCE_UF2          : if SIGNED_FW is 1, will force to include UF2 support (UNSECURE, UF2 does NOT validate signature!)
 # - DEFAULT_TO_OTA_DFU : if entering DFU, by default enter OTA DFU instead of Serial DFU
+# - DFU_USB_ENUMERATION_TIMEOUT_MS : no-valid-image USB grace period while VBUS is present
 #------------------------------------------------------------------------------
 
 PYTHON = python
+DFU_USB_ENUMERATION_TIMEOUT_MS ?= 30000
 
 # local customization
 -include Makefile.user
@@ -189,6 +191,8 @@ C_SRC += \
   src/screen.c \
   src/images.c \
   src/ota_delta.c \
+  src/ota_qspi.c \
+  src/ota_sd_spi.c \
   src/sha256.c \
   src/detools/detools.c \
 
@@ -258,7 +262,8 @@ C_SRC += \
 	src/usb/uf2/bootloader_image.c \
 	src/usb/uf2/bootloader_manifest.c \
 	src/usb/uf2/ghostfat.c \
-	src/usb/usb.c
+	src/usb/usb.c \
+	src/usb/usb_wait.c
 
 # TinyUSB stack
 C_SRC += \
@@ -399,6 +404,7 @@ CFLAGS += -DSOFTDEVICE_PRESENT
 CFLAGS += -DUF2_VERSION_BASE='"$(GIT_VERSION_BASE)"'
 CFLAGS += -DUF2_VERSION='"$(GIT_VERSION)"'
 CFLAGS += -DBLEDIS_FW_VERSION='"$(GIT_VERSION) $(SD_NAME) $(SD_VERSION)"'
+CFLAGS += -DDFU_USB_ENUMERATION_TIMEOUT_MS=$(DFU_USB_ENUMERATION_TIMEOUT_MS)
 
 ifeq ($(SIGNED_FW), 1)
 CFLAGS += -DSIGNED_FW

@@ -121,7 +121,7 @@ static int guard_device_flread_is_volatile(void) {
     s[n] = 0; fclose(f);
     // Locate the device (#else) abstraction block, then its fl_read, then require `volatile` in the body.
     char* dev = strstr(s, "#include \"nrf.h\"");
-    char* fr  = dev ? strstr(dev, "fl_read(uint32_t a, void* d, uint32_t n)") : NULL;
+    char* fr  = dev ? strstr(dev, "fl_read(uint32_t a, void") : NULL;
     if (!dev || !fr) { printf("  WARN: device fl_read not located (source refactored?); update this guard\n"); free(s); return 1; }
     char* fe = strstr(fr, "fl_erase");           // bound the search to the fl_read body
     char saved = 0; if (fe) { saved = *fe; *fe = 0; }

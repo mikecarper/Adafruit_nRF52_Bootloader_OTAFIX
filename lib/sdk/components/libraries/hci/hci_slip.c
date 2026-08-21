@@ -358,13 +358,23 @@ static uint32_t slip_uart_open(void)
   return NRF_SUCCESS;
 }
 
-void tud_cdc_rx_cb(uint8_t port)
+void hci_slip_process_pending_rx(void)
 {
   while ( tud_cdc_available() && !rx_buffer_overflowed() )
   {
-    int8_t ch = tud_cdc_read_char();
-    handle_rx_byte((uint8_t) ch);
+    int32_t ch = tud_cdc_read_char();
+    if (ch < 0)
+    {
+      break;
+    }
+    handle_rx_byte((uint8_t)ch);
   }
+}
+
+void tud_cdc_rx_cb(uint8_t port)
+{
+  (void)port;
+  hci_slip_process_pending_rx();
 }
 
 #else

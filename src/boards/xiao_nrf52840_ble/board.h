@@ -43,6 +43,14 @@
 #define BUTTON_DFU_OTA PINNUM(0, 3)
 #define BUTTON_PULL    NRF_GPIO_PIN_PULLUP
 
+// On-module 2 MiB QSPI flash used as the raw MeshCore repeater OTA store.
+#define MOTA_QSPI_SCK_PIN PINNUM(0, 21)
+#define MOTA_QSPI_CSN_PIN PINNUM(0, 25)
+#define MOTA_QSPI_IO0_PIN PINNUM(0, 20)
+#define MOTA_QSPI_IO1_PIN PINNUM(0, 24)
+#define MOTA_QSPI_IO2_PIN PINNUM(0, 22)
+#define MOTA_QSPI_IO3_PIN PINNUM(0, 23)
+
 //--------------------------------------------------------------------+
 // BLE OTA
 //--------------------------------------------------------------------+

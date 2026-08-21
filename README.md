@@ -1,9 +1,9 @@
 # Adafruit nRF52 Bootloader with Enhanced OTA DFU
 
-## Changes in OTAFIX 2.4.1
+## Changes in OTAFIX 2.4.1 preview.8
 
 - **USB-first recovery with automatic BLE fallback**
-  When no valid application is installed, the bootloader first checks for an active USB data host. An enumerated host receives serial/UF2 DFU; battery power falls back to BLE OTA immediately, while a power-only USB connection falls back after three seconds.
+  When no valid application is installed, the bootloader first checks for an active USB data host. An enumerated host receives serial/UF2 DFU; battery-only power falls back to BLE OTA immediately, while VBUS-powered devices allow up to 30 seconds for host enumeration or VM USB passthrough before falling back. Builds can override the grace period with `DFU_USB_ENUMERATION_TIMEOUT_MS`.
 
 - **Persistent application CRC validation**
   BLE/serial DFU now saves the CRC that was validated during installation, allowing the bootloader to verify application integrity on subsequent boots.
@@ -28,6 +28,9 @@
 
 - **MeshTower V2 microSD self-updates**
   The `heltec_mesh_tower_v2_sdcard` target reads a checksummed raw-sector handoff from the onboard microSD socket and applies either a full MeshCore `.mota` image or an in-place delta. The card holds the download, while application writes remain bounded below InternalFS at `0xED000`. Build it with `make BOARD=heltec_mesh_tower_v2_sdcard`; it must be paired with MeshCore's SD-card firmware target.
+
+- **Raw-QSPI MeshCore repeater self-updates**
+  Exact-board targets for XIAO nRF52840 BLE/Sense, original LilyGo T-Echo, ThinkNode M1/M6, Wio Tracker L1, SenseCAP Solar Node P1, and RAK4631 with a RAK15001 in sensor Slot C can read a verified raw `.mota` from external flash and apply either a full image or an in-place delta. They must be paired with the matching MeshCore QSPI repeater build; a board merely exposing QSPI-named GPIO is not supported. Build the RAK target with `make BOARD=wiscore_rak4631_board_rak15001_slot_c`. It uses 8 MHz standard SPI over the nRF52840 QSPI peripheral, requires the exact `C8:40:15` GD25Q16 JEDEC ID, and leaves QSPI IO2/IO3 disconnected. WP# and HOLD# use the module's onboard pull-ups, so the bootloader does not drive WB_IO4. The Slot C deployment contract avoids the RAK12501 GNSS module's RESET/1PPS lines whether GNSS occupies its supported Slot A or D. Do not combine this target with Ethernet, SD, or another WisBlock SPI module: WisBlock sensor slots share SPI and chip-select, so those configurations must use their own update storage/transport. The ordinary RAK4631 target retains internal staging. RAK3401 is excluded because its required RAK13302 radio uses the same SPI bus and chip-select as RAK15001. Heltec T114 is excluded because its public schematics mark the MX25R1635F U9 footprint optional, so the standard target cannot assume it is populated.
 
 - **Fail-closed bootloader UF2 updates**
   Bootloader self-update files now carry a board-bound manifest and a CRC32 over the complete bootloader region. The receiver verifies the UICR addresses, legacy VID/PID, unique DFU device identity, manifest, and CRC before asking the MBR to copy the image. This distinguishes boards such as the T1, T096, T114, and MeshTower even though their factory bootloaders share a VID/PID. A bootloader containing this check intentionally rejects older self-update UF2 files that do not have the manifest; newly generated files remain installable by older bootloaders.
@@ -122,9 +125,24 @@ If there is another nRF52840-based board you would like to see supported please 
 **IMPORTANT:** If you are running a MeshCore companion firmware or Ripple firmware on your device **you will need to run an erase after flashing a new bootloader**. Use the MeshCore web flasher to do the erase, it will guide you to the correct erase firmware for your device. Other erase firmwares will not work, they will not erase the ExtraFS area.
 
 The recommended way to install the bootloader is using the UF2 file.  
-Download the UF2 file for your board (they can be found in the releases with filenames beginning with `update-` and ending in `_mbr.uf2`), enter UF2 mode (usually by double pressing the reset button within 0.5s) and copy the UF2 file across. The `_mbr` artifact contains the MBR and bootloader; SD-card support is determined by the board target. Packages ending in `_s140_<version>.zip` additionally contain the SoftDevice.
+Download the UF2 file for your board (they can be found in the releases with filenames beginning with `update-` and ending in `_mbr.uf2`), enter UF2 mode (usually by double pressing the reset button within 0.5s) and copy the UF2 file across. The `_mbr` artifact contains the MBR and bootloader; SD-card and QSPI apply support are determined by the exact board target. Packages ending in `_s140_<version>.zip` additionally contain the SoftDevice.
 
-Current preview: [OTAFIX 2.4.1 Preview 7](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/0.9.2-OTAFIX2.4.1-preview.7)
+See the [OTAFIX releases](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases) and use a release whose notes explicitly list your exact board and required SD or QSPI apply mode.
+
+When migrating a RAK4631 from the ordinary `wiscore_rak4631_board` bootloader to
+`wiscore_rak4631_board_rak15001_slot_c`, do **not** use the canonical slot-C
+bootloader-update UF2 for the first migration. A current board-bound ordinary RAK4631
+bootloader expects the DFU device name `4631_DFU`, while the slot-C target is intentionally
+identified as `4631_15001C_DFU`, so it rejects that cross-target UF2. Use the exact slot-C
+OTAFIX combined bootloader + SoftDevice package ending in `_s140_<version>.zip` through
+serial DFU or a compatible BLE DFU client, or flash the exact slot-C image with SWD. A
+MeshCore application Serial DFU ZIP updates only the application and is not a substitute.
+Reinstall the matching slot-C MeshCore application after this one-time bootloader migration;
+subsequent canonical slot-C bootloader-update UF2 files can then be used normally.
+
+The direct preview.7 links below are retained for their original board targets, but preview.7 has only a
+brief USB recovery probe and predates raw-QSPI apply support. Use preview.8 or newer—and verify the release
+notes explicitly mention the 30-second USB grace and QSPI mode—when either new behavior is required.
 
 - [Heltec T1 UF2](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/0.9.2-OTAFIX2.4.1-preview.7/update-heltec_t1_bootloader-0.9.2-OTAFIX2.4.1-preview.7_mbr.uf2)
 - [Heltec T096 UF2](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/0.9.2-OTAFIX2.4.1-preview.7/update-heltec_t096_bootloader-0.9.2-OTAFIX2.4.1-preview.7_mbr.uf2)
@@ -142,15 +160,18 @@ If you have somehow managed to accidentally flash an incorrect bootloader to you
 
 If the device does not show up on your computer after flashing the bootloader or performing an OTA update, it may be **waiting in OTA DFU mode**.
 
-In **OTAFIX 2.4.1** and above, a device without a valid application chooses its recovery transport automatically:
+In **OTAFIX 2.4.1 preview.8** and above, a device without a valid application chooses its recovery transport automatically:
 - Connected to an active USB data host: serial and UF2 DFU remain available.
-- Running on battery or connected to USB power without data: BLE OTA starts immediately or after the three-second USB detection window.
+- Running on battery: BLE OTA starts immediately because VBUS is absent.
+- Connected to USB power without a data host: BLE OTA starts after the 30-second USB detection window.
 
-In **OTAFIX 2.0 through 2.4**, a device without a valid application defaults directly to BLE OTA, where no UF2 drive or serial port is exposed.
+Preview.7 offers USB only briefly before falling back to BLE. Other older OTAFIX builds may fall directly
+to BLE. On those versions, a host or VM that attaches too slowly can miss the USB window even though the
+cable supplies power.
 
 **What to do:**
-- On 2.4.1 or newer, connect the device to a computer with a data-capable USB cable and wait for the UF2 drive or serial port, **or** perform an OTA update using a supported DFU app.
-- On older releases, explicitly request UF2/serial mode using **double-reset**, or perform a BLE OTA update.
+- On preview.8 or newer, connect the device to a computer with a data-capable USB cable and wait for the UF2 drive or serial port, **or** perform an OTA update using a supported DFU app.
+- On preview.7 or older releases, explicitly request UF2/serial mode using **double-reset**, or perform a BLE OTA update.
 
 This behavior keeps computer-based recovery available without leaving battery-powered devices stuck waiting for USB.
 

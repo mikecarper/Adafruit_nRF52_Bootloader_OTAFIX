@@ -41,6 +41,14 @@
 #define BUTTON_DFU_OTA    _PINNUM(1, 10)  // hold on boot to enter OTA DFU mode
 #define BUTTON_PULL       NRF_GPIO_PIN_PULLUP
 
+// On-board 2 MiB QSPI flash used as the raw MeshCore repeater OTA store.
+#define MOTA_QSPI_SCK_PIN _PINNUM(1, 14)
+#define MOTA_QSPI_CSN_PIN _PINNUM(1, 15)
+#define MOTA_QSPI_IO0_PIN _PINNUM(1, 12)
+#define MOTA_QSPI_IO1_PIN _PINNUM(1, 13)
+#define MOTA_QSPI_IO2_PIN _PINNUM(0, 7)
+#define MOTA_QSPI_IO3_PIN _PINNUM(0, 5)
+
 //--------------------------------------------------------------------+
 // BLE OTA
 //--------------------------------------------------------------------+

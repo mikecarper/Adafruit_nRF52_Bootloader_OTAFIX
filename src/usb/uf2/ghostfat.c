@@ -27,6 +27,8 @@
 #include "compile_date.h"
 
 #include "uf2.h"
+#include "uf2_app_flash.h"
+#include "uf2_transfer_state.h"
 #include "bootloader_image.h"
 #include "configkeys.h"
 #include "flash_nrf5x.h"
@@ -404,29 +406,6 @@ void read_block(uint32_t block_no, uint8_t *data) {
  * 512 : write is successful (BPB_SECTOR_SIZE == 512)
  *   0 : is busy with flashing, tinyusb stack will call write_block again with the same parameters later on
  */
-static bool prepare_write(UF2_Block const* block, WriteState* state, uint8_t update_kind) {
-  if (block->numBlocks == 0 || block->numBlocks > MAX_BLOCKS || block->blockNo >= block->numBlocks) {
-    state->aborted = true;
-    return false;
-  }
-
-  if (state->numBlocks == 0) {
-    state->numBlocks = block->numBlocks;
-  } else if (state->numBlocks != block->numBlocks) {
-    state->aborted = true;
-    return false;
-  }
-
-  if (state->updateKind == UF2_UPDATE_KIND_NONE) {
-    state->updateKind = update_kind;
-  } else if (state->updateKind != update_kind) {
-    state->aborted = true;
-    return false;
-  }
-
-  return true;
-}
-
 static bool erase_bootloader_staging(WriteState* state) {
   if (state->bootloaderStagingErased) {
     return true;
@@ -442,25 +421,80 @@ static bool erase_bootloader_staging(WriteState* state) {
   return true;
 }
 
+static bool prepare_app_block(UF2_Block const* block, WriteState* state) {
+  uint32_t const page = (block->targetAddr - USER_FLASH_START) / CODE_PAGE_SIZE;
+  switch (uf2_app_flash_next_action(&state->appSettingsInvalidated, state->appErasedMask, page)) {
+    case UF2_APP_FLASH_INVALIDATE_SETTINGS: {
+      // Fail closed before changing any application page. In particular, an
+      // out-of-order UF2 copy must not leave the old vector table marked valid
+      // after a later application page has already changed.
+      // Direct app UF2 does not use the legacy page cache; abandon any partial
+      // CDC/bootloader staging page before this transfer owns flash state.
+      flash_nrf5x_discard();
+      flash_nrf5x_invalidate_app_settings();
+      return false;
+    }
+
+    case UF2_APP_FLASH_ERASE_PAGE:
+      // Page erase can take about 85 ms. Return busy after this one operation so
+      // TinyUSB can run (and the inherited watchdog can be fed) before any flash
+      // programming. TinyUSB retries this same sector after write_block() returns 0.
+      flash_nrf5x_erase(block->targetAddr, CODE_PAGE_SIZE);
+      return false;
+
+    case UF2_APP_FLASH_PROGRAM_BLOCK:
+      return true;
+  }
+
+  return false;
+}
+
 int write_block(uint32_t block_no, uint8_t* data, WriteState* state) {
   UF2_Block* block = (void*)data;
   (void)block_no;
+
+  if (state->aborted) {
+    return -1;
+  }
 
   if (!is_uf2_block(block)) {
     return -1;
   }
 
+  uint8_t update_kind;
   switch (block->familyID) {
     case CFG_UF2_BOARD_APP_ID:
     case CFG_UF2_FAMILY_APP_ID:
-      if (!prepare_write(block, state, UF2_UPDATE_KIND_APPLICATION)) {
-        return -1;
-      }
+      update_kind = UF2_UPDATE_KIND_APPLICATION;
+      break;
+
+    case CFG_UF2_FAMILY_BOOT_ID:
+      update_kind = UF2_UPDATE_KIND_BOOTLOADER;
+      break;
+
+    default:
+      return -1;
+  }
+
+  uf2_transfer_result_t const transfer_result =
+    uf2_transfer_prepare(block->numBlocks, block->blockNo, update_kind, MAX_BLOCKS,
+                         &state->numBlocks, &state->updateKind, &state->aborted,
+                         state->writtenMask);
+  if (transfer_result == UF2_TRANSFER_ABORTED) {
+    return -1;
+  }
+
+  switch (update_kind) {
+    case UF2_UPDATE_KIND_APPLICATION:
 
       if (in_app_space(block->targetAddr)) {
+        if (!prepare_app_block(block, state)) {
+          return 0;
+        }
+
         PRINTF("Write addr = 0x%08lX, block = %ld (%ld of %ld)\r\n", block->targetAddr, block->blockNo,
                state->numWritten, block->numBlocks);
-        flash_nrf5x_write(block->targetAddr, block->data, block->payloadSize, true);
+        flash_nrf5x_write_erased(block->targetAddr, block->data, block->payloadSize);
       } else if (block->targetAddr < USER_FLASH_START) {
         PRINTF("skip writing to MBR\r\n");
       } else {
@@ -469,11 +503,7 @@ int write_block(uint32_t block_no, uint8_t* data, WriteState* state) {
       }
       break;
 
-    case CFG_UF2_FAMILY_BOOT_ID:
-      if (!prepare_write(block, state, UF2_UPDATE_KIND_BOOTLOADER)) {
-        return -1;
-      }
-
+    case UF2_UPDATE_KIND_BOOTLOADER:
       PRINTF("addr = 0x%08lX, block = %ld (%ld of %ld)\r\n", block->targetAddr, block->blockNo,
              state->numWritten, block->numBlocks);
 
@@ -509,21 +539,18 @@ int write_block(uint32_t block_no, uint8_t* data, WriteState* state) {
       break;
 
     default:
+      state->aborted = true;
       return -1;
   }
 
-  uint8_t const mask = 1U << (block->blockNo % 8);
-  uint32_t const pos = block->blockNo / 8;
-  if (!(state->writtenMask[pos] & mask)) {
-    state->writtenMask[pos] |= mask;
-    state->numWritten++;
-  }
+  uf2_transfer_commit(block->blockNo, &state->numWritten, state->writtenMask);
 
   if (state->numWritten >= state->numBlocks) {
     bool const update_bootloader = state->updateKind == UF2_UPDATE_KIND_BOOTLOADER;
-    flash_nrf5x_flush(!update_bootloader);
 
     if (update_bootloader) {
+      // Bootloader UF2 is staged through the legacy 4 KiB page cache.
+      flash_nrf5x_flush(false);
       uint32_t const expected_board_id = ((uint32_t)USB_DESC_VID << 16) | USB_DESC_UF2_PID;
       uint8_t const* staged_image = (uint8_t const*)(uintptr_t)BOOTLOADER_ADDR_NEW_RECEIVED;
       if (!state->has_uicr || !state->bootloaderStagingErased ||
@@ -532,6 +559,10 @@ int write_block(uint32_t block_no, uint8_t* data, WriteState* state) {
         PRINTF("Bootloader image validation failed\r\n");
         state->aborted = true;
       }
+    } else {
+      // Application UF2 programs erased pages directly in 256-byte blocks.
+      // Never flush a cache that may belong to an abandoned CDC transfer.
+      flash_nrf5x_discard();
     }
   }
 

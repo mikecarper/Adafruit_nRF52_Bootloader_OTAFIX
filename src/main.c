@@ -59,6 +59,7 @@
 #include "nrf_error.h"
 
 #include "boards.h"
+#include "usb_wait.h"
 
 #include "pstorage_platform.h"
 #include "nrf_mbr.h"
@@ -73,7 +74,6 @@
 #include "tusb.h"
 
 void usb_init(bool cdc_only);
-bool usb_wait_for_mount(uint32_t timeout_ms);
 void usb_teardown(void);
 
 // tinyusb function that handles power event (detected, ready, removed)
@@ -120,7 +120,6 @@ extern void tusb_hal_nrf_power_event(uint32_t event);
 
 #define BOOTLOADER_VERSION_REGISTER     NRF_TIMER2->CC[0]
 #define DFU_SERIAL_STARTUP_INTERVAL     1000
-#define DFU_USB_ENUMERATION_INTERVAL    3000
 
 // Allow for using reset button essentially to swap between application and bootloader.
 // This is controlled by a flag in the app and is the behavior of CPX and all Arcade boards when using MakeCode.
@@ -358,7 +357,7 @@ static void check_dfu_mode(void) {
       led_state(STATE_USB_UNMOUNTED);
       usb_init(false);
 
-      if (!usb_wait_for_mount(DFU_USB_ENUMERATION_INTERVAL)) {
+      if (!usb_wait_for_mount(DFU_USB_ENUMERATION_TIMEOUT_MS)) {
         usb_teardown();
         _ota_dfu = true;
       }

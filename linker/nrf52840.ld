@@ -14,7 +14,7 @@ MEMORY
   /* MeshCore OTA: the in-place delta applier (detools CRLE in-place + sha256 + ota_delta) and fail-closed
      UF2 self-update validation do not fit in the stock 38 KB code region. Reclaim 1.5 KB from the CF2
      bootloaderConfig page and give it to FLASH -> 39.5 KB. This is safe for the curated boards:
-     bootloaderConfig plus the update manifest is currently 116 B, is compile-time read-only data, and a
+     bootloaderConfig plus the update manifest is currently 132 B, is compile-time read-only data, and a
      future board that exceeds the reserved 512 B fails at link time rather than at runtime. The
      bootloader still starts at 0xF4000 (UICR/BOOTLOADER_REGION_START unchanged), and the MBR-params
      (0xFE000) and bootloader-settings (0xFF000) pages remain untouched.

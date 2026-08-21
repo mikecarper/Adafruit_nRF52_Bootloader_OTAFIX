@@ -28,9 +28,9 @@
 #include "nrf_soc.h"
 
 #include "nrf_usbd.h"
-#include "nrf_wdt.h"
 #include "tusb.h"
 #include "usb_desc.h"
+#include "usb_wait.h"
 
 #include "uf2/uf2.h"
 #include "boards.h"
@@ -109,39 +109,6 @@ void usb_init(bool cdc_only) {
   #endif
 }
 
-bool usb_wait_for_mount(uint32_t timeout_ms) {
-  // VBUS only proves that USB power is present. A configured TinyUSB device proves
-  // that an active USB host is attached and can be used for DFU.
-  if (!(NRF_POWER->USBREGSTATUS & POWER_USBREGSTATUS_VBUSDETECT_Msk)) {
-    return false;
-  }
-
-  for (uint32_t elapsed_ms = 0; elapsed_ms < timeout_ms; elapsed_ms++) {
-    tud_task();
-
-    if (tud_mounted()) {
-      return true;
-    }
-
-    if (!(NRF_POWER->USBREGSTATUS & POWER_USBREGSTATUS_VBUSDETECT_Msk)) {
-      return false;
-    }
-
-    // WDT configuration survives a reset, so keep feeding a watchdog that was
-    // started by the previous application while waiting for USB enumeration.
-    if (nrf_wdt_started(NRF_WDT)) {
-      for (uint8_t i = 0; i < 8; i++) {
-        nrf_wdt_reload_request_set(NRF_WDT, i);
-      }
-    }
-
-    NRFX_DELAY_MS(1);
-  }
-
-  tud_task();
-  return tud_mounted();
-}
-
 void usb_teardown(void) {
   // Simulate an disconnect which cause pullup disable, USB perpheral disable and hclk disable
   tusb_hal_nrf_power_event(NRFX_POWER_USB_EVT_REMOVED);
@@ -159,10 +126,18 @@ void usb_teardown(void) {
 // tinyusb callbacks
 //--------------------------------------------------------------------+
 void tud_mount_cb(void) {
+#if CFG_TUD_MSC
+  // A configured/remounted USB volume is an explicit boundary between UF2
+  // copies. Do not infer new sessions from ordinary FAT/SCSI traffic.
+  uf2_write_session_reset();
+#endif
   led_state(STATE_USB_MOUNTED);
   bootloader_mark_usb_mounted();
 }
 
 void tud_umount_cb(void) {
+#if CFG_TUD_MSC
+  uf2_write_session_reset();
+#endif
   led_state(STATE_USB_UNMOUNTED);
 }

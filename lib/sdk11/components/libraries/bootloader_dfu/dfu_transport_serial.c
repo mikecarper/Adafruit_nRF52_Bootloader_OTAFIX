@@ -17,6 +17,7 @@
 #include <dfu_types.h>
 #include "app_error.h"
 #include "app_util.h"
+#include "hci_slip.h"
 #include "hci_transport.h"
 #include "app_timer.h"
 #include "app_scheduler.h"
@@ -299,6 +300,14 @@ uint32_t dfu_transport_serial_update_start(void)
     // Register callback to be run when commands have been received by the transport layer.
     err_code = hci_transport_evt_handler_reg(rpc_transport_event_handler);
     APP_ERROR_CHECK(err_code);
+
+#ifdef NRF_USBD
+    // usb_init() may have enumerated CDC before this transport was opened. If
+    // the host sent its first packet immediately, TinyUSB already placed it in
+    // the CDC FIFO but could not deliver it while SLIP had no receive buffer.
+    // Registration alone does not retrigger tud_cdc_rx_cb(), so drain it now.
+    hci_slip_process_pending_rx();
+#endif
 
     return NRF_SUCCESS;
 }

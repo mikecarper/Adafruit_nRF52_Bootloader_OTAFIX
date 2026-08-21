@@ -32,7 +32,22 @@ sd_apply_test: sd_apply_test.c $(SRC)/ota_delta.c $(SRC)/detools/detools.c $(SRC
 	$(CC) $(CFLAGS) -DOTA_DELTA_HOST_TEST -DMOTA_SD_CARD $(INC) sd_apply_test.c \
 		$(SRC)/detools/detools.c $(SRC)/sha256.c -o $@
 
-check: apply_sim readback_test readback_test_v7 bootloader_image_test sd_apply_test
+qspi_apply_test: sd_apply_test.c $(SRC)/ota_delta.c $(SRC)/detools/detools.c $(SRC)/sha256.c \
+                 $(SRC)/ota_delta.h $(SRC)/ota_layout.h $(SRC)/ota_qspi.h
+	$(CC) $(CFLAGS) -DOTA_DELTA_HOST_TEST -DMOTA_QSPI_FLASH $(INC) sd_apply_test.c \
+		$(SRC)/detools/detools.c $(SRC)/sha256.c -o $@
+
+qspi_alignment_test: qspi_alignment_test.c $(SRC)/ota_qspi_alignment.h
+	$(CC) $(CFLAGS) -I $(SRC) qspi_alignment_test.c -o $@
+
+usb_wait_test: usb_wait_test.c $(SRC)/usb/usb_wait.c $(SRC)/usb/usb_wait.h
+	$(CC) $(CFLAGS) -DUSB_WAIT_HOST_TEST -I $(SRC)/usb usb_wait_test.c $(SRC)/usb/usb_wait.c -o $@
+
+uf2_write_state_test: uf2_write_state_test.c $(SRC)/usb/uf2/uf2_app_flash.h \
+                      $(SRC)/usb/uf2/uf2_transfer_state.h
+	$(CC) $(CFLAGS) -I $(SRC)/usb/uf2 uf2_write_state_test.c -o $@
+
+check: apply_sim readback_test readback_test_v7 bootloader_image_test sd_apply_test qspi_apply_test qspi_alignment_test usb_wait_test uf2_write_state_test
 	./apply_sim vectors/base.img vectors/delta.mota vectors/new.img
 	@echo
 	./readback_test
@@ -42,8 +57,16 @@ check: apply_sim readback_test readback_test_v7 bootloader_image_test sd_apply_t
 	./bootloader_image_test
 	@echo
 	./sd_apply_test
+	@echo
+	./qspi_apply_test
+	@echo
+	./qspi_alignment_test
+	@echo
+	./usb_wait_test
+	@echo
+	./uf2_write_state_test
 
 clean:
-	rm -f apply_sim readback_test readback_test_v7 bootloader_image_test sd_apply_test
+	rm -f apply_sim readback_test readback_test_v7 bootloader_image_test sd_apply_test qspi_apply_test qspi_alignment_test usb_wait_test uf2_write_state_test
 
 .PHONY: check clean

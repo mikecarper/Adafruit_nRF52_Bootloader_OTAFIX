@@ -24,6 +24,7 @@
 
 #include <string.h>
 #include "nrf_sdm.h"
+#include "nrf_wdt.h"
 #include "flash_nrf5x.h"
 #include "boards.h"
 #include "dfu_types.h"
@@ -33,6 +34,29 @@
 static uint32_t _fl_addr = FLASH_CACHE_INVALID_ADDR;
 static uint8_t _fl_buf[CODE_PAGE_SIZE] __attribute__((aligned(4)));
 
+static void inherited_watchdog_feed(void)
+{
+    if (nrf_wdt_started(NRF_WDT))
+    {
+        uint32_t const enabled_channels = NRF_WDT->RREN & 0xffU;
+        for (uint8_t channel = 0; channel < 8; channel++)
+        {
+            if (enabled_channels & (1U << channel))
+            {
+                nrf_wdt_reload_request_set(NRF_WDT, channel);
+            }
+        }
+    }
+}
+
+void flash_nrf5x_discard(void)
+{
+    // An interrupted bootloader UF2 can leave an unflushed staging page in the
+    // RAM cache. A new MSC session must reload that page after erasing it rather
+    // than merge the new image with bytes from the abandoned transfer.
+    _fl_addr = FLASH_CACHE_INVALID_ADDR;
+}
+
 void flash_nrf5x_erase (uint32_t dst, uint32_t len)
 {
     uint32_t page_addr = dst & ~(CODE_PAGE_SIZE - 1);
@@ -41,8 +65,19 @@ void flash_nrf5x_erase (uint32_t dst, uint32_t len)
     {
         uint32_t const addr = page_addr + i * CODE_PAGE_SIZE;
         PRINTF("Erase 0x%08lX\r\n", addr);
+        inherited_watchdog_feed();
         nrfx_nvmc_page_erase(addr);
+        inherited_watchdog_feed();
     }
+}
+
+void flash_nrf5x_invalidate_app_settings(void)
+{
+    // bank_0 and bank_0_crc occupy the first settings word. Clearing that word
+    // is a fast, one-way fail-closed transition from every stored state; the
+    // completed UF2 update later erases and rewrites the full settings page.
+    nrfx_nvmc_word_write(BOOTLOADER_SETTINGS_ADDRESS, 0);
+    inherited_watchdog_feed();
 }
 
 
@@ -62,11 +97,17 @@ void flash_nrf5x_flush (bool need_erase)
         if ( need_erase )
         {
             PRINTF("Erase and ");
+            inherited_watchdog_feed();
             nrfx_nvmc_page_erase(_fl_addr);
+            inherited_watchdog_feed();
         }
 
         PRINTF("Write 0x%08lX\r\n", _fl_addr);
-        nrfx_nvmc_words_write(_fl_addr, (uint32_t *) _fl_buf, CODE_PAGE_SIZE / 4);
+        for (uint32_t offset = 0; offset < CODE_PAGE_SIZE; offset += 256)
+        {
+            nrfx_nvmc_words_write(_fl_addr + offset, _fl_buf + offset, 256 / sizeof(uint32_t));
+            inherited_watchdog_feed();
+        }
     }
 
     _fl_addr = FLASH_CACHE_INVALID_ADDR;
@@ -111,3 +152,11 @@ void flash_nrf5x_write (uint32_t dst, void const *src, uint32_t len, bool need_e
     };
 }
 
+void flash_nrf5x_write_erased(uint32_t dst, void const *src, uint32_t len)
+{
+    // UF2 payloads are word-aligned and exactly 256 bytes. Program them as
+    // individual blocks after their page has been erased in a prior callback;
+    // keeping each NVMC write short bounds USB interrupt latency.
+    nrfx_nvmc_words_write(dst, src, len / sizeof(uint32_t));
+    inherited_watchdog_feed();
+}

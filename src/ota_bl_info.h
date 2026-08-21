@@ -29,6 +29,7 @@
 // storage_flags[0]
 #define MOTA_BL_STORAGE_SD             0x01u
 #define MOTA_BL_STORAGE_STAGE_CEILING  0x02u // understands the GPREGRET2 staging-ceiling handoff
+#define MOTA_BL_STORAGE_QSPI           0x04u // raw external-QSPI container at offset zero
 
 typedef struct {
   uint8_t  magic[8];     // MOTA_BL_MAGIC*

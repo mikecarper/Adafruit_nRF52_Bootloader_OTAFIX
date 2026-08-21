@@ -1,7 +1,7 @@
 /*
  * The MIT License (MIT)
  *
- * Copyright (c) 2018 Ha Thach for Adafruit Industries
+ * Copyright (c) 2026 Mike Carper
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,27 +22,16 @@
  * THE SOFTWARE.
  */
 
-#ifndef FLASH_NRF5X_H_
-#define FLASH_NRF5X_H_
+#ifndef USB_WAIT_H_
+#define USB_WAIT_H_
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 
-#include "nrfx_nvmc.h"
-
-#ifdef __cplusplus
- extern "C" {
+#ifndef DFU_USB_ENUMERATION_TIMEOUT_MS
+#define DFU_USB_ENUMERATION_TIMEOUT_MS 30000u
 #endif
 
-void flash_nrf5x_erase (uint32_t dst, uint32_t len);
-void flash_nrf5x_discard (void);
-void flash_nrf5x_invalidate_app_settings (void);
-void flash_nrf5x_write (uint32_t dst, void const *src, uint32_t len, bool need_erase);
-void flash_nrf5x_write_erased (uint32_t dst, void const *src, uint32_t len);
-void flash_nrf5x_flush (bool need_erase);
+bool usb_wait_for_mount(uint32_t timeout_ms);
 
-#ifdef __cplusplus
- }
 #endif
-
-#endif /* FLASH_NRF5X_H_ */

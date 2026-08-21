@@ -24,6 +24,8 @@
 
 #include "tusb.h"
 #include "uf2/uf2.h"
+#include "uf2/uf2_transfer_state.h"
+#include "flash_nrf5x.h"
 
 #if CFG_TUD_MSC
 
@@ -37,9 +39,22 @@
 /* UF2
  *------------------------------------------------------------------*/
 static WriteState _wr_state = { 0 };
+static bool _first_write = true;
 
 void read_block(uint32_t block_no, uint8_t *data);
 int  write_block(uint32_t block_no, uint8_t *data, WriteState *state);
+
+void uf2_write_session_reset(void)
+{
+  // Only bootloader UF2 owns the legacy 4 KiB staging cache. An unrelated MSC
+  // mount/eject must not discard a partial CDC serial-DFU page.
+  if (_wr_state.updateKind == UF2_UPDATE_KIND_BOOTLOADER)
+  {
+    flash_nrf5x_discard();
+  }
+  uf2_transfer_reset(&_wr_state, sizeof(_wr_state));
+  _first_write = true;
+}
 
 //--------------------------------------------------------------------+
 // tinyusb callbacks
@@ -150,6 +165,13 @@ int32_t tud_msc_write10_cb (uint8_t lun, uint32_t lba, uint32_t offset, uint8_t*
     // Consider non-uf2 block write as successful
     // only break if write_block is busy with flashing (return 0)
     written = write_block(lba, buffer, &_wr_state);
+    if (_wr_state.aborted)
+    {
+      // A malformed or conflicting transfer is terminal until an explicit MSC
+      // reset boundary. Stop before another sector in this 4 KiB buffer can
+      // erase or program flash, and fail the current WRITE10 command.
+      return -1;
+    }
     if ( written > 0 )
     {
       bootloader_dfu_activity_mark();
@@ -170,8 +192,6 @@ int32_t tud_msc_write10_cb (uint8_t lun, uint32_t lba, uint32_t offset, uint8_t*
 // Callback invoked when WRITE10 command is completed (status received and accepted by host).
 void tud_msc_write10_complete_cb(uint8_t lun)
 {
-  static bool first_write = true;
-
   // abort the DFU, uf2 block failed integrity check
   if ( _wr_state.aborted )
   {
@@ -190,9 +210,9 @@ void tud_msc_write10_complete_cb(uint8_t lun)
   else if ( _wr_state.numBlocks )
   {
     // Start LED writing pattern with first write
-    if (first_write)
+    if (_first_write)
     {
-      first_write = false;
+      _first_write = false;
       led_state(STATE_WRITING_STARTED);
     }
 
@@ -271,6 +291,7 @@ bool tud_msc_start_stop_cb(uint8_t lun, uint8_t power_condition, bool start, boo
     }else
     {
       // unload disk storage
+      uf2_write_session_reset();
     }
   }
 

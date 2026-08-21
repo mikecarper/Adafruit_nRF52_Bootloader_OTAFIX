@@ -155,6 +155,17 @@ uint32_t hci_slip_write(const uint8_t * p_buffer, uint32_t length);
  */
 uint32_t hci_slip_rx_buffer_register(uint8_t * p_buffer, uint32_t length);
 
+#ifdef NRF_USBD
+/**@brief Process bytes already buffered by USB CDC.
+ *
+ * USB can enumerate before the serial DFU transport has registered its receive
+ * buffer. TinyUSB does not issue another RX callback merely because a buffer is
+ * registered later, so the transport must explicitly consume those pending
+ * bytes once its handler and buffer are ready.
+ */
+void hci_slip_process_pending_rx(void);
+#endif
+
 
 #ifdef __cplusplus
 }

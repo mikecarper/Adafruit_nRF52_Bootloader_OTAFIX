@@ -31,5 +31,6 @@
 // LEGACY so it never scans through a possible Internal ExtraFS by accident.
 #define GPREGRET2_OTA_STAGE_LEGACY   0xD4u
 #define GPREGRET2_OTA_STAGE_EXPANDED 0xEDu
+#define GPREGRET2_OTA_STAGE_QSPI     0x51u
 
 #endif // OTA_LAYOUT_H_

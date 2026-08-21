@@ -23,10 +23,28 @@ make apply_sim
 # Exercise the SD-backed bootloader path with a real full or delta package.
 make sd_apply_test
 ./sd_apply_test <base.img> <full-or-delta.mota> <expected_new.img>
+
+# Exercise raw external-QSPI staging with the same full/delta checks.
+make qspi_apply_test
+./qspi_apply_test <base.img> <full-or-delta.mota> <expected_new.img>
 ```
 
-The suite runs the apply against both S140 v6 (`APP_BASE=0x26000`) and S140 v7 (`0x27000`) layouts. It
-also proves that the `0xED000` expanded-window hint works and missing/mismatched hints fail without
+The suite also exercises the no-valid-image USB recovery wait: no VBUS falls through to BLE without any
+delay, a USB host has the full 30-second default grace period to enumerate, enumeration at the deadline
+is accepted, and VBUS removal stops the wait immediately.
+
+The UF2 write-state test verifies that settings invalidation, each page erase, and block programming
+are separate retryable phases. It also covers busy retries, completion counting, fail-closed committed
+duplicates and same-geometry second copies, terminal aborts, and clearing every transfer/page mask at
+an explicit USB/MSC session reset.
+
+The QSPI alignment test exercises the nRF52840 EasyDMA boundary adapter with one-, three-, and five-byte
+unaligned reads, multi-window reads, end-of-device tails, and the unaligned four-byte approval clear at
+container offset 201. It also verifies that the read-modify-program path preserves adjacent bytes and
+rejects attempts to change NOR bits from zero back to one.
+
+The apply tests run against both S140 v6 (`APP_BASE=0x26000`) and S140 v7 (`0x27000`) layouts. They
+also prove that the `0xED000` expanded-window hint works and missing/mismatched hints fail without
 touching the running application.
 
 `base.img` / `expected_new.img` are flat app images (`BODY||EndF`, what lives at `APP_BASE`); for an nRF52

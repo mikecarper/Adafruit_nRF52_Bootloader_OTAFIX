@@ -32,8 +32,14 @@ option(DEFAULT_TO_OTA_DFU "Default to OTA DFU instead of Serial DFU" OFF)
 option(SIGNED_FW "Enable signed firmware verification" OFF)
 option(DUALBANK_FW "Enable dual bank DFU support" OFF)
 option(FORCE_UF2 "Force UF2 support even with SIGNED_FW" OFF)
+set(DFU_USB_ENUMERATION_TIMEOUT_MS "30000" CACHE STRING
+    "No-valid-image USB enumeration grace period while VBUS is present, in milliseconds")
 set(SIGNED_FW_QX "" CACHE STRING "Public key Qx (comma-separated bytes)")
 set(SIGNED_FW_QY "" CACHE STRING "Public key Qy (comma-separated bytes)")
+
+if (NOT DFU_USB_ENUMERATION_TIMEOUT_MS MATCHES "^[0-9]+$")
+  message(FATAL_ERROR "DFU_USB_ENUMERATION_TIMEOUT_MS must be a non-negative integer")
+endif ()
 
 set(UF2CONV_PY ${CMAKE_CURRENT_LIST_DIR}/lib/uf2/utils/uf2conv.py)
 set(UF2_FAMILY_ID_BOOTLOADER 0xd663823c)
@@ -91,6 +97,11 @@ add_executable(bootloader
 if (MOTA_SD_CARD)
   target_sources(bootloader PUBLIC src/ota_sd_spi.c)
   target_compile_definitions(bootloader PUBLIC MOTA_SD_CARD=1)
+endif ()
+
+if (MOTA_QSPI_FLASH)
+  target_sources(bootloader PUBLIC src/ota_qspi.c)
+  target_compile_definitions(bootloader PUBLIC MOTA_QSPI_FLASH=1)
 endif ()
 
 if (DUALBANK_FW)
@@ -201,6 +212,7 @@ target_compile_definitions(bootloader PUBLIC
   DETOOLS_CONFIG_COMPRESSION_NONE=0
   SOFTDEVICE_PRESENT
   CONFIG_GPIO_AS_PINRESET
+  DFU_USB_ENUMERATION_TIMEOUT_MS=${DFU_USB_ENUMERATION_TIMEOUT_MS}
   __HEAP_SIZE=0
   __START=main
   __STARTUP_CLEAR_BSS
@@ -259,6 +271,7 @@ else ()
     src/usb/msc_uf2.c
     src/usb/usb.c
     src/usb/usb_desc.c
+    src/usb/usb_wait.c
     src/usb/uf2/bootloader_image.c
     src/usb/uf2/bootloader_manifest.c
     src/usb/uf2/ghostfat.c
