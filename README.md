@@ -1,5 +1,11 @@
 # Adafruit nRF52 Bootloader with Enhanced OTA DFU
 
+## Changes in OTAFIX 2.4.1 preview.14
+
+- No functional source change from preview.13. This forward-version rebuild is the
+  first candidate used to qualify the signed, monotonic bootloader-update path on
+  physical hardware after locally provisioning preview.13.
+
 ## Changes in OTAFIX 2.4.1 preview.13
 
 - **Authenticated SD source handoff without filesystem-sector ownership**
