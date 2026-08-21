@@ -54,6 +54,7 @@ extern void     otah_write_words(uint32_t addr, const uint32_t *src, uint32_t nw
 extern uint32_t otah_gpregret_get(void);
 extern void     otah_gpregret_set(uint32_t v);
 extern uint32_t otah_gpregret2_get(void);
+extern void     otah_gpregret2_set(uint32_t v);
 extern uint16_t otah_crc16(uint32_t addr, uint32_t len);
 extern void     otah_settings_commit(uint16_t bank0, uint16_t crc, uint32_t size);
   #define APP_BASE MOTA_NRF52_APP_BASE
@@ -76,8 +77,8 @@ static uint32_t gpregret2_get(void) {
   return otah_gpregret2_get();
 }
 static void gpregret2_set(uint32_t v) {
-  (void)v;
-} // diag no-op on host
+  otah_gpregret2_set(v);
+}
 static uint16_t crc16_region(uint32_t a, uint32_t len) {
   return otah_crc16(a, len);
 }
@@ -767,6 +768,14 @@ bool ota_delta_check_and_apply(void) {
   if (keep == 0) {
     return finish_apply(false); // 'M' (0x4D) != 0, so never taken; keeps the marker live
   }
+
+  // A completed apply result is retained in GPREGRET2 for the application to
+  // report after the reset. Do not replace it during the normal post-apply
+  // boot; only an explicit apply trigger starts a new diagnostic lifecycle.
+  if (gpregret_get() != GPREGRET_OTA_APPLY) {
+    return finish_apply(false);
+  }
+
   // Read the app's staging-window handoff BEFORE GPREGRET2 becomes our diagnostic result register.
   // Backward compatibility is deliberately one-way safe: an old app leaves no recognized expanded
   // marker, so this bootloader scans only below ExtraFS. A new app uses EXPANDED only after finding the
@@ -785,15 +794,10 @@ bool ota_delta_check_and_apply(void) {
   const uint32_t app_limit = stage_ceiling;
 #endif
   // ---- DIAGNOSTIC: stash a bail/progress code in GPREGRET2; the app reads it back into `ota status`.
-  // 0xB0 entered (pre-gate) | 0xB1 gate passed (GPREGRET was 0x6A) | 0xB2 no/unapproved mota |
+  // 0xB1 gate passed (GPREGRET was 0x6A) | 0xB2 no/unapproved mota |
   // 0xB3 bad full/codec | 0xB4 no body_len | 0xB5 base mismatch | 0xB9 bad detools geometry |
   // 0xBA external full pre-hash mismatch | 0xBB external read failure | 0xBC approval clear failure |
   // 0x9N detools err N | 0xB6 wrong size | 0xB7 result-hash mismatch | 0xB8 SUCCESS.
-  // If status shows 0xB0 -> GPREGRET wasn't 0x6A at the bootloader.
-  gpregret2_set(0xB0);
-  if (gpregret_get() != GPREGRET_OTA_APPLY) {
-    return finish_apply(false);
-  }
   gpregret_set(0); // consume the trigger so we never loop
   gpregret2_set(0xB1);
 

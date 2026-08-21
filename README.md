@@ -2,6 +2,9 @@
 
 ## Changes in OTAFIX 2.4.1 preview.9
 
+- **Persistent MeshCore OTA apply result**
+  A normal boot after an OTA apply no longer replaces the retained `GPREGRET2` success or failure code with a pre-gate diagnostic. This preserves `0xB8` success and failure details long enough for the application to report the actual bootloader result.
+
 - **Reliable buttonless USB recovery window**
   Deliberate serial-only (`GPREGRET=0x4E`, including a 1200-baud touch) and UF2 (`GPREGRET=0x57`) entry now allow the full configured 30-second USB enumeration window before returning to a valid application. Once a host mounts, DFU remains available until an update completes or USB is unplugged. MakeCode-style single-tap recovery intentionally retains its brief 3-second window, while button/double-reset recovery remains unbounded.
 

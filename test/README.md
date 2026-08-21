@@ -77,17 +77,19 @@ bytes, and the apply is silently refused (the old firmware boots). The fix: `fl_
 `volatile` pointer. `-fno-strict-aliasing` does *not* cover it (provenance, not type aliasing).
 
 A plain host run can't reproduce the miscompile - here `otah_read`/`otah_write_words` hit the *same* C
-array, an obvious alias the compiler never gets wrong. So `readback_test` guards it five ways:
+array, an obvious alias the compiler never gets wrong. So `readback_test` guards the apply path six ways:
 
 1. **positive** - coherent readback => the apply succeeds, commits, and matches the expected image.
-2. **negative** - it *injects* the exact failure mode (workspace reads return stale pre-write bytes) and
+2. **result retention** - models the reset after a successful apply and proves a second normal boot leaves
+   `GPREGRET2=0xB8` intact for the application to report.
+3. **negative** - it *injects* the exact failure mode (workspace reads return stale pre-write bytes) and
    asserts the apply **fails safe**: the bank stays invalid, returns false (-> DFU, never a corrupt boot).
-3. **bounds/geometry** - rejects wraparound callback ranges, wrapped container size/leaf arithmetic, and
+4. **bounds/geometry** - rejects wraparound callback ranges, wrapped container size/leaf arithmetic, and
    impossible detools flash geometry before invalidating settings or modifying the current application.
-4. **staging handoff** - proves expanded and legacy packages apply only with their matching GPREGRET2
+5. **staging handoff** - proves expanded and legacy packages apply only with their matching GPREGRET2
    ceiling hint; missing or mismatched hints leave the running application untouched.
-5. **source guard** - asserts the device `fl_read` still reads through `volatile`. This is the only check
-   that catches a "someone reverted the fix" regression (1/2 can't, on the host). Verified: flipping
+6. **source guard** - asserts the device `fl_read` still reads through `volatile`. This is the only check
+   that catches a "someone reverted the fix" regression (1/3 can't, on the host). Verified: flipping
    `fl_read` back to a plain `memcpy` turns the suite red.
 
 ## Regenerating the committed vector

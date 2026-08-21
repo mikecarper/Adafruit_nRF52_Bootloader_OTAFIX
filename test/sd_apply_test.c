@@ -33,6 +33,7 @@ static uint8_t QSPI_FLASH[2u * 1024u * 1024u];
   #error "Build this test with MOTA_SD_CARD or MOTA_QSPI_FLASH"
 #endif
 static uint32_t g_gpregret;
+static uint32_t g_gpregret2;
 static uint16_t g_bank0;
 static uint16_t g_crc;
 static uint32_t g_size;
@@ -75,11 +76,10 @@ void otah_gpregret_set(uint32_t value) {
   g_gpregret = value;
 }
 uint32_t otah_gpregret2_get(void) {
-#if defined(MOTA_QSPI_FLASH)
-  return GPREGRET2_OTA_STAGE_QSPI;
-#else
-  return 0;
-#endif
+  return g_gpregret2;
+}
+void otah_gpregret2_set(uint32_t value) {
+  g_gpregret2 = value;
 }
 uint16_t otah_crc16(uint32_t address, uint32_t len) {
   (void)address;
@@ -309,6 +309,11 @@ static void reset_device(const uint8_t *base, uint32_t base_len) {
   memset(QSPI_FLASH, 0xFF, sizeof(QSPI_FLASH));
 #endif
   g_gpregret              = GPREGRET_OTA_APPLY;
+#if defined(MOTA_QSPI_FLASH)
+  g_gpregret2             = GPREGRET2_OTA_STAGE_QSPI;
+#else
+  g_gpregret2             = 0;
+#endif
   g_bank0                 = BANK_VALID_APP_V;
   g_crc                   = 0;
   g_size                  = base_len;
@@ -374,7 +379,8 @@ static int external_io_ok(void) {
 
 static int result_ok(bool applied, const uint8_t *expected, uint32_t expected_len) {
   return applied && g_bank0 == BANK_VALID_APP_V && g_crc == 0x1234 && g_size == expected_len &&
-         g_settings_writes == 2 && g_app_write_while_valid == 0 && g_gpregret == 0 && external_io_ok() &&
+         g_settings_writes == 2 && g_app_write_while_valid == 0 && g_gpregret == 0 &&
+         g_gpregret2 == 0xB8u && external_io_ok() &&
          memcmp(FLASH + MOTA_NRF52_APP_BASE, expected, expected_len) == 0;
 }
 

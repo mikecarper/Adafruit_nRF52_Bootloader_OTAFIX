@@ -31,6 +31,7 @@ void     otah_write_words(uint32_t a, const uint32_t* s, uint32_t nw) {
 uint32_t otah_gpregret_get(void)                           { return g_gpregret; }
 void     otah_gpregret_set(uint32_t v)                     { g_gpregret = v; }
 uint32_t otah_gpregret2_get(void)                          { return g_gpregret2; }
+void     otah_gpregret2_set(uint32_t v)                    { g_gpregret2 = v; }
 uint16_t otah_crc16(uint32_t a, uint32_t len)              { (void)a; (void)len; return 0x1234; }
 void otah_settings_commit(uint16_t b, uint16_t c, uint32_t s) { g_bank0 = b; g_crc = c; g_size = s; g_committed = 1; }
 

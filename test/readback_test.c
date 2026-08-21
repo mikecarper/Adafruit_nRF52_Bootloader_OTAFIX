@@ -10,14 +10,15 @@
 //
 // WHY THIS NEEDS A SPECIAL TEST: a plain host run cannot reproduce the miscompile - here otah_read and
 // otah_write_words both touch the SAME C array (FLASH[]), an obvious alias the compiler will never get
-// wrong, with or without -flto. So we cover the bug four ways:
+// wrong, with or without -flto. So we cover the apply path six ways:
 //   [1] POSITIVE  coherent readback  -> apply succeeds, commits, and matches the expected image.
-//   [2] NEGATIVE  inject the exact failure mode (workspace reads return STALE bytes) -> assert the apply
+//   [2] RESULT    a normal post-apply boot preserves the retained B8 result for the application.
+//   [3] NEGATIVE  inject the exact failure mode (workspace reads return STALE bytes) -> assert the apply
 //                 FAILS SAFE: the bank remains invalid and it returns false (never boots corrupt data).
-//   [3] BOUNDS    malformed detools address/size/header inputs are rejected before touching app flash.
-//   [4] HANDOFF   expanded/legacy GPREGRET2 selection applies only the matching bottom-aligned package.
-//   [5] GUARD     assert the device fl_read reads through `volatile` - the one check that catches a
-//                 "someone reverted the fix" regression, which [1]/[2] cannot on the host.
+//   [4] BOUNDS    malformed detools address/size/header inputs are rejected before touching app flash.
+//   [5] HANDOFF   expanded/legacy GPREGRET2 selection applies only the matching bottom-aligned package.
+//   [6] GUARD     assert the device fl_read reads through `volatile` - the one check that catches a
+//                 "someone reverted the fix" regression, which [1]/[3] cannot on the host.
 //
 // Build/run: see test/Makefile (`make check`). Uses the committed vectors in test/vectors/ by default.
 #include <stdint.h>
@@ -61,6 +62,7 @@ void     otah_write_words(uint32_t a, const uint32_t* s, uint32_t nw) {
 uint32_t otah_gpregret_get(void)                           { return g_gpregret; }
 void     otah_gpregret_set(uint32_t v)                     { g_gpregret = v; }
 uint32_t otah_gpregret2_get(void)                          { return g_gpregret2; }
+void     otah_gpregret2_set(uint32_t v)                    { g_gpregret2 = v; }
 uint16_t otah_crc16(uint32_t a, uint32_t len)              { (void)a; (void)len; return 0x1234; }
 void otah_settings_commit(uint16_t b, uint16_t c, uint32_t s) {
     g_bank0 = b; g_crc = c; g_size = s; g_committed = (b == 0x01); g_settings_writes++;
@@ -147,17 +149,36 @@ int main(int argc, char** argv) {
     // [1] POSITIVE - coherent readback: the apply must succeed, commit, and reproduce the new image.
     printf("[1] positive (coherent readback): ");
     applied = run_case(/*stale=*/0, &committed, &matches);
-    if (applied && committed && matches && g_settings_writes == 2 && !g_app_write_while_valid) {
+    if (applied && committed && matches && g_settings_writes == 2 && !g_app_write_while_valid &&
+        g_gpregret2 == 0xB8u) {
         printf("PASS - invalidated before writes, then committed valid result\n");
     } else {
-        printf("FAIL - applied=%d committed=%d matches=%d settings=%d unsafe_writes=%d\n",
-               applied, committed, matches, g_settings_writes, g_app_write_while_valid);
+        printf("FAIL - applied=%d committed=%d matches=%d settings=%d unsafe_writes=%d GPREGRET2=0x%X\n",
+               applied, committed, matches, g_settings_writes, g_app_write_while_valid, g_gpregret2);
         fails++;
     }
 
-    // [2] NEGATIVE - inject the LTO failure mode (stale workspace readback). The apply MUST fail safe:
+    // [2] RESULT - model the reset after a successful apply. GPREGRET was consumed, while GPREGRET2
+    // retains B8 across reset so the new application can report the bootloader result.
+    printf("[2] successful result survives normal post-apply boot: ");
+    {
+        int writes_before = g_settings_writes;
+        g_cache_page = 0;                                            // reset bootloader-only RAM state
+        g_cache_dirty = 0;
+        bool applied_again = ota_delta_check_and_apply();
+        if (!applied_again && g_gpregret == 0 && g_gpregret2 == 0xB8u &&
+            g_settings_writes == writes_before) {
+            printf("PASS - GPREGRET2 remains B8 for the application\n");
+        } else {
+            printf("FAIL - applied=%d GPREGRET=0x%X GPREGRET2=0x%X settings=%d/%d\n",
+                   applied_again, g_gpregret, g_gpregret2, g_settings_writes, writes_before);
+            fails++;
+        }
+    }
+
+    // [3] NEGATIVE - inject the LTO failure mode (stale workspace readback). The apply MUST fail safe:
     // it must leave the bank INVALID (so even UF2's zero-CRC settings cannot boot it) and return false.
-    printf("[2] negative (stale workspace readback = the LTO bug): ");
+    printf("[3] negative (stale workspace readback = the LTO bug): ");
     applied = run_case(/*stale=*/1, &committed, &matches);
     if (!committed && !applied && !matches && g_bank0 == 0xFF && g_settings_writes == 1 &&
         !g_app_write_while_valid) {
@@ -178,9 +199,9 @@ int main(int argc, char** argv) {
         }
     }
 
-    // [3] Malformed callback ranges, wrapped container geometry, and an oversized detools memory geometry
+    // [4] Malformed callback ranges, wrapped container geometry, and an oversized detools memory geometry
     // must be rejected without invalidating or changing the current application.
-    printf("[3] malformed detools bounds/geometry: ");
+    printf("[4] malformed detools bounds/geometry: ");
     {
         stage_flash();
         struct apply_ctx c = {0, 4, 0, MOTA_NRF52_APP_BASE, g_write_start, 0};
@@ -216,9 +237,9 @@ int main(int argc, char** argv) {
         }
     }
 
-    // [4] The expanded ceiling is selected only by its exact GPREGRET2 marker, and the container must
+    // [5] The expanded ceiling is selected only by its exact GPREGRET2 marker, and the container must
     // be bottom-aligned to that same ceiling. A missing/mismatched hint must leave the old app untouched.
-    printf("[4] legacy/expanded staging handoff: ");
+    printf("[5] legacy/expanded staging handoff: ");
     {
         const uint32_t legacy_start =
             (uint32_t)((MOTA_NRF52_STAGE_CEILING_LEGACY - g_mota_n) & ~(MOTA_NRF52_FLASH_PAGE - 1));
@@ -267,8 +288,8 @@ int main(int argc, char** argv) {
         g_stage_handoff = GPREGRET2_OTA_STAGE_LEGACY;
     }
 
-    // [5] GUARD - the device fl_read must stay volatile.
-    printf("[5] source guard (device fl_read is volatile):\n");
+    // [6] GUARD - the device fl_read must stay volatile.
+    printf("[6] source guard (device fl_read is volatile):\n");
     if (!guard_device_flread_is_volatile()) fails++;
 
     printf("\n%s (%d failure%s)\n", fails ? "SUITE FAILED" : "SUITE PASSED", fails, fails == 1 ? "" : "s");
