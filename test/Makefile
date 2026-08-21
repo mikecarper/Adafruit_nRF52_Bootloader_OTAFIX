@@ -37,6 +37,14 @@ qspi_apply_test: sd_apply_test.c $(SRC)/ota_delta.c $(SRC)/detools/detools.c $(S
 	$(CC) $(CFLAGS) -DOTA_DELTA_HOST_TEST -DMOTA_QSPI_FLASH $(INC) sd_apply_test.c \
 		$(SRC)/detools/detools.c $(SRC)/sha256.c -o $@
 
+bootloader_mota_test: bootloader_mota_test.c $(SRC)/ota_delta.c $(SRC)/detools/detools.c \
+                      $(SRC)/sha256.c $(SRC)/usb/uf2/bootloader_image.c \
+                      $(SRC)/usb/uf2/bootloader_image.h $(SRC)/ota_bl_info.h $(SRC)/ota_layout.h
+	$(CC) $(CFLAGS) -DOTA_DELTA_HOST_TEST -DMOTA_QSPI_FLASH -DMOTA_QSPI_BOOTLOADER_UPDATE \
+		-DUSB_DESC_VID=0x2886 -DUSB_DESC_UF2_PID=0x0044 -DDEVICE_NAME='"XIAO_DFU"' $(INC) \
+		bootloader_mota_test.c $(SRC)/detools/detools.c $(SRC)/sha256.c \
+		$(SRC)/usb/uf2/bootloader_image.c -o $@
+
 qspi_alignment_test: qspi_alignment_test.c $(SRC)/ota_qspi_alignment.h
 	$(CC) $(CFLAGS) -I $(SRC) qspi_alignment_test.c -o $@
 
@@ -50,7 +58,7 @@ uf2_write_state_test: uf2_write_state_test.c $(SRC)/usb/uf2/uf2_app_flash.h \
                       $(SRC)/usb/uf2/uf2_transfer_state.h
 	$(CC) $(CFLAGS) -I $(SRC)/usb/uf2 uf2_write_state_test.c -o $@
 
-check: apply_sim readback_test readback_test_v7 bootloader_image_test sd_apply_test qspi_apply_test qspi_alignment_test qspi_wake_test usb_wait_test uf2_write_state_test
+check: apply_sim readback_test readback_test_v7 bootloader_image_test sd_apply_test qspi_apply_test bootloader_mota_test qspi_alignment_test qspi_wake_test usb_wait_test uf2_write_state_test
 	./apply_sim vectors/base.img vectors/delta.mota vectors/new.img
 	@echo
 	./readback_test
@@ -63,6 +71,8 @@ check: apply_sim readback_test readback_test_v7 bootloader_image_test sd_apply_t
 	@echo
 	./qspi_apply_test
 	@echo
+	./bootloader_mota_test
+	@echo
 	./qspi_alignment_test
 	@echo
 	./qspi_wake_test
@@ -72,6 +82,6 @@ check: apply_sim readback_test readback_test_v7 bootloader_image_test sd_apply_t
 	./uf2_write_state_test
 
 clean:
-	rm -f apply_sim readback_test readback_test_v7 bootloader_image_test sd_apply_test qspi_apply_test qspi_alignment_test qspi_wake_test usb_wait_test uf2_write_state_test
+	rm -f apply_sim readback_test readback_test_v7 bootloader_image_test sd_apply_test qspi_apply_test bootloader_mota_test qspi_alignment_test qspi_wake_test usb_wait_test uf2_write_state_test
 
 .PHONY: check clean

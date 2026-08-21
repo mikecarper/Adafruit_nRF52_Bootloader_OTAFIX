@@ -24,12 +24,17 @@
 
 // Highest `.mota` format_ver this bootloader's apply understands. Bump when the on-flash `.mota` layout the
 // bootloader parses changes (e.g. the fixed-layout manifest). The app requires bl.apply_abi >= mota.format_ver.
-#define MOTA_BL_APPLY_ABI  2u
+#if defined(MOTA_QSPI_BOOTLOADER_UPDATE)
+  #define MOTA_BL_APPLY_ABI 3u
+#else
+  #define MOTA_BL_APPLY_ABI 2u
+#endif
 
 // storage_flags[0]
 #define MOTA_BL_STORAGE_SD             0x01u
 #define MOTA_BL_STORAGE_STAGE_CEILING  0x02u // understands the GPREGRET2 staging-ceiling handoff
 #define MOTA_BL_STORAGE_QSPI           0x04u // raw external-QSPI container at offset zero
+#define MOTA_BL_STORAGE_BOOT_UPDATE     0x08u // format-v3 bootloader image install from QSPI
 
 typedef struct {
   uint8_t  magic[8];     // MOTA_BL_MAGIC*

@@ -104,6 +104,13 @@ if (MOTA_QSPI_FLASH)
   target_compile_definitions(bootloader PUBLIC MOTA_QSPI_FLASH=1)
 endif ()
 
+if (MOTA_QSPI_BOOTLOADER_UPDATE)
+  if (NOT MOTA_QSPI_FLASH)
+    message(FATAL_ERROR "MOTA_QSPI_BOOTLOADER_UPDATE requires MOTA_QSPI_FLASH")
+  endif ()
+  target_compile_definitions(bootloader PUBLIC MOTA_QSPI_BOOTLOADER_UPDATE=1)
+endif ()
+
 if (DUALBANK_FW)
   target_sources(bootloader PUBLIC
     ${SDK11_DIR}/libraries/bootloader_dfu/dfu_dual_bank.c

@@ -30,6 +30,8 @@ static void write_u32(size_t offset, uint32_t value) {
 
 static void make_valid_image(void) {
   memset(image, 0xFF, sizeof(image));
+  write_u32(0, 0x20040000UL);
+  write_u32(4, IMAGE_START + 0x101UL);
 
   // A compiler may emit the compared magic constants into a literal pool.
   // They are not valid headers and must not be mistaken for duplicates.
@@ -73,12 +75,64 @@ int main(void) {
                                     "T096_DFU"));
 
   make_valid_image();
+  image[MANIFEST_OFFSET + offsetof(bootloader_update_manifest_t, device_name) +
+        sizeof(EXPECTED_DEVICE_NAME)] = 'X';
+  write_u32(MANIFEST_OFFSET + offsetof(bootloader_update_manifest_t, crc32), 0);
+  write_u32(MANIFEST_OFFSET + offsetof(bootloader_update_manifest_t, crc32),
+            bootloader_image_crc32(image, sizeof(image),
+                                   MANIFEST_OFFSET + offsetof(bootloader_update_manifest_t, crc32)));
+  assert(!bootloader_image_validate(image, IMAGE_START, IMAGE_SIZE, EXPECTED_BOARD_ID,
+                                    EXPECTED_DEVICE_NAME));
+
+  make_valid_image();
   write_u32(MANIFEST_OFFSET, 0);
   assert(!bootloader_image_validate(image, IMAGE_START, IMAGE_SIZE, EXPECTED_BOARD_ID,
                                     EXPECTED_DEVICE_NAME));
 
   make_valid_image();
+  write_u32(0, 0xFFFFFFFFUL);
+  assert(!bootloader_image_validate(image, IMAGE_START, IMAGE_SIZE, EXPECTED_BOARD_ID,
+                                    EXPECTED_DEVICE_NAME));
+
+  make_valid_image();
+  write_u32(4, IMAGE_START + IMAGE_SIZE + 1UL);
+  assert(!bootloader_image_validate(image, IMAGE_START, IMAGE_SIZE, EXPECTED_BOARD_ID,
+                                    EXPECTED_DEVICE_NAME));
+
+  // A complete but corrupt decoy must not hide the valid manifest later in
+  // the image. Recompute the real CRC after inserting the decoy so it remains
+  // independently valid.
+  make_valid_image();
+  memcpy(image + FALSE_MANIFEST_OFFSET, image + MANIFEST_OFFSET,
+         sizeof(bootloader_update_manifest_t));
+  write_u32(FALSE_MANIFEST_OFFSET + offsetof(bootloader_update_manifest_t, crc32),
+            0xA5A5A5A5UL);
+  write_u32(MANIFEST_OFFSET + offsetof(bootloader_update_manifest_t, crc32), 0);
+  write_u32(MANIFEST_OFFSET + offsetof(bootloader_update_manifest_t, crc32),
+            bootloader_image_crc32(image, sizeof(image),
+                                   MANIFEST_OFFSET + offsetof(bootloader_update_manifest_t, crc32)));
+  assert(bootloader_image_crc32(
+           image, sizeof(image),
+           FALSE_MANIFEST_OFFSET + offsetof(bootloader_update_manifest_t, crc32)) !=
+         0xA5A5A5A5UL);
+  assert(bootloader_image_validate(image, IMAGE_START, IMAGE_SIZE, EXPECTED_BOARD_ID,
+                                   EXPECTED_DEVICE_NAME));
+
+  // These are the coupled CRC fixed point for two otherwise identical valid
+  // manifests in this deterministic fixture. Prove both CRCs are valid, then
+  // require the validator to reject the ambiguous image.
+  make_valid_image();
   memcpy(image + SECOND_MANIFEST_OFFSET, image + MANIFEST_OFFSET, sizeof(bootloader_update_manifest_t));
+  write_u32(MANIFEST_OFFSET + offsetof(bootloader_update_manifest_t, crc32),
+            0xBE0E5D51UL);
+  write_u32(SECOND_MANIFEST_OFFSET + offsetof(bootloader_update_manifest_t, crc32),
+            0x19D6F0F1UL);
+  assert(bootloader_image_crc32(
+           image, sizeof(image),
+           MANIFEST_OFFSET + offsetof(bootloader_update_manifest_t, crc32)) == 0xBE0E5D51UL);
+  assert(bootloader_image_crc32(
+           image, sizeof(image),
+           SECOND_MANIFEST_OFFSET + offsetof(bootloader_update_manifest_t, crc32)) == 0x19D6F0F1UL);
   assert(!bootloader_image_validate(image, IMAGE_START, IMAGE_SIZE, EXPECTED_BOARD_ID,
                                     EXPECTED_DEVICE_NAME));
 

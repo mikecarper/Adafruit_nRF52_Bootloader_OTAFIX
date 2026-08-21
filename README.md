@@ -1,5 +1,17 @@
 # Adafruit nRF52 Bootloader with Enhanced OTA DFU
 
+## Changes in OTAFIX 2.4.1 preview.10
+
+- **LoRa-delivered XIAO bootloader self-update**
+  The `xiao_nrf52840_ble` and `xiao_nrf52840_ble_sense` targets can install an exact-board raw 40 KiB bootloader image from their onboard QSPI OTA store without modifying the application. Bootloader packages use the fixed-layout `.mota` manifest with `format_ver=3`, exact `FULL|SIGNED|BOOTLOADER` flags, a nonzero firmware version, full codec, SHA-256, 1024-byte blocks, zero `base_hash`, and the exact NUL-padded identity `XIAO_BL_28860044` or `XIAO_BL_28860045`. Format 3 deliberately makes older/v2 application installers reject the package instead of treating its payload as an application.
+
+  The running application authenticates the package signature and writes `APRV`; the bootloader then requires the signed-package policy marker, exact QSPI handoff, target/identity/geometry, vector table, complete payload SHA-256, board-bound embedded manifest/CRC, and an incoming `MOTABLDR` marker that preserves ABI 3 plus QSPI bootloader-update capability. It copies the image pagewise to the reserved internal scratch range `0xE0000..0xEA000`, verifies every write and the complete scratch image, powers down QSPI, and only then asks the Nordic MBR to replace the bootloader. The app and old bootloader remain bootable through every pre-MBR failure or reset. Because that scratch range is reserved, these capable XIAO builds also cap ordinary full/delta application writes below `0xE0000`; other boards retain their existing limit.
+
+  The trigger is `GPREGRET=0x6B` with QSPI handoff `GPREGRET2=0x51`. Retained results are: `C1` gate entered, `C2` source/container/approval missing, `C3` package policy or identity rejected, `C4` vectors/payload integrity rejected, `C5` embedded manifest/CRC or continuity capability rejected, `C6` approval clear failed, `C7` scratch copy/readback failed, `C8` QSPI is released and MBR handoff has begun, and `C9` MBR unexpectedly returned. A normal post-update boot preserves `C8` (or the failure code) for the application to report.
+
+- **Bootloader vector validation**
+  Both UF2 and LoRa bootloader-update paths now require an aligned initial stack pointer in nRF RAM and a Thumb reset handler inside the exact bootloader region before accepting an image.
+
 ## Changes in OTAFIX 2.4.1 preview.9
 
 - **Persistent MeshCore OTA apply result**
