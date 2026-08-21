@@ -43,6 +43,7 @@
 #define GPREGRET2_OTA_STAGE_LEGACY   0xD4u
 #define GPREGRET2_OTA_STAGE_EXPANDED 0xEDu
 #define GPREGRET2_OTA_STAGE_QSPI     0x51u
+#define GPREGRET2_OTA_STAGE_SD       0x53u
 
 // Bootloader-update result diagnostics. C8 is written immediately before the
 // MBR COPY_BL handoff (success never returns); a returned MBR call replaces it

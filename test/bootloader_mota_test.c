@@ -13,11 +13,23 @@
 
 #define FLASH_LEN        0x00100000u
 #define QSPI_LEN         (2u * 1024u * 1024u)
+#define SD_FIRST_SECTOR  128u
+#define SD_CARD_SECTORS  (QSPI_LEN / 512u)
 #define MANIFEST_OFFSET  0x00009E00u
 #define CAPS_OFFSET      0x00000300u
 #define TEST_BLOCK_LOG2  10u
 
-#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+  #define TEST_BOARD_ID       0x239A0071u
+  #define TEST_OTHER_BOARD_ID 0x239A0029u
+  #define TEST_DEVICE_NAME    "TOWER_V2_OTA"
+  #define TEST_HW_ID          "NRF_BL_239A0071_TOWER_V2_OTA"
+  #define TEST_TARGET_ID      0x1150F50Eu
+  #define TEST_SOURCE         GPREGRET2_OTA_STAGE_SD
+  #define TEST_PRESERVE_END   MOTA_NRF52_BL_SCRATCH_START
+  #define TEST_RAW_START      MOTA_NRF52_BL_SCRATCH_START
+  #define TEST_STORAGE_FLAGS  (MOTA_BL_STORAGE_SD | MOTA_BL_STORAGE_BOOT_UPDATE)
+#elif defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
   #define TEST_BOARD_ID       0x239A0029u
   #define TEST_OTHER_BOARD_ID 0x239A0071u
   #define TEST_DEVICE_NAME    "3401_DFU"
@@ -48,7 +60,9 @@ static uint32_t g_gpregret, g_gpregret2;
 static int      g_qspi_init_calls, g_qspi_deinit_calls, g_qspi_writes;
 static int      g_settings_writes, g_mbr_calls, g_mbr_success;
 static uint32_t g_mbr_source, g_mbr_words, g_corrupt_write_address;
-#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+static uint16_t g_bank0, g_bank0_crc;
+static uint32_t g_bank0_size;
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_BOOTLOADER_UPDATE)
 static jmp_buf  g_power_cut_env;
 static int      g_power_cut_armed, g_power_cut_after_page;
 static int      g_compaction_started, g_raw_pages_written;
@@ -68,12 +82,18 @@ void otah_write_words(uint32_t address, const uint32_t *src, uint32_t words) {
   if (address == g_corrupt_write_address) {
     FLASH[address] ^= 1u;
   }
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_BOOTLOADER_UPDATE)
 #if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
   // The approval-clear rewrite of the first slot page still begins with mOTA.
   // The first compacted raw page does not; from there writes are sequential.
   if (address == TEST_RAW_START && memcmp(src, "mOTA", 4u) != 0) {
     g_compaction_started = 1;
   }
+#else
+  if (address == TEST_RAW_START) {
+    g_compaction_started = 1;
+  }
+#endif
   if (g_compaction_started &&
       address == TEST_RAW_START + (uint32_t)g_raw_pages_written * MOTA_NRF52_FLASH_PAGE) {
     g_raw_pages_written++;
@@ -101,10 +121,14 @@ uint16_t otah_crc16(uint32_t address, uint32_t len) {
   return 0x1234u;
 }
 void otah_settings_commit(uint16_t bank0, uint16_t crc, uint32_t size) {
-  (void)bank0;
-  (void)crc;
-  (void)size;
+  g_bank0 = bank0;
+  g_bank0_crc = crc;
+  g_bank0_size = size;
   g_settings_writes++;
+}
+int otah_crc_bound_app_size(uint32_t *size) {
+  *size = g_bank0_size;
+  return g_bank0 == 0x01u && g_bank0_crc != 0u;
 }
 
 bool ota_qspi_init(void) {
@@ -135,6 +159,31 @@ bool ota_qspi_write(uint32_t offset, const void *src, uint32_t len) {
   }
   return true;
 }
+
+#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+bool ota_sd_init(void) {
+  g_qspi_init_calls++;
+  return true;
+}
+void ota_sd_deinit(void) {
+  g_qspi_deinit_calls++;
+}
+bool ota_sd_read_sector(uint32_t sector, uint8_t out[512]) {
+  if (sector >= SD_CARD_SECTORS) {
+    return false;
+  }
+  memcpy(out, QSPI + sector * 512u, 512u);
+  return true;
+}
+bool ota_sd_read_bytes(uint32_t first_sector, uint32_t offset, void *out, uint32_t len) {
+  if (first_sector >= SD_CARD_SECTORS || (uint64_t)offset + len >
+      ((uint64_t)SD_CARD_SECTORS - first_sector) * 512u) {
+    return false;
+  }
+  memcpy(out, QSPI + first_sector * 512u + offset, len);
+  return true;
+}
+#endif
 
 const uint8_t *otah_flash_pointer(uint32_t address, uint32_t len) {
   return (uint64_t)address + len <= sizeof(FLASH) ? FLASH + address : NULL;
@@ -184,7 +233,7 @@ static uint8_t *make_boot_image(uint32_t board_id, uint16_t abi, uint8_t storage
                               MOTA_BL_MAGIC4, MOTA_BL_MAGIC5, MOTA_BL_MAGIC6, MOTA_BL_MAGIC7};
   memcpy(caps->magic, magic, sizeof(magic));
   caps->apply_abi        = abi;
-  caps->codec_mask       = 1u;
+  caps->codec_mask       = (1u << CODEC_FULL) | (1u << CODEC_INPLACE);
   caps->storage_flags[0] = storage_flags;
   memset(caps->storage_flags + 1, 0, 3);
 
@@ -315,7 +364,10 @@ static void reset_device(void) {
   g_mbr_source            = 0;
   g_mbr_words             = 0;
   g_corrupt_write_address = UINT32_MAX;
-#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+  g_bank0                  = 0x01u;
+  g_bank0_crc              = 0u;
+  g_bank0_size             = TEST_PRESERVE_END - MOTA_NRF52_APP_BASE;
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_BOOTLOADER_UPDATE)
   g_power_cut_armed       = 0;
   g_power_cut_after_page  = 0;
   g_compaction_started    = 0;
@@ -336,6 +388,26 @@ static void stage(const uint8_t *mota, uint32_t total) {
     exit(2);
   }
   memcpy(FLASH + MOTA_NRF52_INTERNAL_BL_SLOT_START, mota, total);
+#elif defined(MOTA_SD_BOOTLOADER_UPDATE)
+  const uint32_t sectors = (total + MOTA_SD_SECTOR_SIZE - 1u) / MOTA_SD_SECTOR_SIZE;
+  if (SD_FIRST_SECTOR + sectors > SD_CARD_SECTORS) {
+    fprintf(stderr, "test container too large\n");
+    exit(2);
+  }
+  memcpy(QSPI + SD_FIRST_SECTOR * MOTA_SD_SECTOR_SIZE, mota, total);
+  uint8_t *handoff = QSPI + MOTA_SD_HANDOFF_SECTOR * MOTA_SD_SECTOR_SIZE;
+  memset(handoff, 0xFF, MOTA_SD_SECTOR_SIZE);
+  memcpy(handoff, MOTA_SD_HANDOFF_MAGIC, sizeof(MOTA_SD_HANDOFF_MAGIC));
+  wr32(handoff + 8u, MOTA_SD_HANDOFF_VERSION);
+  wr32(handoff + 12u, SD_FIRST_SECTOR);
+  wr32(handoff + 16u, sectors);
+  wr32(handoff + 20u, total);
+  wr32(handoff + 24u, ~total);
+  wr32(handoff + 28u, SD_CARD_SECTORS);
+  wr32(handoff + 32u, mota_sd_handoff_crc32(handoff, 32u));
+  uint8_t token[MOTA_SD_BOOT_TOKEN_LEN];
+  mota_sd_boot_token_encode(token, total, mota + 8u + 24u);
+  memcpy(FLASH + MOTA_NRF52_BL_SCRATCH_START, token, sizeof(token));
 #else
   if (total > sizeof(QSPI)) {
     fprintf(stderr, "test container too large\n");
@@ -381,6 +453,11 @@ int main(void) {
            g_mbr_words == MOTA_NRF52_BL_SIZE / 4u &&
 #if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
            g_qspi_init_calls == 0 && g_qspi_deinit_calls == 0 && g_qspi_writes == 0 &&
+#elif defined(MOTA_SD_BOOTLOADER_UPDATE)
+           g_qspi_init_calls == 1 && g_qspi_deinit_calls == 1 && g_qspi_writes == 0 &&
+           memcmp(QSPI + SD_FIRST_SECTOR * MOTA_SD_SECTOR_SIZE + 201u, APRV, sizeof(APRV)) == 0 &&
+           memcmp(QSPI + MOTA_SD_HANDOFF_SECTOR * MOTA_SD_SECTOR_SIZE,
+                  MOTA_SD_HANDOFF_MAGIC, sizeof(MOTA_SD_HANDOFF_MAGIC)) == 0 &&
 #else
            g_qspi_init_calls == 1 && g_qspi_deinit_calls == 1 && g_qspi_writes == 1 &&
 #endif
@@ -390,13 +467,27 @@ int main(void) {
   report("valid v3 package produces raw source and reaches MBR with C8", ok, &failures);
 
   int calls_before = g_mbr_calls;
-  applied          = ota_delta_check_and_apply();
-  report("normal post-MBR boot preserves C8 and does not retry", !applied && g_gpregret2 == GPREGRET2_BL_MBR_HANDOFF &&
-           g_mbr_calls == calls_before, &failures);
+#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+  int sd_inits_before = g_qspi_init_calls;
+#endif
+  applied = ota_delta_check_and_apply();
+#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+  report("normal boot leaves approved SD file inert until explicitly re-armed",
+         !applied && g_gpregret2 == GPREGRET2_BL_MBR_HANDOFF && g_mbr_calls == calls_before &&
+           g_qspi_init_calls == sd_inits_before &&
+           memcmp(QSPI + SD_FIRST_SECTOR * MOTA_SD_SECTOR_SIZE + 201u, APRV, sizeof(APRV)) == 0,
+         &failures);
+#else
+  report("normal post-MBR boot preserves C8 and does not retry",
+         !applied && g_gpregret2 == GPREGRET2_BL_MBR_HANDOFF && g_mbr_calls == calls_before,
+         &failures);
+#endif
 
   reset_device();
   stage(mota, total);
 #if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+  g_gpregret2 = GPREGRET2_OTA_STAGE_QSPI;
+#elif defined(MOTA_SD_BOOTLOADER_UPDATE)
   g_gpregret2 = GPREGRET2_OTA_STAGE_QSPI;
 #else
   g_gpregret2 = GPREGRET2_OTA_STAGE_EXPANDED;
@@ -405,8 +496,9 @@ int main(void) {
   report("wrong bootloader staging backend is rejected", !applied && g_gpregret2 == GPREGRET2_BL_CONTAINER &&
            g_mbr_calls == 0 && app_unchanged(), &failures);
 
-#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_BOOTLOADER_UPDATE)
   reset_device();
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
   report("manual UF2 fixed scratch guard rejects an app extending past E0000",
          ota_delta_live_app_fits_below(MOTA_NRF52_INTERNAL_BL_SLOT_START) &&
            !ota_delta_live_app_fits_below(MOTA_NRF52_BL_SCRATCH_START),
@@ -419,8 +511,47 @@ int main(void) {
   applied = ota_delta_check_and_apply();
   report("shifted internal container is rejected", !applied && g_gpregret2 == GPREGRET2_BL_CONTAINER &&
            g_mbr_calls == 0 && app_unchanged(), &failures);
+#else
+  report("SD scratch guard accepts a hash-bound app ending below E0000",
+         ota_delta_live_app_fits_below(MOTA_NRF52_BL_SCRATCH_START), &failures);
 
-  // A marker whose inclusive EndF trailer crosses into the shared slot is not
+  reset_device();
+  g_bank0_crc  = 0x1234u;
+  g_bank0_size = MOTA_NRF52_BL_SCRATCH_START - MOTA_NRF52_APP_BASE +
+                 MOTA_NRF52_FLASH_PAGE;
+  stage(mota, total);
+  memset(FLASH + MOTA_NRF52_BL_SCRATCH_START, 0xFF, MOTA_SD_BOOT_TOKEN_LEN);
+  applied = ota_delta_check_and_apply();
+  report("CRC-bound app bytes crossing scratch are rejected before erase",
+         !applied && g_gpregret2 == GPREGRET2_BL_POLICY && g_raw_pages_written == 0 &&
+           g_mbr_calls == 0 && FLASH[MOTA_NRF52_BL_SCRATCH_START] == 0xFF &&
+           app_unchanged() && old_bootloader_unchanged(),
+         &failures);
+
+  reset_device();
+  stage(mota, total);
+  uint8_t *swap_image = make_boot_image(board_base, 3, required_caps);
+  swap_image[0x2000u] ^= 1u;
+  fix_image_crc(swap_image);
+  uint32_t swap_total;
+  uint8_t *swap_mota = make_mota(swap_image, MOTA_NRF52_BL_SIZE, 3,
+                                 MFLAG_FULL | MFLAG_SIGNED | MFLAG_BOOTLOADER,
+                                 TEST_TARGET_ID, TEST_HW_ID, &swap_total);
+  if (swap_total != total) {
+    fprintf(stderr, "swapped test container geometry changed\n");
+    exit(2);
+  }
+  memcpy(QSPI + SD_FIRST_SECTOR * MOTA_SD_SECTOR_SIZE, swap_mota, swap_total);
+  applied = ota_delta_check_and_apply();
+  report("removable-media swap is rejected by internal container token",
+         !applied && g_gpregret2 == GPREGRET2_BL_APPROVAL && g_raw_pages_written == 0 &&
+           g_mbr_calls == 0 && app_unchanged() && old_bootloader_unchanged(),
+         &failures);
+  free(swap_mota);
+  free(swap_image);
+#endif
+
+  // A marker whose inclusive EndF trailer crosses into the raw scratch is not
   // enough free space. Remove the normal lower marker, install only that
   // crossing trailer, and require refusal before compaction/MBR.
   reset_device();
@@ -432,7 +563,7 @@ int main(void) {
   memcpy(APP_SNAPSHOT, FLASH + MOTA_NRF52_APP_BASE, sizeof(APP_SNAPSHOT));
   stage(mota, total);
   applied = ota_delta_check_and_apply();
-  report("live EndF crossing shared slot is rejected before compaction",
+  report("live EndF crossing raw scratch is rejected before copy",
          !applied && g_gpregret2 == GPREGRET2_BL_POLICY && g_raw_pages_written == 0 &&
            g_mbr_calls == 0 && g_settings_writes == 0 && app_unchanged() && old_bootloader_unchanged(),
          &failures);
@@ -442,7 +573,7 @@ int main(void) {
   memcpy(APP_SNAPSHOT, FLASH + MOTA_NRF52_APP_BASE, sizeof(APP_SNAPSHOT));
   stage(mota, total);
   applied = ota_delta_check_and_apply();
-  report("live EndF with wrong body hash is rejected before compaction",
+  report("live EndF with wrong body hash is rejected before copy",
          !applied && g_gpregret2 == GPREGRET2_BL_POLICY && g_raw_pages_written == 0 &&
            g_mbr_calls == 0 && g_settings_writes == 0 && app_unchanged() && old_bootloader_unchanged(),
          &failures);
@@ -476,7 +607,7 @@ int main(void) {
       }
     }
   }
-  report("power cut after every compacted page preserves app/old BL and cannot retry",
+  report("power cut after every scratch page preserves app/old BL and cannot retry",
          power_cut_ok, &failures);
 #endif
 
@@ -537,6 +668,16 @@ int main(void) {
                   TEST_TARGET_ID, TEST_HW_ID, &total);
   report("image that removes full-codec capability is rejected", rejected_with(bad, total, GPREGRET2_BL_MANIFEST),
          &failures);
+  free(bad);
+  free(bad_image);
+
+  bad_image = make_boot_image(board_base, 3, required_caps);
+  ((mota_bl_info_t *)(bad_image + CAPS_OFFSET))->codec_mask = (1u << CODEC_FULL);
+  fix_image_crc(bad_image);
+  bad = make_mota(bad_image, MOTA_NRF52_BL_SIZE, 3, MFLAG_FULL | MFLAG_SIGNED | MFLAG_BOOTLOADER,
+                  TEST_TARGET_ID, TEST_HW_ID, &total);
+  report("image that removes in-place delta capability is rejected",
+         rejected_with(bad, total, GPREGRET2_BL_MANIFEST), &failures);
   free(bad);
   free(bad_image);
 
@@ -641,7 +782,25 @@ int main(void) {
            && app_unchanged()
          , &failures);
 
-#if !defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+  uint32_t beyond_scratch_len = MOTA_NRF52_BL_SCRATCH_START - MOTA_NRF52_APP_BASE +
+                                MOTA_NRF52_FLASH_PAGE;
+  uint8_t *beyond_scratch = malloc(beyond_scratch_len);
+  memset(beyond_scratch, 0xA6, beyond_scratch_len);
+  bad = make_mota(beyond_scratch, beyond_scratch_len, 2, MFLAG_FULL, 0x12345678u,
+                  "APP_TEST", &total);
+  reset_device();
+  stage(bad, total);
+  g_gpregret  = GPREGRET_OTA_APPLY;
+  g_gpregret2 = TEST_SOURCE;
+  applied     = ota_delta_check_and_apply();
+  report("ordinary SD full app may extend past bootloader scratch to ED000",
+         applied && g_gpregret2 == 0xB8u && g_settings_writes == 2 &&
+           memcmp(FLASH + MOTA_NRF52_APP_BASE, beyond_scratch, beyond_scratch_len) == 0,
+         &failures);
+  free(bad);
+  free(beyond_scratch);
+#elif !defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
   uint32_t too_large_len = MOTA_NRF52_BL_SCRATCH_START - MOTA_NRF52_APP_BASE + 1u;
   uint8_t *too_large = malloc(too_large_len);
   memset(too_large, 0xA6, too_large_len);

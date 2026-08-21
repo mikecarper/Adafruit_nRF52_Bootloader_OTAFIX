@@ -8,10 +8,14 @@
   #include "ota_sd_handoff.h"
   #include "ota_sd_spi.h"
 #endif
+#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+  #include "ota_sd_boot_token.h"
+#endif
 #if defined(MOTA_QSPI_FLASH)
   #include "ota_qspi.h"
 #endif
-#if defined(MOTA_QSPI_BOOTLOADER_UPDATE) || defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+#if defined(MOTA_SD_BOOTLOADER_UPDATE) || defined(MOTA_QSPI_BOOTLOADER_UPDATE) || \
+  defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
   #include "usb/uf2/bootloader_image.h"
 #endif
 #include "detools/detools.h"
@@ -25,16 +29,29 @@
   #define MOTA_QSPI_STORAGE_FLAGS (MOTA_BL_STORAGE_QSPI | MOTA_BL_STORAGE_STAGE_CEILING)
 #endif
 
-#if defined(MOTA_QSPI_BOOTLOADER_UPDATE) || defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+  #define MOTA_SD_STORAGE_FLAGS (MOTA_BL_STORAGE_SD | MOTA_BL_STORAGE_BOOT_UPDATE)
+#else
+  #define MOTA_SD_STORAGE_FLAGS MOTA_BL_STORAGE_SD
+#endif
+
+#if defined(MOTA_SD_BOOTLOADER_UPDATE) || defined(MOTA_QSPI_BOOTLOADER_UPDATE) || \
+  defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
   #define MOTA_BOOTLOADER_UPDATE_ENABLED 1
 #endif
 
-#if defined(MOTA_QSPI_BOOTLOADER_UPDATE)
+#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+  #define MOTA_BOOT_UPDATE_STORAGE_FLAGS MOTA_SD_STORAGE_FLAGS
+#elif defined(MOTA_QSPI_BOOTLOADER_UPDATE)
   #define MOTA_BOOT_UPDATE_STORAGE_FLAGS MOTA_QSPI_STORAGE_FLAGS
 #elif defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
   // No backend bit means the normal internal staging window. GPREGRET 0x6A vs
   // 0x6B selects an application vs bootloader package in that shared window.
   #define MOTA_BOOT_UPDATE_STORAGE_FLAGS (MOTA_BL_STORAGE_STAGE_CEILING | MOTA_BL_STORAGE_BOOT_UPDATE)
+#endif
+
+#if defined(MOTA_BOOTLOADER_UPDATE_ENABLED)
+  #define MOTA_BOOT_UPDATE_CODEC_MASK ((1u << CODEC_FULL) | (1u << CODEC_INPLACE))
 #endif
 
 // Capability marker the running MeshCore app scans for (see ota_bl_info.h). `used` + the reference in
@@ -45,7 +62,7 @@ __attribute__((used, aligned(4))) const mota_bl_info_t g_mota_bl_info = {
   MOTA_BL_APPLY_ABI,
 #if defined(MOTA_SD_CARD)
   (uint16_t)((1u << 0) | (1u << 2)), // SD: full images and in-place deltas
-  {MOTA_BL_STORAGE_SD, 0, 0, 0},     // raw-SD handoff
+  {MOTA_SD_STORAGE_FLAGS, 0, 0, 0},  // raw-SD handoff
 #elif defined(MOTA_QSPI_FLASH)
   (uint16_t)((1u << 0) | (1u << 2)), // QSPI: full images and in-place deltas
   {MOTA_QSPI_STORAGE_FLAGS, 0, 0, 0},
@@ -83,6 +100,9 @@ extern uint32_t otah_gpregret2_get(void);
 extern void     otah_gpregret2_set(uint32_t v);
 extern uint16_t otah_crc16(uint32_t addr, uint32_t len);
 extern void     otah_settings_commit(uint16_t bank0, uint16_t crc, uint32_t size);
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_BOOTLOADER_UPDATE)
+extern int      otah_crc_bound_app_size(uint32_t *size);
+#endif
   #define APP_BASE MOTA_NRF52_APP_BASE
 static void fl_read(uint32_t a, void *d, uint32_t n) {
   otah_read(a, d, n);
@@ -173,7 +193,9 @@ static void otah_settings_commit(uint16_t bank0, uint16_t crc, uint32_t size) {
   #define BANK_INVALID_APP_V 0xFFu
 #endif
 
-#if defined(MOTA_QSPI_BOOTLOADER_UPDATE) && defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+#if (defined(MOTA_SD_BOOTLOADER_UPDATE) && defined(MOTA_QSPI_BOOTLOADER_UPDATE)) || \
+  (defined(MOTA_SD_BOOTLOADER_UPDATE) && defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)) || \
+  (defined(MOTA_QSPI_BOOTLOADER_UPDATE) && defined(MOTA_INTERNAL_BOOTLOADER_UPDATE))
   #error "Select exactly one bootloader-update staging backend"
 #endif
 
@@ -185,14 +207,18 @@ static void otah_settings_commit(uint16_t bank0, uint16_t crc, uint32_t size) {
     #error "App-preserving bootloader update requires the nRF52840 1 MiB flash layout"
   #endif
   #define BOOT_UPDATE_BOARD_ID (((uint32_t)USB_DESC_VID << 16) | USB_DESC_UF2_PID)
-  #if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+  #if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_BOOTLOADER_UPDATE)
     #define APP_APPLY_END MOTA_NRF52_APP_END
   #else
     #define APP_APPLY_END MOTA_NRF52_BL_SCRATCH_START
   #endif
 #endif
 
-#if defined(MOTA_QSPI_BOOTLOADER_UPDATE)
+#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+  #if !defined(MOTA_SD_CARD)
+    #error "MOTA_SD_BOOTLOADER_UPDATE requires MOTA_SD_CARD"
+  #endif
+#elif defined(MOTA_QSPI_BOOTLOADER_UPDATE)
   #if !defined(MOTA_QSPI_FLASH)
     #error "MOTA_QSPI_BOOTLOADER_UPDATE requires MOTA_QSPI_FLASH"
   #endif
@@ -738,8 +764,8 @@ static int find_body_len(uint32_t app_limit, uint32_t *body_len_out) {
   return 0;
 }
 
-#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
-// A shared internal slot is safe only when the live application ends before
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_BOOTLOADER_UPDATE)
+// An internal destination is safe only when the live application ends before
 // it. Do not trust a marker-shaped byte sequence alone: bind the first EndF to
 // the body by recomputing its truncated SHA-256 before any staged page is
 // erased or rewritten.
@@ -753,15 +779,36 @@ bool ota_delta_live_app_fits_below(uint32_t limit) {
   uint8_t actual[32];
   fl_read(APP_BASE + body_len + 8u, expected, sizeof(expected));
   sha256_region(APP_BASE, body_len, actual);
-  return memcmp(actual, expected, sizeof(expected)) == 0;
+  if (memcmp(actual, expected, sizeof(expected)) != 0) {
+    return 0;
+  }
+
+  // A CRC-bound bootloader setting can cover bytes beyond the first valid
+  // EndF (for example padding in a full DFU image). Those bytes are part of the
+  // live application even though EndF itself is earlier, so scratch must stay
+  // above the complete recorded bank or a power cut would make the old app
+  // fail its next boot CRC.
+  uint32_t recorded_size = 0u;
+#ifdef OTA_DELTA_HOST_TEST
+  const int crc_bound = otah_crc_bound_app_size(&recorded_size);
+#else
+  const bootloader_settings_t *settings;
+  bootloader_util_settings_get(&settings);
+  const int crc_bound = settings && settings->bank_0 == BANK_VALID_APP_V &&
+                        settings->bank_0_crc != 0u;
+  recorded_size = crc_bound ? settings->bank_0_size : 0u;
+#endif
+  const uint32_t endf_size = body_len + ENDF_LEN;
+  return !crc_bound || (recorded_size >= endf_size && recorded_size <= limit - APP_BASE);
 }
 #endif
 
 static int clear_approval(const struct mota_min *o) {
 #if defined(MOTA_SD_CARD)
-  // The trigger was already consumed from GPREGRET. The app invalidates sector
-  // 1 before staging another update, so the SD file cannot be retried by a
-  // normal reset and no raw-sector write implementation is needed here.
+  // This backend has no raw-sector write primitive, so APRV and the checksummed
+  // handoff remain on the card. GPREGRET was consumed before any validation or
+  // scratch erase, which makes the file inert across a normal reset. A running
+  // app may deliberately re-arm it only after authenticating an update command.
   (void)o;
   return 1;
 #elif defined(MOTA_QSPI_FLASH)
@@ -826,6 +873,18 @@ typedef char boot_update_raw_image_must_end_before_bootloader
 typedef char boot_update_device_name_must_fit_manifest
   [(sizeof(DEVICE_NAME) <= BOOTLOADER_UPDATE_DEVICE_NAME_SIZE) ? 1 : -1];
 
+#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+typedef char boot_update_sd_token_must_fit_first_scratch_page
+  [(MOTA_SD_BOOT_TOKEN_LEN <= MOTA_NRF52_FLASH_PAGE) ? 1 : -1];
+
+static int sd_boot_authorization_valid(const struct mota_min *m) {
+  uint8_t token[MOTA_SD_BOOT_TOKEN_LEN];
+  fl_read(MOTA_NRF52_BL_SCRATCH_START, token, sizeof(token));
+  return m->total == BOOT_UPDATE_PACKAGE_SIZE &&
+         mota_sd_boot_token_valid(token, m->total, m->image_hash);
+}
+#endif
+
 #if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
 typedef char boot_update_internal_slot_end_must_be_page_aligned
   [((MOTA_NRF52_INTERNAL_BL_SLOT_END & (MOTA_NRF52_FLASH_PAGE - 1u)) == 0) ? 1 : -1];
@@ -846,7 +905,7 @@ typedef char boot_update_start_must_match_dfu
   [(BOOTLOADER_ADDR_START == MOTA_NRF52_BL_START) ? 1 : -1];
 typedef char boot_update_size_must_match_dfu
   [(DFU_BL_IMAGE_MAX_SIZE == MOTA_NRF52_BL_SIZE) ? 1 : -1];
-#if defined(MOTA_QSPI_BOOTLOADER_UPDATE)
+#if defined(MOTA_SD_BOOTLOADER_UPDATE) || defined(MOTA_QSPI_BOOTLOADER_UPDATE)
 typedef char boot_update_scratch_must_match_dfu
   [(BOOTLOADER_ADDR_NEW_RECEIVED == MOTA_NRF52_BL_SCRATCH_START) ? 1 : -1];
 #endif
@@ -966,7 +1025,8 @@ static int boot_image_caps_valid(const uint8_t *image) {
     const uint16_t codec_mask = rd_u16(candidate + offsetof(mota_bl_info_t, codec_mask));
     const uint8_t *storage    = candidate + offsetof(mota_bl_info_t, storage_flags);
     if (magic_equal && apply_abi >= 3u && apply_abi != UINT16_MAX &&
-        (codec_mask & (1u << CODEC_FULL)) != 0 && storage[0] == MOTA_BOOT_UPDATE_STORAGE_FLAGS &&
+        (codec_mask & MOTA_BOOT_UPDATE_CODEC_MASK) == MOTA_BOOT_UPDATE_CODEC_MASK &&
+        storage[0] == MOTA_BOOT_UPDATE_STORAGE_FLAGS &&
         (storage[1] | storage[2] | storage[3]) == 0) {
       if (++matches > 1u) {
         return 0;
@@ -1034,7 +1094,12 @@ static bool boot_update_reject(const struct mota_min *m, uint32_t result) {
 }
 
 static uint32_t scan_bootloader_mota(struct mota_min *m, uint32_t source) {
-#if defined(MOTA_QSPI_BOOTLOADER_UPDATE)
+#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+  if (source != GPREGRET2_OTA_STAGE_SD) {
+    return 0;
+  }
+  return scan_mota(m, APP_APPLY_END);
+#elif defined(MOTA_QSPI_BOOTLOADER_UPDATE)
   if (source != GPREGRET2_OTA_STAGE_QSPI) {
     return 0;
   }
@@ -1073,6 +1138,19 @@ static bool apply_bootloader_update(void) {
   if (!boot_image_metadata_valid_at(m.payload_addr)) {
     return boot_update_reject(&m, GPREGRET2_BL_MANIFEST);
   }
+#elif defined(MOTA_SD_BOOTLOADER_UPDATE)
+  // SD-backed application builds do not reserve the fixed MBR scratch range
+  // at link time. Prove the live EndF-inclusive image ends below 0xE0000
+  // before erasing any scratch page.
+  if (!ota_delta_live_app_fits_below(MOTA_NRF52_BL_SCRATCH_START)) {
+    return boot_update_reject(&m, GPREGRET2_BL_POLICY);
+  }
+  // APRV and the SD handoff are removable-media metadata. Bind the candidate
+  // bytes to the signed manifest image_hash captured by the app in internal
+  // scratch before the first erase. Copying page zero consumes the token.
+  if (!sd_boot_authorization_valid(&m)) {
+    return boot_update_reject(&m, GPREGRET2_BL_APPROVAL);
+  }
 #endif
   if (!clear_approval(&m)) {
     gpregret2_set(GPREGRET2_BL_APPROVAL);
@@ -1090,9 +1168,11 @@ static bool apply_bootloader_update(void) {
     return finish_apply(false);
   }
 
-  // External QSPI is no longer needed after the scratch copy. Finish pending
-  // operations and enter deep power-down before handing control to the MBR.
-#if defined(MOTA_QSPI_BOOTLOADER_UPDATE)
+  // External staging is no longer needed after the scratch copy. Release the
+  // SD/QSPI peripheral before handing control to the MBR.
+#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+  ota_sd_deinit();
+#elif defined(MOTA_QSPI_BOOTLOADER_UPDATE)
   ota_qspi_deinit();
   g_qspi_source = 0;
 #endif

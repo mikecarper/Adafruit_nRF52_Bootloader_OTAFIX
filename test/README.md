@@ -32,6 +32,10 @@ make qspi_apply_test
 make readback_internal_test bootloader_mota_internal_test
 ./readback_internal_test
 ./bootloader_mota_internal_test
+
+# Exercise signed MeshTower V2 microSD bootloader-package validation.
+make bootloader_mota_sd_test
+./bootloader_mota_sd_test
 ```
 
 The internal tests exercise one shared `0xED000` staging ceiling. An ordinary `0x6A/0xED` delta is
@@ -43,6 +47,16 @@ capability, then forward-compacts the payload from `+365` in the same slot to th
 `0xE2000..0xEC000`. It verifies every page/readback and simulates power loss after each of the ten
 destination pages, proving the application and installed bootloader stay byte-identical, settings are
 untouched, the trigger is consumed, and a partial slot cannot retry.
+
+The SD bootloader test pins the MeshTower V2 identity, exact `0x09` (`SD|BOOT_UPDATE`) capability, and
+distinct `GPREGRET2=0x53` handoff. Because the SD backend is read-only, it also proves that `APRV` and
+the checksummed handoff remain on the card while the consumed `GPREGRET=0x6B` trigger keeps them inert
+on a normal reset. A 64-byte internal token binds the signed manifest's full `image_hash`, so the suite
+also rejects a removable-media swap before the first scratch erase and proves page zero consumes the token.
+It checks the independently hashed live `EndF` and CRC-bound bank-size boundary before every possible
+scratch erase, both full and in-place successor codecs, readback/full-image verification, all ten page-level
+power cuts, and preservation of ordinary SD application updates through `0xED000` even though bootloader
+scratch begins at `0xE0000`.
 
 The suite also exercises the no-valid-image USB recovery wait: no VBUS falls through to BLE without any
 delay, a USB host has the full 30-second default grace period to enumerate, enumeration at the deadline

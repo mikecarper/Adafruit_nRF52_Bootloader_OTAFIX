@@ -24,7 +24,8 @@
 
 // Highest `.mota` format_ver this bootloader's apply understands. Bump when the on-flash `.mota` layout the
 // bootloader parses changes (e.g. the fixed-layout manifest). The app requires bl.apply_abi >= mota.format_ver.
-#if defined(MOTA_QSPI_BOOTLOADER_UPDATE) || defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+#if defined(MOTA_SD_BOOTLOADER_UPDATE) || defined(MOTA_QSPI_BOOTLOADER_UPDATE) || \
+  defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
   #define MOTA_BL_APPLY_ABI 3u
 #else
   #define MOTA_BL_APPLY_ABI 2u

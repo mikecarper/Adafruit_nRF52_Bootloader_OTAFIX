@@ -73,6 +73,12 @@ uint16_t otah_crc16(uint32_t a, uint32_t len)              { (void)a; (void)len;
 void otah_settings_commit(uint16_t b, uint16_t c, uint32_t s) {
     g_bank0 = b; g_crc = c; g_size = s; g_committed = (b == 0x01); g_settings_writes++;
 }
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+int otah_crc_bound_app_size(uint32_t *size) {
+    *size = g_size;
+    return g_bank0 == 0x01u && g_crc != 0u;
+}
+#endif
 
 #if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
 const uint8_t *otah_flash_pointer(uint32_t address, uint32_t len) {
