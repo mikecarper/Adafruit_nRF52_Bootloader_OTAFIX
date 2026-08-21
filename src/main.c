@@ -303,8 +303,9 @@ static void check_dfu_mode(void) {
 
   bool const valid_app = bootloader_app_is_valid();
   bool const just_start_app = valid_app && !dfu_start && (*dbl_reset_mem) == DFU_DBL_RESET_APP;
+  bool const app_single_tap = APP_ASKS_FOR_SINGLE_TAP_RESET();
 
-  if (!just_start_app && APP_ASKS_FOR_SINGLE_TAP_RESET()) {
+  if (!just_start_app && app_single_tap) {
     dfu_start = 1;
   }
 
@@ -313,7 +314,7 @@ static void check_dfu_mode(void) {
   // because otherwise, if there is no application, it will restart in Serial DFU mode,
   // making it IMPOSSIBLE to recover devices in the field if there are no user
   // accessible USB ports
-  if (!valid_app || dfu_start) {
+  if ((!valid_app || dfu_start) && !serial_only_dfu && !uf2_dfu) {
     _ota_dfu = 1;
   }
 #endif
@@ -337,7 +338,7 @@ static void check_dfu_mode(void) {
 #endif
   }
 
-  if (APP_ASKS_FOR_SINGLE_TAP_RESET()) {
+  if (app_single_tap) {
     (*dbl_reset_mem) = DFU_DBL_RESET_APP;
   } else {
     (*dbl_reset_mem) = 0;
@@ -378,9 +379,11 @@ static void check_dfu_mode(void) {
     }
 
     // Initiate an update of the firmware.
-    if (APP_ASKS_FOR_SINGLE_TAP_RESET() || uf2_dfu || serial_only_dfu) {
-      // If USB is not enumerated in 3s (eg. because we're running on battery), we restart into app.
-      bootloader_dfu_start(_ota_dfu, 3000, true);
+    if (app_single_tap || uf2_dfu || serial_only_dfu) {
+      // Explicit 0x4E/0x57 entry gets the complete host-enumeration window;
+      // MakeCode-style single-tap entry intentionally remains brief.
+      uint32_t const timeout_ms = dfu_buttonless_timeout_ms(serial_only_dfu, uf2_dfu);
+      bootloader_dfu_start(_ota_dfu, timeout_ms, true);
     } else {
       // No timeout if bootloader requires user action (double-reset).
       bootloader_dfu_start(_ota_dfu, 0, false);

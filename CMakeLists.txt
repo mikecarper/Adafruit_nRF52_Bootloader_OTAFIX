@@ -33,7 +33,7 @@ option(SIGNED_FW "Enable signed firmware verification" OFF)
 option(DUALBANK_FW "Enable dual bank DFU support" OFF)
 option(FORCE_UF2 "Force UF2 support even with SIGNED_FW" OFF)
 set(DFU_USB_ENUMERATION_TIMEOUT_MS "30000" CACHE STRING
-    "No-valid-image USB enumeration grace period while VBUS is present, in milliseconds")
+    "USB grace period for no-valid-image and explicit buttonless recovery, in milliseconds")
 set(SIGNED_FW_QX "" CACHE STRING "Public key Qx (comma-separated bytes)")
 set(SIGNED_FW_QY "" CACHE STRING "Public key Qy (comma-separated bytes)")
 

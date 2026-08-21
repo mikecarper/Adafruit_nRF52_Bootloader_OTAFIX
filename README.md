@@ -2,6 +2,9 @@
 
 ## Changes in OTAFIX 2.4.1 preview.9
 
+- **Reliable buttonless USB recovery window**
+  Deliberate serial-only (`GPREGRET=0x4E`, including a 1200-baud touch) and UF2 (`GPREGRET=0x57`) entry now allow the full configured 30-second USB enumeration window before returning to a valid application. Once a host mounts, DFU remains available until an update completes or USB is unplugged. MakeCode-style single-tap recovery intentionally retains its brief 3-second window, while button/double-reset recovery remains unbounded.
+
 - **Reliable raw-QSPI resume after deep power-down**
   The bootloader now sends an opcode-only `0xAB` wake as mode-0 GPIO SPI, with conservative CS-high timing guards, before assigning the pins to QSPI and issuing `TASK_ACTIVATE`. This prevents a successful probe or rejected handoff from leaving the NOR asleep and causing the next boot or probe to time out during QSPI activation. Connected QSPI pads are restored to the Nordic high-drive configuration before peripheral handoff; RAK15001 IO2/IO3 remain disconnected.
 

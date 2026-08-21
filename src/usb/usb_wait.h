@@ -32,6 +32,17 @@
 #define DFU_USB_ENUMERATION_TIMEOUT_MS 30000u
 #endif
 
+#define DFU_SINGLE_TAP_TIMEOUT_MS 3000u
+
+static inline uint32_t dfu_buttonless_timeout_ms(bool serial_only_dfu,
+                                                 bool uf2_dfu) {
+  // Explicit application requests (including a 1200-baud touch) get the full
+  // host-enumeration window. The only fallback caller is MakeCode-style
+  // single-tap recovery, which intentionally remains brief.
+  return (serial_only_dfu || uf2_dfu) ? DFU_USB_ENUMERATION_TIMEOUT_MS
+                                      : DFU_SINGLE_TAP_TIMEOUT_MS;
+}
+
 bool usb_wait_for_mount(uint32_t timeout_ms);
 
 #endif
