@@ -65,6 +65,7 @@
 #include "nrf_mbr.h"
 #include "pstorage.h"
 
+#include "dfu_entry.h"
 #include "ota_delta.h"   // MeshCore .mota delta-apply (single-slot, in-place)
 
 #ifdef NRF_USBD
@@ -97,18 +98,16 @@ extern void tusb_hal_nrf_power_event(uint32_t event);
  */
 
 /* Magic that written to NRF_POWER->GPREGRET by application when it wish to go into DFU
- * - DFU_MAGIC_OTA_APPJUM        : used by BLEDfu service, SD is already inited
+ * - DFU_MAGIC_OTA_APPJUM        : used by BLEDfu service; immediately reset-converted to A8
  * - DFU_MAGIC_OTA_RESET         : entered by soft reset, SD is not inited yet
  * - DFU_MAGIC_SERIAL_ONLY_RESET : with CDC interface only
  * - DFU_MAGIC_UF2_RESET         : with CDC and MSC interfaces
  * - DFU_MAGIC_SKIP              : skip DFU entirely including double reset delay,
  *                                 Can be used with systemoff or quick reset to app
  *
- * Note: for DFU_MAGIC_OTA_APPJUM Softdevice must not initialized.
- * since it is already in application. In all other case of OTA SD must be initialized
+ * Note: DFU_MAGIC_OTA_APPJUM arrives through a direct application jump. main() converts it to
+ * DFU_MAGIC_OTA_RESET before initialization so flash protection and peripheral state are reset.
  */
-#define DFU_MAGIC_OTA_APPJUM            BOOTLOADER_DFU_START  // 0xB1
-#define DFU_MAGIC_OTA_RESET             0xA8
 #define DFU_MAGIC_SERIAL_ONLY_RESET     0x4e
 #define DFU_MAGIC_UF2_RESET             0x57
 #define DFU_MAGIC_SKIP                  0x6d
@@ -169,6 +168,19 @@ static void disable_softdevice(void) {
 //
 //--------------------------------------------------------------------+
 int main(void) {
+  // bootloader_util_app_start() protects the bootloader and settings with
+  // ACL/BPROT before launching the application. Adafruit BLEDfu returns by a
+  // direct jump, so that protection survives and a settings-page erase during
+  // DFU would fault after the first application page was erased. Bounce through
+  // a hardware reset before any bootloader initialization or flash access. The
+  // peer handoff lives in .noinit RAM and A8 selects reset-based BLE DFU.
+  uint8_t const requested_entry = (uint8_t)NRF_POWER->GPREGRET;
+  uint8_t const reset_entry = dfu_entry_reset_magic(requested_entry);
+  if (reset_entry != requested_entry) {
+    NRF_POWER->GPREGRET = reset_entry;
+    NVIC_SystemReset();
+  }
+
   // Populate Boot Address and MBR Param into MBR if not already
   // MBR_BOOTLOADER_ADDR/MBR_PARAM_PAGE_ADDR are used if available, else UICR registers are used
   // Note: skip it for now since this will prevent us to change the size of bootloader in the future

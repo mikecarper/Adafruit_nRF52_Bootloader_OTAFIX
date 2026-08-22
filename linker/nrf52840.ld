@@ -119,8 +119,16 @@ SECTIONS
   /* No init RAM section in bootloader. Used for bond information exchange. */
   .noinit(NOLOAD) :
   {
-
+    __dfu_peer_data_start__ = .;
+    KEEP(*(.noinit.peer_data))
+    __dfu_peer_data_end__ = .;
+    *(.noinit)
+    *(.noinit.*)
   } > NOINIT
+  ASSERT(__dfu_peer_data_start__ == ORIGIN(NOINIT),
+         "retained BLE peer data must start at 0x20007F80")
+  ASSERT(__dfu_peer_data_end__ - __dfu_peer_data_start__ == 62,
+         "retained BLE peer data ABI must be 60-byte data plus 2-byte CRC")
   /* other placements follow here... */
 }
 

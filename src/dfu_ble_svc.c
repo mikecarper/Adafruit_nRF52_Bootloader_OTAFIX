@@ -38,25 +38,25 @@
  *
  */
 
-#include "dfu_ble_svc.h"
+#include "dfu_ble_peer_data_layout.h"
 #include <string.h>
 #include "nrf_error.h"
 #include "crc16.h"
 
-#if defined ( __CC_ARM )
-  static dfu_ble_peer_data_t m_peer_data __attribute__((section("NoInit"), zero_init));            /**< This variable should be placed in a non initialized RAM section in order to be valid upon soft reset from application into bootloader. */
-  static uint16_t            m_peer_data_crc __attribute__((section("NoInit"), zero_init));        /**< CRC variable to ensure the integrity of the peer data provided. */
+/** Retained application-to-bootloader peer record. Must survive buttonless DFU reset. */
+#if defined(__CC_ARM)
+static dfu_ble_retained_peer_data_t m_retained_peer_data __attribute__((section("NoInit"), zero_init));
 
-#elif defined ( __GNUC__ )
-  __attribute__((section(".noinit"))) static dfu_ble_peer_data_t m_peer_data;                      /**< This variable should be placed in a non initialized RAM section in order to be valid upon soft reset from application into bootloader. */
-  __attribute__((section(".noinit"))) static uint16_t            m_peer_data_crc;                  /**< CRC variable to ensure the integrity of the peer data provided. */
+#elif defined(__GNUC__)
+__attribute__((section(".noinit.peer_data"))) static dfu_ble_retained_peer_data_t m_retained_peer_data;
 
-#elif defined ( __ICCARM__ )
-  __no_init static dfu_ble_peer_data_t m_peer_data     @ 0x20003F80;                               /**< This variable should be placed in a non initialized RAM section in order to be valid upon soft reset from application into bootloader. */
-  __no_init static uint16_t            m_peer_data_crc @ 0x20003F80 + sizeof(dfu_ble_peer_data_t); /**< CRC variable to ensure the integrity of the peer data provided. */
+#elif defined(__ICCARM__)
+__no_init static dfu_ble_retained_peer_data_t m_retained_peer_data @ DFU_BLE_RETAINED_PEER_DATA_ADDRESS;
 
 #endif
 
+#define m_peer_data     m_retained_peer_data.peer_data
+#define m_peer_data_crc m_retained_peer_data.crc
 
 /**@brief Function for setting the peer data from application in bootloader before reset.
  *
@@ -75,8 +75,8 @@ static uint32_t dfu_ble_peer_data_set(dfu_ble_peer_data_t * p_peer_data)
     uint32_t src = (uint32_t)p_peer_data;
     uint32_t dst = (uint32_t)&m_peer_data;
     // Calculating length in order to check if destination is residing inside source.
-    // Source inside the the destination (calculation underflow) is safe a source is read before 
-    // written to destination so that when destination grows into source, the source data is no 
+    // Source inside the the destination (calculation underflow) is safe a source is read before
+    // written to destination so that when destination grows into source, the source data is no
     // longer needed.
     uint32_t len = dst - src;
 

@@ -8,6 +8,18 @@ CC      ?= gcc
 CFLAGS  ?= -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter
 SRC      = ../src
 INC      = -I $(SRC) -I $(SRC)/detools
+PSTORAGE_SRC = ../lib/sdk11/components/drivers_nrf/pstorage/pstorage_raw.c
+PSTORAGE_INC = -I pstorage_stubs -I ../lib/sdk11/components/drivers_nrf/pstorage
+PEER_DATA_INC = -I $(SRC) \
+	-I ../lib/sdk11/components/libraries/bootloader_dfu \
+	-I ../lib/sdk11/components/libraries/util \
+	-I ../lib/nrfx/mdk -I $(SRC)/cmsis/include
+S132_V6_INC = -I ../lib/softdevice/s132_nrf52_6.1.1/s132_nrf52_6.1.1_API/include \
+	-I ../lib/softdevice/s132_nrf52_6.1.1/s132_nrf52_6.1.1_API/include/nrf52
+S140_V6_INC = -I ../lib/softdevice/s140_nrf52_6.1.1/s140_nrf52_6.1.1_API/include \
+	-I ../lib/softdevice/s140_nrf52_6.1.1/s140_nrf52_6.1.1_API/include/nrf52
+S140_V7_INC = -I ../lib/softdevice/s140_nrf52_7.3.0/s140_nrf52_7.3.0_API/include \
+	-I ../lib/softdevice/s140_nrf52_7.3.0/s140_nrf52_7.3.0_API/include/nrf52
 
 apply_sim: apply_sim.c $(SRC)/ota_delta.c $(SRC)/detools/detools.c $(SRC)/sha256.c \
            $(SRC)/ota_delta.h $(SRC)/ota_layout.h
@@ -86,10 +98,30 @@ uf2_write_state_test: uf2_write_state_test.c $(SRC)/usb/uf2/uf2_app_flash.h \
                       $(SRC)/usb/uf2/uf2_transfer_state.h
 	$(CC) $(CFLAGS) -I $(SRC)/usb/uf2 uf2_write_state_test.c -o $@
 
-check: apply_sim readback_test readback_test_v7 readback_internal_test bootloader_image_test sd_apply_test qspi_apply_test bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test softdevice_fwid_test qspi_alignment_test qspi_wake_test usb_wait_test uf2_write_state_test
+dfu_entry_test: dfu_entry_test.c $(SRC)/dfu_entry.h
+	$(CC) $(CFLAGS) -I $(SRC) dfu_entry_test.c -o $@
+
+peer_data_layout_test: peer_data_layout_test.c $(SRC)/dfu_ble_peer_data_layout.h \
+                       ../lib/sdk11/components/libraries/bootloader_dfu/dfu_ble_svc.h
+	$(CC) $(CFLAGS) -DNRF52840_XXAA -DS140 $(PEER_DATA_INC) $(S140_V6_INC) peer_data_layout_test.c -o $@
+
+peer_data_layout_nrf52_test: peer_data_layout_test.c $(SRC)/dfu_ble_peer_data_layout.h \
+                             ../lib/sdk11/components/libraries/bootloader_dfu/dfu_ble_svc.h
+	$(CC) $(CFLAGS) -DNRF52 -DNRF52832_XXAA -DS132 $(PEER_DATA_INC) $(S132_V6_INC) peer_data_layout_test.c -o $@
+
+peer_data_layout_nrf52833_test: peer_data_layout_test.c $(SRC)/dfu_ble_peer_data_layout.h \
+                                ../lib/sdk11/components/libraries/bootloader_dfu/dfu_ble_svc.h
+	$(CC) $(CFLAGS) -DNRF52833_XXAA -DS140 $(PEER_DATA_INC) $(S140_V7_INC) peer_data_layout_test.c -o $@
+
+pstorage_busy_test: pstorage_busy_test.c $(PSTORAGE_SRC) $(wildcard pstorage_stubs/*.h)
+	$(CC) $(CFLAGS) -Wno-int-to-pointer-cast -DNRF52_SERIES $(PSTORAGE_INC) \
+		pstorage_busy_test.c $(PSTORAGE_SRC) -o $@
+
+check: apply_sim readback_test readback_test_v7 readback_internal_test bootloader_image_test sd_apply_test qspi_apply_test bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test softdevice_fwid_test qspi_alignment_test qspi_wake_test usb_wait_test uf2_write_state_test dfu_entry_test peer_data_layout_test peer_data_layout_nrf52_test peer_data_layout_nrf52833_test pstorage_busy_test
 	python3 version_derivation_test.py
 	python3 manifest_patcher_test.py
 	python3 cf2_guard_test.py
+	python3 peer_data_linker_test.py
 	python3 ../tools/check_internal_bootloader_targets.py
 	@echo
 	./apply_sim vectors/base.img vectors/delta.mota vectors/new.img
@@ -121,8 +153,16 @@ check: apply_sim readback_test readback_test_v7 readback_internal_test bootloade
 	./usb_wait_test
 	@echo
 	./uf2_write_state_test
+	@echo
+	./dfu_entry_test
+	@echo
+	./peer_data_layout_test
+	./peer_data_layout_nrf52_test
+	./peer_data_layout_nrf52833_test
+	@echo
+	./pstorage_busy_test
 
 clean:
-	rm -f apply_sim readback_test readback_test_v7 readback_internal_test bootloader_image_test sd_apply_test qspi_apply_test bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test softdevice_fwid_test qspi_alignment_test qspi_wake_test usb_wait_test uf2_write_state_test
+	rm -f apply_sim readback_test readback_test_v7 readback_internal_test bootloader_image_test sd_apply_test qspi_apply_test bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test softdevice_fwid_test qspi_alignment_test qspi_wake_test usb_wait_test uf2_write_state_test dfu_entry_test peer_data_layout_test peer_data_layout_nrf52_test peer_data_layout_nrf52833_test pstorage_busy_test
 
 .PHONY: check clean

@@ -85,6 +85,28 @@ are separate retryable phases. It also covers busy retries, completion counting,
 duplicates and same-geometry second copies, terminal aborts, and clearing every transfer/page mask at
 an explicit USB/MSC session reset.
 
+The pstorage regression compiles the production raw driver against a deterministic SoftDevice flash
+mock. It verifies that an immediate `NRF_ERROR_BUSY` waits for and ignores the preceding operation's
+event, retries without completing the wrong queue entry, and propagates lazy-erase enqueue failures
+instead of leaving the DFU packet buffer permanently active. It also covers fatal synchronous and
+asynchronous rollback, full-ring callback enqueue, nested callback attribution, command-bound lazy
+erase identity, exactly-once abort callbacks for every accepted pending packet, and multi-page clears
+used by dual-bank OTA. It also pins strict buffered-store FIFO ordering while a pending store is in
+flight, including stores submitted from its callback, so a final DFU packet cannot overtake older
+accepted packets or report completion before they are programmed. A later clear is backpressured until
+that accepted store FIFO drains, and a store accepted reentrantly during an abort callback is kicked
+after the original abort snapshot instead of being left idle without a future flash event.
+
+The DFU-entry regression pins the buttonless handoff contract: legacy `B1` direct-jump entry must bounce
+through a hardware reset, while reset-based BLE, serial, UF2, and normal boots must not reset again. This
+clears bootloader ACL or BPROT state before the first application-page erase can trigger a settings-page
+write.
+
+The retained-peer-data regression compiles the exact S132 v6, S140 v7, and S140 v6 Nordic types used by
+nRF52832, nRF52833, and nRF52840 and pins the Bluefruit BLEDfu ABI: 60 bytes of peer data at
+`0x20007F80`, followed by its CRC16 at offset 60. A static test checks every release and debug linker
+script so LTO or input-section ordering cannot place the CRC before the data again.
+
 The QSPI alignment test exercises the nRF52840 EasyDMA boundary adapter with one-, three-, and five-byte
 unaligned reads, multi-window reads, end-of-device tails, and the unaligned four-byte approval clear at
 container offset 201. It also verifies that the read-modify-program path preserves adjacent bytes and
