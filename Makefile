@@ -366,6 +366,7 @@ CFLAGS += \
 	-mfpu=fpv4-sp-d16 \
 	-ggdb \
 	-Os \
+	-fno-jump-tables \
 	-flto \
 	-ffunction-sections \
 	-fdata-sections \
@@ -483,6 +484,7 @@ CFLAGS += -DDFU_APP_DATA_RESERVED=$(DFU_APP_DATA_RESERVED)
 #------------------------------------------------------------------------------
 
 LDFLAGS += \
+	-Wl,--sort-section=alignment \
 	$(CFLAGS) \
 	-Wl,-L,linker -Wl,-T,$(LD_FILE) \
 	-Wl,--print-memory-usage \

@@ -197,14 +197,17 @@ set_property(TARGET bootloader APPEND PROPERTY LINK_DEPENDS ${LD_FILE})
 
 target_link_options(bootloader PUBLIC
   "LINKER:--script=${LD_FILE}"
+  "LINKER:--sort-section=alignment"
   -L${NRFX_DIR}/mdk
   -flto
+  -fno-jump-tables
   -nostartfiles
   --specs=nosys.specs --specs=nano.specs
   )
 target_compile_options(bootloader PUBLIC
   -mabi=aapcs
   -Os
+  -fno-jump-tables
   -flto
   -fno-builtin
   -fshort-enums

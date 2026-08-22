@@ -1,5 +1,20 @@
 # Adafruit nRF52 Bootloader with Enhanced OTA DFU
 
+## Changes in OTAFIX 2.4.2
+
+- Release builds now use Arm GNU Toolchain 14.2.Rel1 with the cumulative,
+  hardware-qualified A/B/C size improvements: ordinary `-Os`, no
+  compiler-generated jump tables, and linker alignment-based section sorting.
+  The Make and CMake build paths carry the same flags.
+- BLE direct-jump entry is bridged through a real reset before OTA startup,
+  clearing nRF52840 ACL state while retaining compatibility with installed
+  buttonless applications.
+- Raw pstorage now preserves FIFO order across BUSY retries, lazy erases,
+  callback reentrancy, and multi-page clears; retained BLE peer data also uses
+  the application-compatible data/CRC layout.
+- Host regressions cover reset entry, retained peer layout/linker placement,
+  pstorage failure paths, callback reentrancy, and multi-page erase sequencing.
+
 ## Changes in OTAFIX 2.4.1 preview.15
 
 - No functional source change from preview.14. This forward-version rebuild is
