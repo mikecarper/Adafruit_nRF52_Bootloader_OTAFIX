@@ -87,7 +87,9 @@ jobs:
           pip3 install adafruit-nrfutil uritemplate requests intelhex setuptools
 
       - name: Run host tests
-        run: make -C test check
+        run: |
+          make -C test check
+          make -C test sanitize
 
       - name: Build signed and dual-bank display variants
         shell: bash

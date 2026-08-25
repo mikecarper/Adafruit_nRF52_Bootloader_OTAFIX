@@ -61,12 +61,14 @@ typedef struct {
     uint32_t numBlocks;
     uint32_t numWritten;
     uint32_t bootloaderEraseOffset;
+    uint32_t appEraseAddress;
 
     uint8_t updateKind;
     bool aborted;
     bool has_uicr;
     bool bootloaderStagingErased;
     bool appSettingsInvalidated;
+    bool appEraseInProgress;
 
     uint8_t writtenMask[MAX_BLOCKS / 8 + 1];
     uint8_t appErasedMask[(UF2_APP_PAGE_COUNT + 7) / 8];

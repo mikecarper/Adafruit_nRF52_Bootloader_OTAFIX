@@ -6,6 +6,8 @@
 
 CC      ?= gcc
 CFLAGS  ?= -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter
+SANITIZER_CFLAGS = -std=c11 -O1 -g -Wall -Wextra -Wno-unused-parameter \
+	-fsanitize=address,undefined -fno-omit-frame-pointer
 SRC      = ../src
 INC      = -I $(SRC) -I $(SRC)/detools
 PSTORAGE_SRC = ../lib/sdk11/components/drivers_nrf/pstorage/pstorage_raw.c
@@ -122,6 +124,8 @@ check: apply_sim readback_test readback_test_v7 readback_internal_test bootloade
 	python3 manifest_patcher_test.py
 	python3 cf2_guard_test.py
 	python3 peer_data_linker_test.py
+	python3 bootloader_handoff_test.py
+	python3 ble_advertising_test.py
 	python3 ../tools/check_internal_bootloader_targets.py
 	@echo
 	./apply_sim vectors/base.img vectors/delta.mota vectors/new.img
@@ -162,7 +166,11 @@ check: apply_sim readback_test readback_test_v7 readback_internal_test bootloade
 	@echo
 	./pstorage_busy_test
 
+sanitize:
+	$(MAKE) clean
+	$(MAKE) CFLAGS="$(SANITIZER_CFLAGS)" check
+
 clean:
 	rm -f apply_sim readback_test readback_test_v7 readback_internal_test bootloader_image_test sd_apply_test qspi_apply_test bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test softdevice_fwid_test qspi_alignment_test qspi_wake_test usb_wait_test uf2_write_state_test dfu_entry_test peer_data_layout_test peer_data_layout_nrf52_test peer_data_layout_nrf52833_test pstorage_busy_test
 
-.PHONY: check clean
+.PHONY: check sanitize clean

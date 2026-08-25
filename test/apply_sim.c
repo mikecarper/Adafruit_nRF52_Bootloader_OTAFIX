@@ -51,12 +51,20 @@ int main(int argc, char** argv) {
     long base_n = load(argv[1], &base), mota_n = load(argv[2], &mota), exp_n = load(argv[3], &expect);
 
     memset(FLASH, 0xFF, FLASH_LEN);
-    if (MOTA_NRF52_APP_BASE + base_n > FLASH_LEN) { fprintf(stderr, "base too big\n"); return 2; }
+    if (MOTA_NRF52_APP_BASE + base_n > FLASH_LEN) {
+        fprintf(stderr, "base too big\n");
+        free(base); free(mota); free(expect);
+        return 2;
+    }
     memcpy(FLASH + MOTA_NRF52_APP_BASE, base, base_n);                       // running image at APP_BASE
 
     // stage the .mota bottom-aligned below FS_START, page-aligned (mirrors OtaStoreFlashNrf52)
     uint32_t write_start = (uint32_t)((MOTA_NRF52_FS_START - mota_n) & ~(MOTA_NRF52_FLASH_PAGE - 1));
-    if (write_start < MOTA_NRF52_APP_BASE + base_n) { fprintf(stderr, "mota overlaps app!\n"); return 2; }
+    if (write_start < MOTA_NRF52_APP_BASE + base_n) {
+        fprintf(stderr, "mota overlaps app!\n");
+        free(base); free(mota); free(expect);
+        return 2;
+    }
     memcpy(FLASH + write_start, mota, mota_n);
     // the app writes APRV into the staged manifest's approval field before reset - do the same here
     static const uint8_t APRV4[4] = {'A','P','R','V'};
@@ -104,5 +112,6 @@ int main(int argc, char** argv) {
         }
     }
     printf("\n%s\n", ok ? "RESULT: APPLY OK - app region == expected new image" : "RESULT: APPLY FAILED");
+    free(base); free(mota); free(expect);
     return ok ? 0 : 1;
 }

@@ -8,6 +8,7 @@
 
 typedef enum {
   UF2_TRANSFER_ACCEPT,
+  UF2_TRANSFER_DUPLICATE,
   UF2_TRANSFER_ABORTED,
 } uf2_transfer_result_t;
 
@@ -46,13 +47,10 @@ static inline uf2_transfer_result_t uf2_transfer_prepare(uint32_t incoming_num_b
   uint8_t const mask = 1U << (block_no % 8);
   uint32_t const pos = block_no / 8;
   if (written_mask[pos] & mask) {
-    // A retry while flash is busy is accepted because the block is committed
-    // only after programming succeeds. Once committed, however, there is no
-    // collision-free way to distinguish a transport retransmission from the
-    // beginning of a different same-size image without retaining every block.
-    // Fail closed until an explicit USB/MSC session boundary.
-    *aborted = true;
-    return UF2_TRANSFER_ABORTED;
+    // USB mass-storage hosts may retransmit a completed WRITE10 command. The
+    // caller must verify that the committed destination already contains the
+    // incoming bytes before accepting this as an idempotent retransmission.
+    return UF2_TRANSFER_DUPLICATE;
   }
 
   return UF2_TRANSFER_ACCEPT;
@@ -67,6 +65,16 @@ static inline void uf2_transfer_commit(uint32_t block_no,
     written_mask[pos] |= mask;
     (*num_written)++;
   }
+}
+
+static inline uf2_transfer_result_t uf2_transfer_validate_duplicate(
+    uf2_transfer_result_t result, bool destination_matches, bool* aborted) {
+  if (result == UF2_TRANSFER_DUPLICATE && !destination_matches) {
+    *aborted = true;
+    return UF2_TRANSFER_ABORTED;
+  }
+
+  return result;
 }
 
 static inline void uf2_transfer_reset(void* state, size_t state_size) {

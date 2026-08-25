@@ -12,6 +12,7 @@ flash-and-pray on a board.
 
 ```bash
 make check        # apply the committed vector (apply_sim) + the LTO-readback regression (readback_test)
+make sanitize     # rebuild and run the complete host suite with ASan and UBSan
 ```
 
 Debug an arbitrary scenario (e.g. the real firmware that misbehaved on a device):
@@ -80,10 +81,17 @@ The suite also exercises the no-valid-image USB recovery wait: no VBUS falls thr
 delay, a USB host has the full 30-second default grace period to enumerate, enumeration at the deadline
 is accepted, and VBUS removal stops the wait immediately.
 
-The UF2 write-state test verifies that settings invalidation, each page erase, and block programming
-are separate retryable phases. It also covers busy retries, completion counting, fail-closed committed
-duplicates and same-geometry second copies, terminal aborts, and clearing every transfer/page mask at
-an explicit USB/MSC session reset.
+The UF2 write-state test verifies that the bootloader atomically clears the
+application-valid settings word before erasing any out-of-order target page,
+and that each page erase and block program remains a separate retryable phase.
+This keeps an interrupted image unbootable even while its vector page is still
+intact. nRF52840/833 application erases run in 2 ms partial-NVMC slices so USB
+and an inherited watchdog run between slices. The test covers busy retries,
+idempotent committed-block retransmission, completion counting, terminal
+geometry/kind aborts, and clearing every transfer/page mask at an explicit
+USB/MSC session reset. The production caller compares retransmitted
+application bytes with flash before accepting them; a conflicting
+same-geometry image remains fail-closed.
 
 The pstorage regression compiles the production raw driver against a deterministic SoftDevice flash
 mock. It verifies that an immediate `NRF_ERROR_BUSY` waits for and ignores the preceding operation's
@@ -97,10 +105,25 @@ accepted packets or report completion before they are programmed. A later clear 
 that accepted store FIFO drains, and a store accepted reentrantly during an abort callback is kicked
 after the original abort snapshot instead of being left idle without a future flash event.
 
-The DFU-entry regression pins the buttonless handoff contract: legacy `B1` direct-jump entry must bounce
-through a hardware reset, while reset-based BLE, serial, UF2, and normal boots must not reset again. This
-clears bootloader ACL or BPROT state before the first application-page erase can trigger a settings-page
-write.
+The DFU-entry regression pins the buttonless handoff contract: legacy `B1`
+direct-jump entry must bounce through a hardware reset, while reset-based BLE,
+serial, UF2, and normal boots must not reset again. A source-level guard also
+requires that conversion before board initialization, requires the UF2
+settings-invalidating zero-word write to precede page erase, and fixes the
+bootloader-copy sequence as continuation, settings finalization, completion
+indication, stale transport-magic clear, then system reset. The replacement
+image therefore cannot re-enter BLE DFU because of the `0xA8` request left by
+the prior transport callback. Completed BLE, UF2, and CDC application updates
+all tear down their active transport and reset before application startup, so
+none direct-jumps with live USB, SoftDevice, or radio state. The same guard
+requires non-BLE recovery to disable the SoftDevice before TinyUSB/direct NVMC,
+uses Nordic's supported 2 ms partial-erase minimum, and keeps no-application
+USB recovery sensitive to VBUS removal so it can fall back to BLE.
+
+The BLE-advertising regression pins the 31-byte Legacy DFU layout. Flags and the
+128-bit DFU service UUID must be inserted before the local name, leaving eight
+name bytes. Longer board names, including MeshTower V2's `TOWER_V2_OTA`, must
+use the shortened-name AD type instead of silently dropping the UUID.
 
 The retained-peer-data regression compiles the exact S132 v6, S140 v7, and S140 v6 Nordic types used by
 nRF52832, nRF52833, and nRF52840 and pins the Bluefruit BLEDfu ABI: 60 bytes of peer data at

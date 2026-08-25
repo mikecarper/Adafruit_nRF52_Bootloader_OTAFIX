@@ -54,6 +54,12 @@ endif ()
 project(Adafruit_nRF52_Bootloader C ASM)
 include(CheckCCompilerFlag)
 
+if(NOT CMAKE_C_COMPILER_ID STREQUAL "GNU" OR
+   CMAKE_C_COMPILER_VERSION VERSION_LESS "14.2")
+  message(FATAL_ERROR
+    "Arm GNU Toolchain 14.2.Rel1 or newer is required; found ${CMAKE_C_COMPILER_ID} ${CMAKE_C_COMPILER_VERSION}")
+endif()
+
 set(CMAKE_EXECUTABLE_SUFFIX .elf)
 add_executable(bootloader
   # src
@@ -200,6 +206,7 @@ target_link_options(bootloader PUBLIC
   "LINKER:--sort-section=alignment"
   -L${NRFX_DIR}/mdk
   -flto
+  -flto-partition=one
   -fno-jump-tables
   -nostartfiles
   --specs=nosys.specs --specs=nano.specs
@@ -209,7 +216,7 @@ target_compile_options(bootloader PUBLIC
   -Os
   -fno-jump-tables
   -flto
-  -fno-builtin
+  -flto-partition=one
   -fshort-enums
   -fstack-usage
   -fno-strict-aliasing

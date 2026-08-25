@@ -41,7 +41,9 @@
 #define DFU_SERVICE_HANDLE                   0x000C                                                  /**< Handle of DFU service when DFU service is first service initialized. */
 #define BLE_HANDLE_MAX                       0xFFFF                                                  /**< Max handle value is BLE. */
 
-// limit of 8 chars
+// Names that exceed the remaining advertising payload use the shortened-name
+// type. The Legacy DFU UUID must remain present so generic scanners can find
+// the bootloader.
 #ifndef DEVICE_NAME
 #define DEVICE_NAME                          "AdaDFU"                                                /**< Name of device. Will be included in the advertising data. */
 #endif //DEVICE_NAME
@@ -846,8 +848,15 @@ static void advertising_init(ble_data_t* adv_data, uint8_t adv_flags)
   sd_ble_uuid_encode(&service_uuid, &len, uuid128);
 
   advertising_add(adv_data, BLE_GAP_AD_TYPE_FLAGS, &adv_flags, 1);
-  advertising_add(adv_data, BLE_GAP_AD_TYPE_COMPLETE_LOCAL_NAME, DEVICE_NAME, strlen(DEVICE_NAME));
   advertising_add(adv_data, BLE_GAP_AD_TYPE_128BIT_SERVICE_UUID_MORE_AVAILABLE, uuid128, 16);
+
+  uint8_t const name_len = (uint8_t)strlen(DEVICE_NAME);
+  uint8_t const name_max = (uint8_t)(BLE_GAP_ADV_SET_DATA_SIZE_MAX - adv_data->len - 2);
+  uint8_t const name_adv_len = name_len < name_max ? name_len : name_max;
+  uint8_t const name_type = name_adv_len == name_len
+                              ? BLE_GAP_AD_TYPE_COMPLETE_LOCAL_NAME
+                              : BLE_GAP_AD_TYPE_SHORT_LOCAL_NAME;
+  advertising_add(adv_data, name_type, DEVICE_NAME, name_adv_len);
 }
 
 

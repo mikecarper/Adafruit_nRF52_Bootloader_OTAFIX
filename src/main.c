@@ -169,11 +169,10 @@ static void disable_softdevice(void) {
 //--------------------------------------------------------------------+
 int main(void) {
   // bootloader_util_app_start() protects the bootloader and settings with
-  // ACL/BPROT before launching the application. Adafruit BLEDfu returns by a
-  // direct jump, so that protection survives and a settings-page erase during
-  // DFU would fault after the first application page was erased. Bounce through
-  // a hardware reset before any bootloader initialization or flash access. The
-  // peer handoff lives in .noinit RAM and A8 selects reset-based BLE DFU.
+  // ACL/BPROT before launching the application. Adafruit BLEDfu enters with a
+  // direct jump and B1, so bounce that path through a real reset before any
+  // bootloader initialization or flash access. A8 retains BLE DFU selection
+  // across the reset. Nordic's COPY_BL path already performs its own reset.
   uint8_t const requested_entry = (uint8_t)NRF_POWER->GPREGRET;
   uint8_t const reset_entry = dfu_entry_reset_magic(requested_entry);
   if (reset_entry != requested_entry) {
@@ -203,6 +202,14 @@ int main(void) {
     bootloader_dfu_sd_update_finalize();
 
     led_state(STATE_WRITING_FINISHED);
+
+    // COPY_BL/COPY_SD resumes execution in the replacement image before all
+    // MBR/SoftDevice peripheral state is clean for direct NVMC or USB access.
+    // Finalization clears the pending bank state. Clear the stale BLE transport
+    // request left by reset_callback() before resetting, or the replacement
+    // bootloader re-enters BLE DFU instead of launching the application.
+    NRF_POWER->GPREGRET = 0;
+    NVIC_SystemReset();
   }
 
   // Check all inputs and enter DFU if needed
@@ -213,15 +220,17 @@ int main(void) {
   // launching the user application
   bool bootloader_must_be_reentered = bootloader_must_reset_to_self();
 
-  // A successful BLE application update must reboot through reset so the
-  // application starts with clean SoftDevice, radio, and peripheral state.
-  // Interrupted updates keep using the recovery path below.
-  bool const reset_after_ble_app_update = _ota_dfu && bootloader_dfu_app_update_complete();
+  // Every completed application update must reboot through reset so the app
+  // starts with clean USB, SoftDevice, radio, and peripheral state. This is
+  // required by BLE and also prevents a completed UF2/CDC transfer from
+  // direct-jumping out of a live USB stack. Interrupted updates keep using the
+  // recovery path below.
+  bool const reset_after_app_update = bootloader_dfu_app_update_complete();
 
   // Reset peripherals
   board_teardown();
 
-  if (reset_after_ble_app_update) {
+  if (reset_after_app_update) {
     NVIC_SystemReset();
   }
 
@@ -366,6 +375,16 @@ static void check_dfu_mode(void) {
 
   // Enter DFU mode accordingly to input
   if (dfu_start || !valid_app) {
+    if (!_ota_dfu) {
+      // A buttonless handoff can leave the SoftDevice enabled even when a
+      // later recovery decision selects USB. Direct NVMC access from the
+      // CDC/UF2 transports would then raise a bus fault on the first flash
+      // write. USB owns no SoftDevice resources, so make that boundary
+      // explicit before initializing TinyUSB.
+      disable_softdevice();
+      _sd_inited = false;
+    }
+
     if (probe_usb) {
       led_state(STATE_USB_UNMOUNTED);
       usb_init(false);
@@ -397,8 +416,10 @@ static void check_dfu_mode(void) {
       uint32_t const timeout_ms = dfu_buttonless_timeout_ms(serial_only_dfu, uf2_dfu);
       bootloader_dfu_start(_ota_dfu, timeout_ms, true);
     } else {
-      // No timeout if bootloader requires user action (double-reset).
-      bootloader_dfu_start(_ota_dfu, 0, false);
+      // No timeout if bootloader requires user action (double-reset). A
+      // no-application USB probe still exits when VBUS is removed so the next
+      // reset can fall back to BLE recovery without requiring a reset button.
+      bootloader_dfu_start(_ota_dfu, 0, probe_usb);
     }
 
     if (_ota_dfu) {

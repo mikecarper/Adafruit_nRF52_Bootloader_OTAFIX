@@ -2,13 +2,32 @@
 
 ## Changes in OTAFIX 2.4.2
 
-- Release builds now use Arm GNU Toolchain 14.2.Rel1 with the cumulative,
-  hardware-qualified A/B/C size improvements: ordinary `-Os`, no
-  compiler-generated jump tables, and linker alignment-based section sorting.
-  The Make and CMake build paths carry the same flags.
+- Release builds now require Arm GNU Toolchain 14.2.Rel1 or newer with the
+  cumulative size improvements: ordinary `-Os`, no compiler-generated jump
+  tables, linker alignment-based section sorting, and one whole-program LTO
+  partition. Make and CMake both use the Nordic startup to initialize data/BSS
+  and call `main` directly, and both retain GCC's size-reducing C builtins. This
+  keeps the complete MeshTower V2 SD-card build below the fixed CF2 boundary
+  without removing validation. GCC 12 is not supported: its output can exceed
+  the fixed, manifest-protected nRF52840 bootloader envelope on feature-rich
+  targets.
 - BLE direct-jump entry is bridged through a real reset before OTA startup,
   clearing nRF52840 ACL state while retaining compatibility with installed
-  buttonless applications.
+  buttonless applications. Before selecting USB CDC/UF2, the bootloader also
+  explicitly disables any still-running SoftDevice so direct NVMC access cannot
+  bus-fault on the first settings write or page erase.
+- Bootloader-bank finalization clears the stale BLE-entry request before its
+  reset, and every completed BLE, CDC, or UF2 application install now resets
+  after transport teardown. A replacement bootloader cannot loop back into BLE
+  DFU, and an application cannot inherit live radio or USB peripheral state.
+- Application UF2 reception invalidates the saved application state before its
+  first target-page erase, programs only after erase completion, and accepts a
+  retransmitted block only when flash already contains the same bytes. nRF52840
+  and nRF52833 page erases use Nordic's supported 2 ms partial-erase minimum so
+  TinyUSB and an inherited watchdog run between slices.
+- A mounted no-application USB recovery session exits when VBUS is removed, so
+  its reset can select battery-powered BLE recovery without a physical reset
+  button.
 - Raw pstorage now preserves FIFO order across BUSY retries, lazy erases,
   callback reentrancy, and multi-page clears; retained BLE peer data also uses
   the application-compatible data/CRC layout.
@@ -97,8 +116,8 @@
 - **Persistent application CRC validation**
   BLE/serial DFU now saves the CRC that was validated during installation, allowing the bootloader to verify application integrity on subsequent boots.
 
-- **Clean reboot after BLE OTA**
-  A successfully installed BLE application now starts after a hardware reset, ensuring clean SoftDevice, radio, and peripheral state. Interrupted updates still re-enter recovery DFU.
+- **Clean reboot after application DFU**
+  A successfully installed BLE, serial, or UF2 application now starts after a hardware reset, ensuring clean SoftDevice, radio, USB, and peripheral state. Interrupted updates still re-enter recovery DFU.
 
 - **Reliable BLE OTA connection settings**
   Uses a 15-30 ms preferred connection interval with zero slave latency and lets the phone control connection updates, avoiding both the earlier throughput regression and connection-update races.
@@ -260,6 +279,7 @@ In **OTAFIX 2.4.1 preview.8** and above, a device without a valid application ch
 - Connected to an active USB data host: serial and UF2 DFU remain available.
 - Running on battery: BLE OTA starts immediately because VBUS is absent.
 - Connected to USB power without a data host: BLE OTA starts after the 30-second USB detection window.
+- On current builds, removing VBUS from an enumerated no-application USB session exits that session and resets into BLE recovery; no reset-button press is required.
 
 Preview.7 offers USB only briefly before falling back to BLE. Other older OTAFIX builds may fall directly
 to BLE. On those versions, a host or VM that attaches too slowly can miss the USB window even though the
@@ -270,6 +290,83 @@ cable supplies power.
 - On preview.7 or older releases, explicitly request UF2/serial mode using **double-reset**, or perform a BLE OTA update.
 
 This behavior keeps computer-based recovery available without leaving battery-powered devices stuck waiting for USB.
+
+---
+
+### Manual bootloader handoff and hard recovery
+
+A Legacy DFU bootloader or SoftDevice-plus-bootloader update has two distinct
+handoffs. The MBR first copies the replacement bootloader and starts it
+directly. The replacement then finalizes the pending bank and performs one
+intentional hardware reset before starting USB, BLE, or direct flash work.
+It clears the prior transport's retained BLE-entry request before that reset.
+During that sequence the USB drive and serial port may disappear and
+re-enumerate. Wait for the second enumeration, then confirm the exact model and
+board ID in `INFO_UF2.TXT` before copying application firmware.
+
+A bootloader-only Legacy DFU package uses the application bank as temporary
+storage and is not application-preserving. Reinstall the exact board's
+application after the bootloader is stable. The signed internal, SD, and QSPI
+bootloader-update paths described above use their own guarded staging layouts
+and have different preservation guarantees.
+
+For a device that shows as an unknown USB device, has no serial port, or does
+not expose its UF2 drive:
+
+1. Remove USB and every other power source, including the battery, for at least
+   five seconds. A VM-side USB detach is not a hardware power cycle.
+2. Reconnect with a known data cable, wait through the recovery window, and use
+   the board's double-reset gesture if necessary.
+3. If serial DFU is available, install only the exact-board combined package:
+
+   ```bash
+   adafruit-nrfutil dfu serial -pkg <exact-board-s140-package.zip> \
+     -p <serial-port> -b 115200 -sb
+   ```
+
+4. If the device remains an unknown USB device and does not advertise BLE DFU
+   after a true power cycle, use SWD. This erases the application and ExtraFS:
+
+   ```bash
+   nrfjprog --family NRF52 --recover
+   nrfjprog --family NRF52 --program <matching-s140-softdevice.hex> --verify --sectorerase
+   nrfjprog --family NRF52 --program <exact-board-bootloader_mbr.hex> --verify --sectorerase
+   nrfjprog --family NRF52 --reset
+   ```
+
+Do not substitute a similarly named board or rely on a changing drive letter.
+Resolve the USB serial number and verify the board-bound package before every
+write.
+
+BLE scanners should select the Legacy DFU service UUID, not depend on the full
+advertised name. OTAFIX reserves the UUID before adding the local name to the
+31-byte legacy advertising payload. Flags, UUID, and field overhead leave eight
+name bytes, so longer names use the BLE shortened-name type; connect and read
+board metadata before writing firmware. Older bootloaders that advertised a
+long name before the UUID could silently omit the UUID and may require an exact
+MAC or MAC+1 filter for recovery.
+
+If USB enumeration works but serial DFU never acknowledges START and copied
+application UF2 files do not change flash, do not replace only
+`dcd_nrf5x.c` with a newer TinyUSB version. The newer Nordic atomic-EasyDMA
+driver depends on its matching TinyUSB core; a partial backport onto this
+repository's vendored TinyUSB 0.12 stack can lose host-to-device completion
+handling even though a USB capture shows successful bulk OUT transactions.
+Upgrade the TinyUSB core and controller driver together. OTAFIX keeps the
+compatible vendored driver and pins a minimal backport of upstream TinyUSB
+commit `6af4ee2c5` for the independent post-SoftDevice HFCLK retry. The
+`mikecarper/tinyusb` fork's `otafix-0.12-nrf5x` branch contains only the two
+nRF5x fixes on the pinned TinyUSB 0.12-era base, making the backport
+reproducible from a clean clone without unrelated core changes.
+
+If the first valid UF2 flash sector instead makes an older bootloader reset,
+while ordinary non-UF2 disk traffic remains stable, the recovery path may have
+entered USB with the SoftDevice still enabled. Direct NVMC access is forbidden
+in that state. Current builds explicitly disable the SoftDevice before TinyUSB
+startup and use 2 ms partial page erases; install the corrected bootloader over
+BLE or SWD before retrying application UF2. A bootloader-only Legacy DFU update
+uses the first 40 KiB of the application bank as staging, so reinstall the
+exact application afterward.
 
 ---
 

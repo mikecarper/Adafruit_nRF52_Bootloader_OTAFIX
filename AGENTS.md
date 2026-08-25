@@ -43,6 +43,10 @@ make BOARD={board} flash-sd    # Flash SoftDevice only
 python3 tools/build_all.py
 ```
 
+For an intentionally dirty qualification tree, supply the packed test version
+explicitly, for example `--test-version 0x02040302`. Production builds still
+derive their version from a clean exact Git tag.
+
 ## Architecture
 
 ### MCU Variants and SoftDevices
@@ -104,6 +108,6 @@ GitHub Actions (`.github/workflows/githubci.yml`) builds all boards in parallel 
 
 ## Required Toolchain
 
-- `arm-none-eabi-gcc` (tested with 12.3.1)
+- `arm-none-eabi-gcc` 14.2.Rel1 or newer (GCC 12 is too large for the fixed nRF52840 envelope)
 - Python 3 with: `adafruit-nrfutil`, `intelhex`
 - `nrfjprog` (for JLink flashing)

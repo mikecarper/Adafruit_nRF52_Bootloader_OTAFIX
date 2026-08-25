@@ -110,6 +110,12 @@ OBJCOPY = $(CROSS_COMPILE)objcopy
 SIZE    = $(CROSS_COMPILE)size
 GDB     = $(CROSS_COMPILE)gdb
 
+ARM_GCC_VERSION := $(shell $(CC) -dumpfullversion -dumpversion 2>$(NULL_DEVICE))
+ARM_GCC_SUPPORTED := $(shell $(PYTHON) -c "import sys; p=tuple(map(int, sys.argv[1].split('.')[:2])); print(int(p >= (14, 2)))" "$(ARM_GCC_VERSION)" 2>$(NULL_DEVICE))
+ifneq ($(ARM_GCC_SUPPORTED),1)
+  $(error Arm GNU Toolchain 14.2.Rel1 or newer is required; found '$(ARM_GCC_VERSION)')
+endif
+
 # Set make directory command, Windows tries to create a directory named "-p" if that flag is there.
 ifneq ($(OS), Windows_NT)
   MKDIR = mkdir -p
@@ -368,6 +374,7 @@ CFLAGS += \
 	-Os \
 	-fno-jump-tables \
 	-flto \
+	-flto-partition=one \
 	-ffunction-sections \
 	-fdata-sections \
 	-fshort-enums \
@@ -408,6 +415,7 @@ endif
 
 # Defined Symbol (MACROS)
 CFLAGS += -D__HEAP_SIZE=0
+CFLAGS += -D__START=main -D__STARTUP_CLEAR_BSS
 CFLAGS += -DCONFIG_GPIO_AS_PINRESET
 
 # Skip defining CONFIG_NFCT_PINS_AS_GPIOS if the device uses the NFCT.
@@ -486,6 +494,7 @@ CFLAGS += -DDFU_APP_DATA_RESERVED=$(DFU_APP_DATA_RESERVED)
 LDFLAGS += \
 	-Wl,--sort-section=alignment \
 	$(CFLAGS) \
+	-nostartfiles \
 	-Wl,-L,linker -Wl,-T,$(LD_FILE) \
 	-Wl,--print-memory-usage \
 	-Wl,-Map=$@.map -Wl,-cref -Wl,-gc-sections \

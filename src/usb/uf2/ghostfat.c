@@ -458,12 +458,20 @@ static bool erase_bootloader_staging(WriteState* state) {
 }
 
 static bool prepare_app_block(UF2_Block const* block, WriteState* state) {
+  if (state->appEraseInProgress) {
+    if (flash_nrf5x_erase_step(state->appEraseAddress, false)) {
+      state->appEraseInProgress = false;
+    }
+    return false;
+  }
+
   uint32_t const page = (block->targetAddr - USER_FLASH_START) / CODE_PAGE_SIZE;
-  switch (uf2_app_flash_next_action(&state->appSettingsInvalidated, state->appErasedMask, page)) {
+  switch (uf2_app_flash_next_action(&state->appSettingsInvalidated,
+                                    state->appErasedMask, page)) {
     case UF2_APP_FLASH_INVALIDATE_SETTINGS: {
-      // Fail closed before changing any application page. In particular, an
-      // out-of-order UF2 copy must not leave the old vector table marked valid
-      // after a later application page has already changed.
+      // Fail closed before changing any application or SoftDevice page. The
+      // reset boundary in main() has already cleared stale ACL/BPROT state, so
+      // this one-way settings write is safe after either direct handoff.
       // Direct app UF2 does not use the legacy page cache; abandon any partial
       // CDC/bootloader staging page before this transfer owns flash state.
       flash_nrf5x_discard();
@@ -472,10 +480,11 @@ static bool prepare_app_block(UF2_Block const* block, WriteState* state) {
     }
 
     case UF2_APP_FLASH_ERASE_PAGE:
-      // Page erase can take about 85 ms. Return busy after this one operation so
-      // TinyUSB can run (and the inherited watchdog can be fed) before any flash
-      // programming. TinyUSB retries this same sector after write_block() returns 0.
-      flash_nrf5x_erase(block->targetAddr, CODE_PAGE_SIZE);
+      // Return busy between short partial-erase steps so TinyUSB can run and an
+      // inherited watchdog can be fed. TinyUSB retries this same sector until
+      // the page is complete, then once more to program the block.
+      state->appEraseAddress = block->targetAddr;
+      state->appEraseInProgress = !flash_nrf5x_erase_step(block->targetAddr, true);
       return false;
 
     case UF2_APP_FLASH_PROGRAM_BLOCK:
@@ -518,6 +527,25 @@ int write_block(uint32_t block_no, uint8_t* data, WriteState* state) {
                          state->writtenMask);
   if (transfer_result == UF2_TRANSFER_ABORTED) {
     return -1;
+  }
+  if (transfer_result == UF2_TRANSFER_DUPLICATE) {
+    bool const destination_matches =
+      update_kind != UF2_UPDATE_KIND_APPLICATION ||
+      !in_app_space(block->targetAddr) ||
+      memcmp((void const*)(uintptr_t)block->targetAddr, block->data,
+             block->payloadSize) == 0;
+    if (uf2_transfer_validate_duplicate(transfer_result, destination_matches,
+                                        &state->aborted) == UF2_TRANSFER_ABORTED) {
+      // A different same-geometry application has reused a committed block
+      // number. Keep the application invalid and require an explicit MSC
+      // session reset before another image can start.
+      return -1;
+    }
+
+    // Application retransmissions are accepted only when they are already in
+    // flash. Bootloader retransmissions can be ignored here because the final
+    // board-bound whole-image manifest CRC rejects any mixed staged image.
+    return BPB_SECTOR_SIZE;
   }
 
   switch (update_kind) {
@@ -601,6 +629,9 @@ int write_block(uint32_t block_no, uint8_t* data, WriteState* state) {
       // Application UF2 programs erased pages directly in 256-byte blocks.
       // Never flush a cache that may belong to an abandoned CDC transfer.
       flash_nrf5x_discard();
+      if (!state->appSettingsInvalidated) {
+        state->aborted = true;
+      }
     }
   }
 
