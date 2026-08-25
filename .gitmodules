@@ -1,6 +1,7 @@
 [submodule "lib/tinyusb"]
 	path = lib/tinyusb
-	url = https://github.com/hathach/tinyusb.git
+	url = https://github.com/mikecarper/tinyusb.git
+	branch = otafix-0.12-nrf5x
 [submodule "lib/nrfx"]
 	path = lib/nrfx
 	url = https://github.com/NordicSemiconductor/nrfx.git
