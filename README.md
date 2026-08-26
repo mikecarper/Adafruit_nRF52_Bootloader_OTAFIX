@@ -1,25 +1,15 @@
 # Adafruit nRF52 Bootloader with Enhanced OTA DFU
 
-## Changes in OTAFIX 2.4.2
+## Changes in OTAFIX 2.4.3
 
-- Release builds now require Arm GNU Toolchain 14.2.Rel1 or newer with the
-  cumulative size improvements: ordinary `-Os`, no compiler-generated jump
-  tables, linker alignment-based section sorting, and one whole-program LTO
-  partition. Make and CMake both use the Nordic startup to initialize data/BSS
-  and call `main` directly, and both retain GCC's size-reducing C builtins. This
-  keeps the complete MeshTower V2 SD-card build below the fixed CF2 boundary
-  without removing validation. GCC 12 is not supported: its output can exceed
-  the fixed, manifest-protected nRF52840 bootloader envelope on feature-rich
-  targets.
-- BLE direct-jump entry is bridged through a real reset before OTA startup,
-  clearing nRF52840 ACL state while retaining compatibility with installed
-  buttonless applications. Before selecting USB CDC/UF2, the bootloader also
-  explicitly disables any still-running SoftDevice so direct NVMC access cannot
-  bus-fault on the first settings write or page erase.
-- Bootloader-bank finalization clears the stale BLE-entry request before its
-  reset, and every completed BLE, CDC, or UF2 application install now resets
-  after transport teardown. A replacement bootloader cannot loop back into BLE
-  DFU, and an application cannot inherit live radio or USB peripheral state.
+- The MBR bootloader/SoftDevice replacement path now clears its stale BLE-entry
+  request and performs a hardware reset after bank finalization. A replacement
+  bootloader therefore cannot loop back into BLE DFU.
+- Every completed BLE, CDC, or UF2 application install now resets after
+  transport teardown, so the application cannot inherit live radio or USB
+  peripheral state. USB CDC/UF2 startup also disables any inherited SoftDevice,
+  preventing direct NVMC access from faulting on the first settings write or
+  page erase.
 - Application UF2 reception invalidates the saved application state before its
   first target-page erase, programs only after erase completion, and accepts a
   retransmitted block only when flash already contains the same bytes. nRF52840
@@ -28,9 +18,25 @@
 - A mounted no-application USB recovery session exits when VBUS is removed, so
   its reset can select battery-powered BLE recovery without a physical reset
   button.
-- Raw pstorage now preserves FIFO order across BUSY retries, lazy erases,
-  callback reentrancy, and multi-page clears; retained BLE peer data also uses
-  the application-compatible data/CRC layout.
+- TinyUSB's nRF5x startup-race fix and a post-SoftDevice HFCLK retry are pinned
+  together on the repository's compatible 0.12-era fork.
+- Production builds require Arm GNU Toolchain 14.2.Rel1 or newer, use the Nordic
+  startup directly, retain GCC's size-reducing builtins, and use one whole-program
+  LTO partition. Nonrelease CI and dirty-tree qualification builds carry an
+  explicit test-only packed version instead of producing release candidates.
+
+## Changes in OTAFIX 2.4.2
+
+- Release builds use Arm GNU Toolchain 14.2.Rel1 with the cumulative,
+  hardware-qualified A/B/C size improvements: ordinary `-Os`, no
+  compiler-generated jump tables, and linker alignment-based section sorting.
+  The Make and CMake build paths carry the same flags.
+- BLE direct-jump entry is bridged through a real reset before OTA startup,
+  clearing nRF52840 ACL state while retaining compatibility with installed
+  buttonless applications.
+- Raw pstorage preserves FIFO order across BUSY retries, lazy erases, callback
+  reentrancy, and multi-page clears; retained BLE peer data also uses the
+  application-compatible data/CRC layout.
 - Host regressions cover reset entry, retained peer layout/linker placement,
   pstorage failure paths, callback reentrancy, and multi-page erase sequencing.
 
