@@ -19,6 +19,7 @@
 | lilygo_techo | LilyGo T-Echo | 0x239A:0x0029 | https://lilygo.cc/products/t-echo-lilygo |
 | lilygo_techo_lite | LilyGo T-Echo Lite | 0x239A:0x00DA | https://lilygo.cc/products/t-echo-lite |
 | minewsemi_mx25le01 | MinewSemi MX25LE01 | 0x239A:0x0029 | https://www.minewsemi.com |
+| pca10056 | Nordic nRF52840 DK | 0x239A:0x00DA | https://www.nordicsemi.com/Products/Development-hardware/nRF52840-DK |
 | promicro_nrf52840 | ProMicro NRF52840 | 0x239A:0x00B3 | https://www.nologo.tech/product/otherboard/NRF52840.html |
 | sensecap_solar_p1 | Seeed Solar Node P1 | 0x2886:0x0044 | https://www.seeedstudio.com/ |
 | t1000_e | Seeed T1000-E for Meshtastic | 0x2886:0x0057 | https://www.seeedstudio.com/SenseCAP-Card-Tracker-T1000-E-for-Meshtastic-p-5913.html |

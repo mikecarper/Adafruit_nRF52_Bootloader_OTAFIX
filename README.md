@@ -251,6 +251,8 @@ candidates are not release artifacts.
 
   The `lilygo_techo_lite` target uses the current T-Echo Lite QSPI routing (SCK P0.04, CS P0.12, IO0 P0.06, IO1 P0.08, IO2 P1.09, and IO3 P0.26) and switches its active-high RT9080 rail on P0.30 around flash access. Its 4 MiB production parts use more than one JEDEC memory-type value, so the bootloader validates the reported capacity instead of requiring one exact signature.
 
+  The `pca10056` target uses the nRF52840 DK's dedicated MX25R6435F routing (SCK P0.19, CS P0.17, and IO0..IO3 on P0.20..P0.23). It requires the exact `C2:28:17` JEDEC signature and uses the board-qualified 8 MHz clock.
+
   The RAK15001 Slot C target remains `wiscore_rak4631_board_rak15001_slot_c`. It uses 8 MHz standard SPI over the nRF52840 QSPI peripheral, requires the exact `C8:40:15` GD25Q16 JEDEC ID, and leaves QSPI IO2/IO3 disconnected. WP# and HOLD# use the module's onboard pull-ups, so the bootloader does not drive WB_IO4. The Slot C deployment contract avoids the RAK12501 GNSS module's RESET/1PPS lines whether GNSS occupies its supported Slot A or D. Do not combine it with Ethernet, SD, or another WisBlock SPI module because the sensor slots share SPI and chip-select.
 
   The RAK3401/RAK13302 target is `wiscore_rak3401_rak13302_w25q16`. It shares SCK P0.03, MOSI P0.30, and MISO P0.29 with the 1 W radio, gives the W25Q16 its own CS on P0.31, and drives the radio's active-low NSS on P0.26 high before any flash wake or QSPI access. It requires exact JEDEC `EF:40:15` at 8 MHz and leaves QSPI IO2/IO3 disconnected, so the breakout must hold WP# and HOLD# high. The dedicated mapping leaves the Slot A GPS UART/PPS pins untouched. Pair it only with MeshCore environment `RAK_3401_repeater_rak13302_w25q16_lora_ota` and hardware ID `RAK3401_RAK13302_W25Q16`; other RAK3401 builds retain internal staging and do not advertise this external store.
@@ -315,6 +317,7 @@ candidates are not release artifacts.
   - **LILYGO T-Echo** -> `LGTE_DFU`
   - **LILYGO T-Echo Lite** -> `LTEL_DFU`
   - **Minewsemi MX25LE01** -> `MX25_DFU`
+  - **Nordic PCA10056** -> `N056_DFU`
   - **ProMicro NRF52840** -> `PROM_DFU`
   - **RAK 3401** -> `3401_DFU`
   - **RAK 4631** -> `4631_DFU`
@@ -340,6 +343,7 @@ candidates are not release artifacts.
 - LilyGo T-Echo
 - LilyGo T-Echo Lite
 - Minewsemi MX25LE01
+- Nordic PCA10056 (nRF52840 DK)
 - Nologo ProMicro NRF52840 (aka SuperMini NRF52840)
 - RAK 3401
 - RAK 4631 ([See note](#notes-on-RAK4631-bootloader))
