@@ -182,7 +182,7 @@ candidates are not release artifacts.
 
   This shared-slot LoRa path is separate from legacy/manual bootloader UF2 reception, whose Nordic-defined fixed staging address remains `0xE0000`. On an internal-update build, manual UF2 now refuses before its first staging erase when a valid application's hash-bound `EndF` extends into that fixed range. Recovery with no valid application remains available. Thus the LoRa feature does not falsely make legacy UF2 staging application-preserving for larger applications.
 
-  Internal bootloader updates are enabled only for nRF52840 targets whose Make and CMake definitions prove the fixed layout and do not enable SD or QSPI storage: GAT562, Heltec Mesh Pocket, MeshTower V2, T096, T1, T114, Keepteen LT1, MinewSemi MX25LE01, ProMicro nRF52840, T1000-E, ThinkNode M3, RAK3401, ordinary RAK4631, and WisMesh Tag. `tools/check_internal_bootloader_targets.py` validates the inventory, canonical identities, and derived-target collision freedom. The non-watch GAT562 carriers covered by the `gat562` target do not populate a QSPI NOR device; the 30S Kit's QSPI-capable pins are used as GPIO. GAT562 Mesh Watch 13 is excluded because it has a populated W25Q16JV. Boards with populated onboard flash are deliberately not switched to internal staging: Mesh Solar (MX25R1635F), Nano G2 Ultra (W25Q16JV), T-Impulse+ (MX25R6435F), ThinkNode M8 (MX25R1635F), T-Echo Lite/Card (ZD25WQ32CEIGR; some Lite revisions use MX25R1635F), and MeshTracker X1 (GD25Q64C/WM1110). Use the QSPI path where an exact OTAFIX target is available; otherwise these boards remain excluded from application-preserving bootloader updates until one is provided and verified.
+  Internal bootloader updates are enabled only for nRF52840 targets whose Make and CMake definitions prove the fixed layout and do not enable SD or QSPI storage: GAT562, Heltec Mesh Pocket, MeshTower V2, T096, T1, T114, Keepteen LT1, MinewSemi MX25LE01, ProMicro nRF52840, T1000-E, ThinkNode M3, RAK3401, ordinary RAK4631, and WisMesh Tag. `tools/check_internal_bootloader_targets.py` validates the inventory, canonical identities, and derived-target collision freedom. The non-watch GAT562 carriers covered by the `gat562` target do not populate a QSPI NOR device; the 30S Kit's QSPI-capable pins are used as GPIO. GAT562 Mesh Watch 13 is excluded because it has a populated W25Q16JV. Other boards with populated onboard flash remain excluded from internal staging: Mesh Solar (MX25R1635F), Nano G2 Ultra (W25Q16JV), T-Impulse+ (MX25R6435F), ThinkNode M8 (MX25R1635F), T-Echo Card (ZD25WQ32CEIGR), and MeshTracker X1 (GD25Q64C/WM1110). Use the QSPI path where an exact OTAFIX target is available; otherwise these boards remain excluded from application-preserving bootloader updates until one is provided and verified.
 
 - **MeshTower V2 microSD bootloader self-update**
   The exact `heltec_mesh_tower_v2_sdcard` target can accept signed format-3 bootloader packages from the contiguous raw-sector SD run named by the retained-RAM authorization above. Its identity is board ID `0x239A0071`, device name `TOWER_V2_OTA`, hardware ID `NRF_BL_239A0071_TOWER_V2_OTA`, and package target `0x1150F50E`. The installed and candidate `MOTABLDR` capability profile is exactly `0x09` (`SD|BOOT_UPDATE`), and bootloader apply uses the distinct `GPREGRET2=0x53` source marker. The LoRa packet type remains `0x0C`.
@@ -247,7 +247,9 @@ candidates are not release artifacts.
   The `heltec_mesh_tower_v2_sdcard` target reads the authenticated contiguous sector run named by retained RAM from the onboard microSD socket and applies either a full MeshCore `.mota` image or an in-place delta. The card holds the download, while application writes remain bounded below InternalFS at `0xED000`. Build it with `make BOARD=heltec_mesh_tower_v2_sdcard`; it must be paired with MeshCore's SD-card firmware target.
 
 - **Raw-QSPI MeshCore repeater self-updates**
-  Exact-board targets for XIAO nRF52840 BLE/Sense, original LilyGo T-Echo, ThinkNode M1/M6, Wio Tracker L1, SenseCAP Solar Node P1, and qualified RAK external-flash configurations can read a verified raw `.mota` from external flash and apply either a full image or an in-place delta. They must be paired with the matching MeshCore QSPI repeater build; a board merely exposing QSPI-named GPIO is not supported.
+  Exact-board targets for XIAO nRF52840 BLE/Sense, original LilyGo T-Echo, LilyGo T-Echo Lite, Nordic PCA10056, ThinkNode M1/M6, Wio Tracker L1, SenseCAP Solar Node P1, and qualified RAK external-flash configurations can read a verified raw `.mota` from external flash and apply either a full image or an in-place delta. They must be paired with a matching application build that writes the authenticated raw-QSPI handoff; a board merely exposing QSPI-named GPIO is not supported.
+
+  The `lilygo_techo_lite` target uses the current T-Echo Lite QSPI routing (SCK P0.04, CS P0.12, IO0 P0.06, IO1 P0.08, IO2 P1.09, and IO3 P0.26) and switches its active-high RT9080 rail on P0.30 around flash access. Its 4 MiB production parts use more than one JEDEC memory-type value, so the bootloader validates the reported capacity instead of requiring one exact signature.
 
   The RAK15001 Slot C target remains `wiscore_rak4631_board_rak15001_slot_c`. It uses 8 MHz standard SPI over the nRF52840 QSPI peripheral, requires the exact `C8:40:15` GD25Q16 JEDEC ID, and leaves QSPI IO2/IO3 disconnected. WP# and HOLD# use the module's onboard pull-ups, so the bootloader does not drive WB_IO4. The Slot C deployment contract avoids the RAK12501 GNSS module's RESET/1PPS lines whether GNSS occupies its supported Slot A or D. Do not combine it with Ethernet, SD, or another WisBlock SPI module because the sensor slots share SPI and chip-select.
 
@@ -311,6 +313,7 @@ candidates are not release artifacts.
   - **Heltec MeshTower V2 / V2H** -> `TOWER_V2_OTA`
   - **Keepteen LT1** -> `KeepteenLT1_OTA`
   - **LILYGO T-Echo** -> `LGTE_DFU`
+  - **LILYGO T-Echo Lite** -> `LTEL_DFU`
   - **Minewsemi MX25LE01** -> `MX25_DFU`
   - **ProMicro NRF52840** -> `PROM_DFU`
   - **RAK 3401** -> `3401_DFU`
@@ -334,7 +337,8 @@ candidates are not release artifacts.
 - Heltec Automation Mesh Pocket
 - Heltec Automation MeshTower V2 / V2H
 - Keepteen LT1
-- LilyGO T-Echo
+- LilyGo T-Echo
+- LilyGo T-Echo Lite
 - Minewsemi MX25LE01
 - Nologo ProMicro NRF52840 (aka SuperMini NRF52840)
 - RAK 3401

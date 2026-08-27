@@ -17,6 +17,7 @@
 | heltec_t114 | HT-n5262 | 0x239A:0x0071 | https://heltec.org/project/mesh-node-t114/ |
 | keepteen_lt1 | Keepteen LT1 | 0x239A:0x00B3 | https://www.keepteen.com/ |
 | lilygo_techo | LilyGo T-Echo | 0x239A:0x0029 | https://lilygo.cc/products/t-echo-lilygo |
+| lilygo_techo_lite | LilyGo T-Echo Lite | 0x239A:0x00DA | https://lilygo.cc/products/t-echo-lite |
 | minewsemi_mx25le01 | MinewSemi MX25LE01 | 0x239A:0x0029 | https://www.minewsemi.com |
 | promicro_nrf52840 | ProMicro NRF52840 | 0x239A:0x00B3 | https://www.nologo.tech/product/otherboard/NRF52840.html |
 | sensecap_solar_p1 | Seeed Solar Node P1 | 0x2886:0x0044 | https://www.seeedstudio.com/ |
