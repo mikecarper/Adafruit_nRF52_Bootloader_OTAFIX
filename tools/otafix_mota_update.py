@@ -30,6 +30,15 @@ OFFICIAL_PUBLIC_KEY = (
     "272564CC588D3D122285A15E6E2566D2ABE7177BB7EA1D1E41B23B29F0F85D2D"
 )
 BUNDLE_RE = re.compile(r"^OTAFIX-(.+)-bootloader-mota\.zip$")
+SEEDER_READY_RE = re.compile(r"(?mi)^\s*\[dev\]\s+COUNT\s*->\s*\d+\b")
+SEEDER_ATTACH_ERROR_RE = re.compile(
+    r"(?mi)^\s*\[dev\].*\b(?:ERR|ERROR)\b|"
+    r"folder\s+(?:is\s+)?already\s+(?:owned|attached)|"
+    r"could not (?:attach|enter).*folder"
+)
+COMPANION_TERMINAL_RESET = (
+    b"+++MESHCORE-TERM-STOP\r\n+++MESHCORE-TERM-START\r\n"
+)
 VERSION_RE = re.compile(
     r"OTAFIX(?P<major>[0-9]+)\.(?P<minor>[0-9]+)\.(?P<patch>[0-9]+)"
     r"(?:-preview\.(?P<preview>[0-9]+))?"
@@ -460,7 +469,7 @@ def serial_text_command(port: str, command: str, companion: bool) -> str:
         import serial
     except ImportError as exc:
         raise UpdateError("pyserial is required to control the LoRa source") from exc
-    start = b"+++MESHCORE-TERM-START\r\n" if companion else b""
+    start = COMPANION_TERMINAL_RESET if companion else b""
     stop = b"+++MESHCORE-TERM-STOP\r\n" if companion else b""
     with serial.Serial(port, 115200, timeout=0.2, write_timeout=2) as stream:
         stream.reset_input_buffer()
@@ -482,6 +491,42 @@ def serial_text_command(port: str, command: str, companion: bool) -> str:
             stream.write(stop)
             stream.flush()
     return clean_output(output.decode("utf-8", "replace"))
+
+
+def seeder_log_tail(log_path: Path, log_stream: Any | None = None) -> str:
+    if log_stream is not None and not log_stream.closed:
+        log_stream.flush()
+    try:
+        detail = log_path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return f"could not read seeder log: {exc}"
+    return detail[-4096:].strip() or "no seeder log output"
+
+
+def wait_for_seeder_attachment(
+    process: subprocess.Popen[str],
+    log_path: Path,
+    log_stream: Any | None = None,
+    timeout: float = 10.0,
+) -> None:
+    deadline = time.monotonic() + timeout
+    while True:
+        detail = seeder_log_tail(log_path, log_stream)
+        if SEEDER_READY_RE.search(detail):
+            return
+        if SEEDER_ATTACH_ERROR_RE.search(detail):
+            raise UpdateError(f"motatool could not attach to the source: {detail}")
+        return_code = process.poll()
+        if return_code is not None:
+            raise UpdateError(
+                f"motatool seeder exited with status {return_code}: {detail}"
+            )
+        if time.monotonic() >= deadline:
+            raise UpdateError(
+                "motatool did not receive the source COUNT response before "
+                f"the attachment timeout: {detail}"
+            )
+        time.sleep(0.1)
 
 
 def detect_source_mode(meshcli: str, port: str) -> str:
@@ -632,11 +677,9 @@ def install_update(args: argparse.Namespace, meshcli: str, motatool: str,
                 stderr=subprocess.STDOUT,
                 text=True,
             )
-            time.sleep(2)
-            if serve_process.poll() is not None:
-                raise UpdateError(f"motatool seeder exited; see {log_path}")
+            wait_for_seeder_attachment(serve_process, log_path, log_stream)
 
-            print(f"Seeder running; log: {log_path}")
+            print(f"Seeder running (device COUNT confirmed); log: {log_path}")
             seen = False
             for _ in range(12):
                 listing = mesh_command(meshcli, target_port, "ota ls")

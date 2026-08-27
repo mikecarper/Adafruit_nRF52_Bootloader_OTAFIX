@@ -59,6 +59,13 @@ LoRa source, RF hop count, and bandwidth. It keeps frequency `909.950 MHz` and
 SF5 unless they are overridden. A non-interactive version check is also
 available:
 
+For a Companion source, the updater resets the shared USB stream through
+Binary mode before entering the text terminal, so it works with both older
+Binary-first firmware and current ASCII-first Full Companion firmware. It does
+not report the seeder as running until the source answers the initial `COUNT`
+request. An attachment error or a source owned by another transport fails
+before catalog discovery begins.
+
 ```bash
 python3 tools/otafix_mota_update.py \
   --target-serial /dev/serial/by-id/TARGET \

@@ -99,6 +99,7 @@ jobs:
         run: |
           make -C test check
           make -C test sanitize
+          python3 tools/test_otafix_mota_update.py
 
       - name: Build signed and dual-bank display variants
         shell: bash
