@@ -247,6 +247,14 @@ Download the UF2 file for your board (they can be found in the releases with fil
 
 See the [OTAFIX releases](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases) and use a release whose notes explicitly list your exact board and required internal, SD, or QSPI apply mode.
 
+Self-update-capable MeshCore targets can use the signed full bootloader `.mota`
+bundle attached to current releases. Trust the official public key once, then
+run the menu-driven `tools/otafix_mota_update.py` release checker/updater or use
+MeshCore's explicit bootloader installation commands. See
+[mOTA signing and custom keys](docs/mota_signing.md) for the official key,
+menu and radio options, estimated transfer times, exact-board safety rules, and
+instructions for signing a custom OTAFIX variant.
+
 When migrating a RAK4631 from the ordinary `wiscore_rak4631_board` bootloader to
 `wiscore_rak4631_board_rak15001_slot_c`, do **not** use the canonical slot-C
 bootloader-update UF2 for the first migration. A current board-bound ordinary RAK4631

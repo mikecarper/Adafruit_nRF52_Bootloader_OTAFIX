@@ -127,9 +127,68 @@ jobs:
             cmake --build "cmake-build-dualbank-$board"
           done
 
+  bootloader-mota:
+    if: ${{ github.event_name == 'release' }}
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Checkout pinned motatool
+        uses: actions/checkout@v7
+        with:
+          repository: mikecarper/motatool
+          ref: 11f67eef8f1dffba9cbb7d102777cc7134be3821
+          path: _motatool
+
+      - name: Download bootloader artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: _release
+          merge-multiple: true
+
+      - name: Build motatool
+        run: cargo build --release --locked --manifest-path _motatool/Cargo.toml
+
+      - name: Build signed bootloader mOTA bundle
+        shell: bash
+        env:
+          OTAFIX_MOTA_SIGNING_KEY: ${{ secrets.OTAFIX_MOTA_SIGNING_KEY }}
+        run: |
+          if [[ -z "$OTAFIX_MOTA_SIGNING_KEY" ]]; then
+            echo "OTAFIX_MOTA_SIGNING_KEY repository secret is required" >&2
+            exit 1
+          fi
+          key_file="$RUNNER_TEMP/otafix-mota-signing.key"
+          install -m 600 /dev/null "$key_file"
+          printf '%s\n' "$OTAFIX_MOTA_SIGNING_KEY" > "$key_file"
+          unset OTAFIX_MOTA_SIGNING_KEY
+          python3 tools/build_bootloader_mota_release.py \
+            --artifacts-dir _release \
+            --output-dir _mota-release \
+            --motatool _motatool/target/release/motatool \
+            --sign-key "$key_file" \
+            --public-key tools/otafix_mota_release.pub \
+            --tag "$GITHUB_REF_NAME"
+          install -m 755 tools/otafix_mota_update.py \
+            _mota-release/otafix_mota_update.py
+          sha256sum _mota-release/otafix_mota_update.py > \
+            _mota-release/otafix_mota_update.py.sha256
+
+      - name: Upload bootloader mOTA release bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: bootloader-mota-release
+          path: |
+            _mota-release/*.zip
+            _mota-release/*.txt
+            _mota-release/*.sha256
+            _mota-release/*.py
+
   release:
     if: ${{ github.event_name == 'release' }}
-    needs: [build, feature-builds]
+    needs: [build, feature-builds, bootloader-mota]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -147,3 +206,6 @@ jobs:
             _release/*.zip
             _release/*.hex
             _release/*.uf2
+            _release/*.txt
+            _release/*.sha256
+            _release/*.py
