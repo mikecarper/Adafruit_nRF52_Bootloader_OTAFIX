@@ -9,6 +9,7 @@
 
 | Board | Name | VID PID | URL |
 | --- | --- | --- | --- |
+| gat562 | MTools Tec GAT562 | 0x239A:0x0029 | https://github.com/gat-iot/GAT562-family |
 | heltec_mesh_pocket | Heltec Mesh Pocket | 0x239A:0x0071 | https://heltec.org/project/mesh-pocket/ |
 | heltec_mesh_tower_v2 | Heltec MeshTower V2 | 0x239A:0x0071 | https://heltec.org/project/meshtower/ |
 | heltec_t096 | HT-n5262G | 0x239A:0x0071 | https://heltec.org/project/t096/ |
@@ -41,6 +42,7 @@ from both build systems and fails on an unsafe target, noncanonical name, or col
 
 | Board target | Manifest board ID | Exact DEVICE_NAME | Derived `.mota` target |
 | --- | --- | --- | --- |
+| gat562 | 0x239A0029 | GAT562_DFU | 0xD50D2D44 |
 | heltec_mesh_pocket | 0x239A0071 | MESH_POCKET_OTA | 0x059277F4 |
 | heltec_mesh_tower_v2 | 0x239A0071 | TOWER_V2_OTA | 0x1150F50E |
 | heltec_t096 | 0x239A0071 | T096_DFU | 0x42354C85 |
