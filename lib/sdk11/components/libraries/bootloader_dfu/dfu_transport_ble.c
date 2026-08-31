@@ -117,6 +117,7 @@ static dfu_ble_peer_data_t  m_ble_peer_data;                                    
 static bool                 m_ble_peer_data_valid    = false;                                        /**< True if BLE Peer data has been exchanged from application. */
 static uint32_t             m_direct_adv_cnt         = APP_DIRECTED_ADV_TIMEOUT;                     /**< Counter of direct advertisements. */
 static uint8_t            * mp_final_packet;                                                         /**< Pointer to final data packet received. When callback for succesful packet handling is received from dfu bank handling a transfer complete response can be sent to peer. */
+static bool                 m_ble_data_policy_active = false;                                        /**< True only while firmware DATA packets are expected. */
 
 
 static ble_gap_addr_t      const * m_whitelist[1];                                                  /**< List of peers in whitelist (only one) */
@@ -227,33 +228,73 @@ static ble_dfu_resp_val_t nrf_err_code_translate(uint32_t                  err_c
 }
 
 #ifdef SPEEDUP_FLASH_WRITES
-static void prioritize_ble_over_flash_writes(void) {
-  // We set the local latency to 0: That will revert latency to the negotiated one with the host.
-  //  That will increase throughput to the maximum possible
+static void set_local_connection_latency(uint16_t requested_latency)
+{
+  if (!IS_CONNECTED()) return;
+
   ble_opt_t opt;
   varclr(&opt);
   opt.gap_opt.local_conn_latency.conn_handle       = m_conn_handle; /**< Connection Handle */
-  opt.gap_opt.local_conn_latency.requested_latency = 0;             /**< Requested local connection latency. */
+  opt.gap_opt.local_conn_latency.requested_latency = requested_latency;
   opt.gap_opt.local_conn_latency.p_actual_latency =
     NULL; /**< Pointer to storage for the actual local connection latency (can be set to NULL to skip return value). */
-  sd_ble_opt_set(BLE_GAP_OPT_LOCAL_CONN_LATENCY, &opt);
+  (void) sd_ble_opt_set(BLE_GAP_OPT_LOCAL_CONN_LATENCY, &opt);
 }
 
-static void prioritize_flash_writes_over_ble(void) {
+static void set_slave_latency_disabled(bool disabled)
+{
+  if (!IS_CONNECTED()) return;
+
+  ble_opt_t opt;
+  varclr(&opt);
+  opt.gap_opt.slave_latency_disable.conn_handle = m_conn_handle;
+  opt.gap_opt.slave_latency_disable.disable     = disabled ? 1 : 0;
+  (void) sd_ble_opt_set(BLE_GAP_OPT_SLAVE_LATENCY_DISABLE, &opt);
+}
+
+static void prioritize_ble_over_flash_writes(void)
+{
+  // Local latency 0 only removes the extra events skipped by this bootloader;
+  // it does not override slave latency negotiated by the peer. A bonded
+  // buttonless handoff can inherit non-zero slave latency from the central, so
+  // disable that latency only while firmware DATA is active. Both options are
+  // local and best-effort; an older/unsupported stack keeps the usable link.
+  set_local_connection_latency(0);
+  set_slave_latency_disabled(true);
+  m_ble_data_policy_active = true;
+}
+
+static void restore_ble_connection_policy(void)
+{
+  set_local_connection_latency(0);
+  set_slave_latency_disabled(false);
+  m_ble_data_policy_active = false;
+}
+
+static void prioritize_flash_writes_over_ble(void)
+{
   // We set the local latency to the maximum possible: That will make FLASH writes faster, as BLE comms will
   //  be delayed (even losing RXd packets, but this is the same as a poor connection and will be handled by
   //  the protocol itself)
-  ble_opt_t opt;
-  varclr(&opt);
-  opt.gap_opt.local_conn_latency.conn_handle       = m_conn_handle; /**< Connection Handle */
-  opt.gap_opt.local_conn_latency.requested_latency = 50;            /**< Requested local connection latency. */
-  opt.gap_opt.local_conn_latency.p_actual_latency =
-    NULL; /**< Pointer to storage for the actual local connection latency (can be set to NULL to skip return value). */
-  sd_ble_opt_set(BLE_GAP_OPT_LOCAL_CONN_LATENCY, &opt);
+  set_slave_latency_disabled(false);
+  m_ble_data_policy_active = false;
+  set_local_connection_latency(50);
 }
 #else
-  #define prioritize_ble_over_flash_writes()
-  #define prioritize_flash_writes_over_ble()
+static void prioritize_ble_over_flash_writes(void)
+{
+  m_ble_data_policy_active = true;
+}
+
+static void restore_ble_connection_policy(void)
+{
+  m_ble_data_policy_active = false;
+}
+
+static void prioritize_flash_writes_over_ble(void)
+{
+  m_ble_data_policy_active = false;
+}
 #endif
 /**@brief     Function for handling the callback events from the dfu module.
  *            Callbacks are expected when \ref dfu_data_pkt_handle has been executed.
@@ -273,7 +314,7 @@ static void dfu_cb_handler(uint32_t packet, uint32_t result, uint8_t * p_data)
             if (result != NRF_SUCCESS)
             {
                 // Restore latency to the negotiated one
-                prioritize_ble_over_flash_writes();
+                restore_ble_connection_policy();
 
                 // Disconnect from peer.
                 if (IS_CONNECTED())
@@ -292,7 +333,7 @@ static void dfu_cb_handler(uint32_t packet, uint32_t result, uint8_t * p_data)
                 if (mp_final_packet == p_data)
                 {
                     // Restore latency to the negotiated one
-                    prioritize_ble_over_flash_writes();
+                    restore_ble_connection_policy();
 
                     // Notify the DFU Controller about the success of the procedure.
                     err_code = ble_dfu_response_send(&m_dfu,
@@ -306,7 +347,7 @@ static void dfu_cb_handler(uint32_t packet, uint32_t result, uint8_t * p_data)
         case START_PACKET:
 
             // Restore latency to the negotiated one
-            prioritize_ble_over_flash_writes();
+            restore_ble_connection_policy();
 
             // Translate the err_code returned by the above function to DFU Response Value.
             resp_val = nrf_err_code_translate(result, BLE_DFU_START_PROCEDURE);
@@ -333,6 +374,8 @@ static void dfu_cb_handler(uint32_t packet, uint32_t result, uint8_t * p_data)
  */
 static void dfu_error_notify(ble_dfu_t * p_dfu, uint32_t err_code)
 {
+    restore_ble_connection_policy();
+
     // An error has occurred. Notify the DFU Controller about this error condition.
     // Translate the err_code returned to DFU Response Value.
     ble_dfu_resp_val_t resp_val;
@@ -391,8 +434,8 @@ static void start_data_process(ble_dfu_t * p_dfu, ble_dfu_evt_t * p_evt)
         err_code = dfu_start_pkt_handle(&update_packet);
         if (err_code != NRF_SUCCESS)
         {
-            // Prioritize BLE over flash writes
-            prioritize_ble_over_flash_writes();
+            // Leave the upfront erase phase on failure.
+            restore_ble_connection_policy();
 
             // Translate the err_code returned by the above function to DFU Response Value.
             ble_dfu_resp_val_t resp_val;
@@ -741,6 +784,7 @@ static void on_dfu_evt(ble_dfu_t * p_dfu, ble_dfu_evt_t * p_evt)
     switch (p_evt->ble_dfu_evt_type)
     {
         case BLE_DFU_VALIDATE:
+            restore_ble_connection_policy();
             err_code = dfu_image_validate();
 
             // Translate the err_code returned by the above function to DFU Response Value.
@@ -751,6 +795,7 @@ static void on_dfu_evt(ble_dfu_t * p_dfu, ble_dfu_evt_t * p_evt)
             break;
 
         case BLE_DFU_ACTIVATE_N_RESET:
+            restore_ble_connection_policy();
             err_code = dfu_transport_ble_close();
             APP_ERROR_CHECK(err_code);
 
@@ -764,6 +809,7 @@ static void on_dfu_evt(ble_dfu_t * p_dfu, ble_dfu_evt_t * p_evt)
             break;
 
         case BLE_DFU_SYS_RESET:
+            restore_ble_connection_policy();
             err_code = dfu_transport_ble_close();
             APP_ERROR_CHECK(err_code);
 
@@ -771,11 +817,13 @@ static void on_dfu_evt(ble_dfu_t * p_dfu, ble_dfu_evt_t * p_evt)
             break;
 
         case BLE_DFU_START:
+            restore_ble_connection_policy();
             m_pkt_type    = PKT_TYPE_START;
             m_update_mode = (uint8_t)p_evt->evt.ble_dfu_pkt_write.p_data[0];
             break;
 
         case BLE_DFU_RECEIVE_INIT_DATA:
+            restore_ble_connection_policy();
             m_pkt_type = PKT_TYPE_INIT;
             if ((uint8_t)p_evt->evt.ble_dfu_pkt_write.p_data[0] == DFU_INIT_COMPLETE)
             {
@@ -791,6 +839,7 @@ static void on_dfu_evt(ble_dfu_t * p_dfu, ble_dfu_evt_t * p_evt)
 
         case BLE_DFU_RECEIVE_APP_DATA:
             m_pkt_type = PKT_TYPE_FIRMWARE_DATA;
+            prioritize_ble_over_flash_writes();
             break;
 
         case BLE_DFU_PACKET_WRITE:
@@ -963,6 +1012,9 @@ static void on_ble_evt(ble_evt_t * p_ble_evt)
             {
                 m_conn_handle    = p_ble_evt->evt.gap_evt.conn_handle;
                 m_is_advertising = false;
+                // A reconnect must receive an explicit DATA control-point
+                // event before the low-latency policy is enabled again.
+                m_ble_data_policy_active = false;
 
                 // Data length negotiation is optional; peers may reject it while the
                 // connection remains usable for DFU.
@@ -984,6 +1036,10 @@ static void on_ble_evt(ble_evt_t * p_ble_evt)
                 APP_ERROR_CHECK(err_code);
 
             }
+            // The connection-scoped SoftDevice options are gone with the link.
+            // Clear local phase state without issuing an option call on the
+            // stale handle.
+            m_ble_data_policy_active = false;
             if (!m_tear_down_in_progress)
             {
                 // The Disconnected event is because of an external event. (Link loss or
@@ -998,6 +1054,14 @@ static void on_ble_evt(ble_evt_t * p_ble_evt)
             break;
 
         case BLE_GAP_EVT_CONN_PARAM_UPDATE:
+            // A connection-parameter update resets the SoftDevice's local
+            // connection-latency option.  Reapply the DATA-phase policy only
+            // after RECEIVE_APP_DATA; doing this during START would undo the
+            // intentional flash-priority latency used for the upfront erase.
+            if (m_ble_data_policy_active)
+            {
+                prioritize_ble_over_flash_writes();
+            }
             break;
 
         case BLE_GAP_EVT_SEC_PARAMS_REQUEST:
@@ -1259,6 +1323,7 @@ uint32_t dfu_transport_ble_update_start(void)
 
     m_tear_down_in_progress = false;
     m_pkt_type              = PKT_TYPE_INVALID;
+    m_ble_data_policy_active = false;
 
     dfu_register_callback(dfu_cb_handler);
 
@@ -1300,6 +1365,7 @@ uint32_t dfu_transport_ble_close()
 {
     uint32_t err_code;
 
+    restore_ble_connection_policy();
     m_tear_down_in_progress = true;
 
     if (IS_CONNECTED())

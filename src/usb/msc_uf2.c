@@ -26,6 +26,7 @@
 #include "uf2/uf2.h"
 #include "uf2/uf2_transfer_state.h"
 #include "flash_nrf5x.h"
+#include "app_timer.h"
 
 #if CFG_TUD_MSC
 
@@ -40,9 +41,98 @@
  *------------------------------------------------------------------*/
 static WriteState _wr_state = { 0 };
 static bool _first_write = true;
+static bool _app_completion_pending = false;
+static bool _app_completion_after_eject = false;
+static bool _app_msc_command_active = false;
+static uint32_t _app_completion_last_activity = 0;
+
+#define UF2_APP_COMPLETION_IDLE_MS 1000u
+#define UF2_APP_COMPLETION_IDLE_TICKS APP_TIMER_TICKS(UF2_APP_COMPLETION_IDLE_MS)
+
+APP_TIMER_DEF(_app_completion_timer);
 
 void read_block(uint32_t block_no, uint8_t *data);
 int  write_block(uint32_t block_no, uint8_t *data, WriteState *state);
+
+static void complete_app_update(void)
+{
+  dfu_update_status_t update_status;
+  memset(&update_status, 0, sizeof(dfu_update_status_t));
+  update_status.status_code = DFU_UPDATE_APP_COMPLETE;
+
+  PRINTF("Application update complete\r\n");
+  bootloader_dfu_update_process(update_status);
+  led_state(STATE_WRITING_FINISHED);
+}
+
+static bool take_pending_app_completion(void)
+{
+  bool const can_complete = _app_completion_pending && !_wr_state.aborted;
+
+  _app_completion_pending = false;
+  _app_completion_after_eject = false;
+  return can_complete;
+}
+
+static void app_completion_timer_handler(void *context)
+{
+  (void) context;
+
+  if (!_app_completion_pending)
+  {
+    return;
+  }
+
+  uint32_t const now = app_timer_cnt_get();
+  if (_app_msc_command_active)
+  {
+    // The MSC lifecycle begins at acceptance of every valid CBW and ends only
+    // after its CSW reaches the host. This covers delayed WRITE10 data, READ10,
+    // built-in commands, and application-provided SCSI commands uniformly.
+    // Never let the idle fallback reset in the middle of any of them.
+    _app_completion_last_activity = now;
+    APP_ERROR_CHECK(app_timer_start(_app_completion_timer,
+                                    UF2_APP_COMPLETION_IDLE_TICKS,
+                                    NULL));
+    return;
+  }
+
+  uint32_t const idle_ticks =
+    app_timer_cnt_diff_compute(now, _app_completion_last_activity);
+  if (idle_ticks + APP_TIMER_MIN_TIMEOUT_TICKS < UF2_APP_COMPLETION_IDLE_TICKS)
+  {
+    APP_ERROR_CHECK(app_timer_start(_app_completion_timer,
+                                    UF2_APP_COMPLETION_IDLE_TICKS - idle_ticks,
+                                    NULL));
+    return;
+  }
+
+  if (take_pending_app_completion())
+  {
+    complete_app_update();
+  }
+}
+
+static void defer_app_completion(void)
+{
+  _app_completion_last_activity = app_timer_cnt_get();
+  if (_app_completion_pending)
+  {
+    return;
+  }
+
+  _app_completion_pending = true;
+  APP_ERROR_CHECK(app_timer_start(_app_completion_timer,
+                                  UF2_APP_COMPLETION_IDLE_TICKS,
+                                  NULL));
+}
+
+void uf2_write_session_init(void)
+{
+  APP_ERROR_CHECK(app_timer_create(&_app_completion_timer, APP_TIMER_MODE_SINGLE_SHOT,
+                                   app_completion_timer_handler));
+  uf2_write_session_reset();
+}
 
 void uf2_write_session_reset(void)
 {
@@ -54,6 +144,60 @@ void uf2_write_session_reset(void)
   }
   uf2_transfer_reset(&_wr_state, sizeof(_wr_state));
   _first_write = true;
+  _app_completion_pending = false;
+  _app_completion_after_eject = false;
+  _app_msc_command_active = false;
+}
+
+void uf2_write_session_close(void)
+{
+  if (take_pending_app_completion())
+  {
+    complete_app_update();
+  }
+  uf2_write_session_reset();
+}
+
+// TinyUSB invokes these around every valid MSC command, including READ10,
+// WRITE10, built-in commands, and application-provided SCSI commands. Tracking
+// the complete CBW-to-CSW lifetime closes the idle-timer race left by tracking
+// only individual data callbacks.
+void tud_msc_command_begin_cb(uint8_t lun, uint8_t const scsi_cmd[16])
+{
+  (void) lun;
+  (void) scsi_cmd;
+
+  _app_msc_command_active = true;
+  if (_app_completion_pending)
+  {
+    _app_completion_last_activity = app_timer_cnt_get();
+  }
+}
+
+void tud_msc_command_complete_cb(uint8_t lun, uint8_t const scsi_cmd[16])
+{
+  (void) lun;
+  (void) scsi_cmd;
+
+  _app_msc_command_active = false;
+  if (_app_completion_pending)
+  {
+    _app_completion_last_activity = app_timer_cnt_get();
+  }
+}
+
+void tud_msc_reset_cb(void)
+{
+  // BOT/bus reset abandons an in-flight command without a CSW. It is not
+  // permission to bless an image or honor a half-completed eject, but it must
+  // release the lifecycle guard so a completed image can reach a fresh idle
+  // boundary while the cable remains connected.
+  _app_msc_command_active = false;
+  _app_completion_after_eject = false;
+  if (_app_completion_pending)
+  {
+    _app_completion_last_activity = app_timer_cnt_get();
+  }
 }
 
 //--------------------------------------------------------------------+
@@ -98,6 +242,13 @@ int32_t tud_msc_scsi_cb (uint8_t lun, uint8_t const scsi_cmd[16], void* buffer, 
   {
     case SCSI_CMD_PREVENT_ALLOW_MEDIUM_REMOVAL:
       // Host is about to read/write etc ... better not to disconnect disk
+      resplen = 0;
+    break;
+
+    case 0x35: // SCSI SYNCHRONIZE CACHE (10)
+      // A Linux filesystem sync can issue this while other virtual-FAT bios
+      // remain queued. It is activity, not permission to disconnect. Start a
+      // fresh idle interval only after TinyUSB has returned this command's CSW.
       resplen = 0;
     break;
 
@@ -198,6 +349,9 @@ void tud_msc_write10_complete_cb(uint8_t lun)
     // aborted and reset
     PRINTF("Aborted\r\n");
 
+    _app_completion_pending = false;
+    _app_completion_after_eject = false;
+
     dfu_update_status_t update_status;
     memset(&update_status, 0, sizeof(dfu_update_status_t ));
     update_status.status_code = DFU_RESET;
@@ -252,16 +406,39 @@ void tud_msc_write10_complete_cb(uint8_t lun)
         PRINTF("bootloader update complete\r\n");
       }else
       {
-        // update App
-        update_status.status_code = DFU_UPDATE_APP_COMPLETE;
-
-        PRINTF("Application update complete\r\n");
+        // The final WRITE10 status has reached the host, but Linux can still
+        // issue FAT metadata writes or SYNCHRONIZE CACHE from cp/sync. Keep the
+        // completed image invalid for a short idle window, or until an explicit
+        // eject status has itself completed, so reset cannot turn sync into
+        // EIO. Bootloader-family UF2 retains its immediate COPY_BL path.
+        defer_app_completion();
+        return;
       }
 
       bootloader_dfu_update_process(update_status);
 
       led_state(STATE_WRITING_FINISHED);
     }
+  }
+}
+
+// Invoked after TinyUSB has sent and the host has accepted a non-READ/WRITE
+// SCSI status. A cache sync merely restarts the idle interval; an explicit
+// media eject is permission to complete immediately after its status.
+void tud_msc_scsi_complete_cb(uint8_t lun, uint8_t const scsi_cmd[16])
+{
+  (void) lun;
+
+  if (scsi_cmd[0] == 0x35)
+  {
+    return;
+  }
+
+  if (_app_completion_after_eject &&
+      scsi_cmd[0] == SCSI_CMD_START_STOP_UNIT &&
+      take_pending_app_completion())
+  {
+    complete_app_update();
   }
 }
 
@@ -291,7 +468,16 @@ bool tud_msc_start_stop_cb(uint8_t lun, uint8_t power_condition, bool start, boo
     }else
     {
       // unload disk storage
-      uf2_write_session_reset();
+      if (_app_completion_pending)
+      {
+        // tud_msc_scsi_complete_cb() will run after the eject status reaches
+        // the host, then complete the application update exactly once.
+        _app_completion_after_eject = true;
+      }
+      else
+      {
+        uf2_write_session_reset();
+      }
     }
   }
 

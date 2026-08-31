@@ -100,6 +100,7 @@ void usb_init(bool cdc_only) {
   usb_desc_init(cdc_only);
 #if CFG_TUD_MSC
   uf2_init();
+  uf2_write_session_init();
 #endif
   tusb_init();
 
@@ -137,7 +138,9 @@ void tud_mount_cb(void) {
 
 void tud_umount_cb(void) {
 #if CFG_TUD_MSC
-  uf2_write_session_reset();
+  // A fully received application is safe to commit when the host physically
+  // disconnects. Incomplete or malformed sessions are still discarded.
+  uf2_write_session_close();
 #endif
   led_state(STATE_USB_UNMOUNTED);
 }

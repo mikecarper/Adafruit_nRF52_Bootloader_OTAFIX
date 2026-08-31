@@ -1,4 +1,7 @@
 Makefile whitespace=cr-at-eol
 lib/sdk11/components/drivers_nrf/pstorage/pstorage_raw.c whitespace=cr-at-eol
+lib/sdk11/components/libraries/bootloader_dfu/dfu_single_bank.c whitespace=cr-at-eol
+lib/sdk11/components/libraries/bootloader_dfu/bootloader.c whitespace=cr-at-eol
 linker/*.ld whitespace=cr-at-eol
 src/dfu_ble_svc.c whitespace=cr-at-eol
+src/usb/tusb_config.h whitespace=cr-at-eol

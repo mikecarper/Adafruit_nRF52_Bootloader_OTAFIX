@@ -134,7 +134,9 @@ static uint32_t dfu_timer_restart(void)
  * @details For lazy erase mode (OTA), this sets up the tracking array and erases
  *          only the first page to signal readiness. Subsequent pages are erased
  *          on-demand when stores target them.
- *          For non-OTA mode, all pages are erased upfront.
+ *          For non-OTA serial DFU, the complete page-rounded image region is
+ *          erased before the transport is told that preparation completed.
+ *          No erase is allowed to interrupt the ordered DATA stream.
  */
 static void dfu_prepare_func_app_erase(uint32_t image_size)
 {

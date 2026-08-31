@@ -508,8 +508,64 @@ LIBS += -lm -lc
 
 ASFLAGS += $(CFLAGS)
 
-C_OBJECTS = $(addprefix $(BUILD)/,$(C_SRC:.c=.o))
-ASM_OBJECTS = $(addprefix $(BUILD)/,$(ASM_SRC:.S=.o))
+# Keep intermediates version-scoped, then guard that tree with a content-hashed
+# build profile. GNU Make tracks source timestamps, but it does not notice that
+# a command-line feature, signing key, SoftDevice, or compiler/linker flag
+# changed. The profile stamp is rewritten only when one of those material
+# inputs changes, so an identical invocation keeps the cache while a different
+# invocation recompiles and relinks before replacing the same public artifact.
+OBJECT_BUILD = $(BUILD)/obj-$(subst /,_,$(OUT_NAME))
+PROFILE_STAMP = $(OBJECT_BUILD)/.build-profile.sha256
+
+define BUILD_PROFILE_TEXT
+format=1
+BOARD=$(BOARD)
+MCU_SUB_VARIANT=$(MCU_SUB_VARIANT)
+GIT_VERSION=$(GIT_VERSION)
+GIT_VERSION_BASE=$(GIT_VERSION_BASE)
+GIT_SUBMODULE_VERSIONS=$(GIT_SUBMODULE_VERSIONS)
+MOTA_BOOTLOADER_VERSION=$(MOTA_BOOTLOADER_VERSION)
+MOTA_BOOTLOADER_TEST_BUILD=$(MOTA_BOOTLOADER_TEST_BUILD)
+MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE=$(MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE)
+SD_NAME=$(SD_NAME)
+SD_VERSION=$(SD_VERSION)
+SD_FILENAME=$(SD_FILENAME)
+SD_HEX=$(SD_HEX)
+MOTA_SOFTDEVICE_FAMILY=$(MOTA_SOFTDEVICE_FAMILY)
+MOTA_SOFTDEVICE_FWID=$(MOTA_SOFTDEVICE_FWID)
+MOTA_APP_BASE=$(MOTA_APP_BASE)
+SIGNED_FW=$(SIGNED_FW)
+SIGNED_FW_QX=$(SIGNED_FW_QX)
+SIGNED_FW_QY=$(SIGNED_FW_QY)
+DUALBANK_FW=$(DUALBANK_FW)
+FORCE_UF2=$(FORCE_UF2)
+DEFAULT_TO_OTA_DFU=$(DEFAULT_TO_OTA_DFU)
+DEBUG=$(DEBUG)
+DFU_USB_ENUMERATION_TIMEOUT_MS=$(DFU_USB_ENUMERATION_TIMEOUT_MS)
+USE_NFCT=$(USE_NFCT)
+ANT_LICENSE_KEY=$(ANT_LICENSE_KEY)
+DFU_APP_DATA_RESERVED=$(DFU_APP_DATA_RESERVED)
+DFU_DEV_REV=$(DFU_DEV_REV)
+UF2_FAMILY_ID_BOOTLOADER=$(UF2_FAMILY_ID_BOOTLOADER)
+LD_FILE=$(LD_FILE)
+CROSS_COMPILE=$(CROSS_COMPILE)
+CC=$(CC)
+ARM_GCC_VERSION=$(ARM_GCC_VERSION)
+OBJCOPY=$(OBJCOPY)
+SIZE=$(SIZE)
+PYTHON=$(PYTHON)
+NRFUTIL=$(NRFUTIL)
+C_SRC=$(C_SRC)
+ASM_SRC=$(ASM_SRC)
+IPATH=$(IPATH)
+CFLAGS=$(CFLAGS)
+ASFLAGS=$(ASFLAGS)
+LDFLAGS=$(LDFLAGS)
+LIBS=$(LIBS)
+endef
+
+C_OBJECTS = $(addprefix $(OBJECT_BUILD)/,$(C_SRC:.c=.o))
+ASM_OBJECTS = $(addprefix $(OBJECT_BUILD)/,$(ASM_SRC:.S=.o))
 
 OBJECTS = $(C_OBJECTS) $(ASM_OBJECTS)
 DEP_FILES = $(OBJECTS:.o=.d)
@@ -523,10 +579,14 @@ INC_PATHS = $(addprefix -I,$(IPATH))
 #------------------------------------------------------------------------------
 
 .DEFAULT_GOAL := all
-.PHONY: all clean copy-artifact flash flash-dfu flash-sd flash-mbr dfu-flash sd mbr gdbflash gdb
+.PHONY: all build-profile clean copy-artifact flash flash-dfu flash-sd flash-mbr dfu-flash sd mbr gdbflash gdb FORCE
 
 # default target to build
 all: $(BUILD)/$(OUT_NAME).out $(BUILD)/$(OUT_NAME)_mbr.hex $(BUILD)/update-$(OUT_NAME)_mbr.uf2 $(BUILD)/$(MERGED_FILE).hex $(BUILD)/$(MERGED_FILE).zip
+
+# Materialize just the profile guard. This is useful to audit build-cache
+# behavior without invoking the cross compiler.
+build-profile: $(PROFILE_STAMP)
 
 # Print out the value of a make variable.
 # https://stackoverflow.com/questions/16467718/how-to-print-out-a-variable-in-makefile
@@ -539,6 +599,28 @@ print-%:
 $(BUILD):
 	@$(MKDIR) "$@"
 
+$(OBJECT_BUILD):
+	@$(MKDIR) "$@"
+
+FORCE:
+
+# Write the unhashed candidate directly through GNU Make so flag values do not
+# pass through shell evaluation. Store only its SHA-256, and preserve the
+# existing stamp's mtime when the profile is unchanged.
+$(PROFILE_STAMP): FORCE | $(OBJECT_BUILD)
+	$(file >$@.candidate,$(BUILD_PROFILE_TEXT))
+	@set -e; \
+	trap 'rm -f "$@.candidate" "$@.tmp"' 0 1 2 15; \
+	profile_hash="$$($(PYTHON) -c 'import hashlib, pathlib, sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$@.candidate")"; \
+	if test -r "$@" && test "$$(cat "$@")" = "$$profile_hash"; then \
+		:; \
+	else \
+		printf '%s\n' "$$profile_hash" > "$@.tmp"; \
+		mv -f "$@.tmp" "$@"; \
+	fi; \
+	rm -f "$@.candidate"; \
+	trap - 0 1 2 15
+
 clean:
 	@$(RM) $(BUILD)
 	@$(RM) $(BIN)
@@ -548,19 +630,19 @@ linkermap: $(BUILD)/$(OUT_NAME).out
 	@linkermap -v $<.map
 
 # Create objects from C SRC files
-$(BUILD)/%.o: %.c
+$(OBJECT_BUILD)/%.o: %.c $(PROFILE_STAMP)
 	@echo CC $(notdir $<)
 	@$(MKDIR) "$(dir $@)"
 	@$(CC) $(CFLAGS) $(INC_PATHS) -MMD -MP -MF $(@:.o=.d) -c -o $@ $<
 
 # Assemble files
-$(BUILD)/%.o: %.S
+$(OBJECT_BUILD)/%.o: %.S $(PROFILE_STAMP)
 	@echo AS $(notdir $<)
 	@$(MKDIR) "$(dir $@)"
 	@$(CC) -x assembler-with-cpp $(ASFLAGS) $(INC_PATHS) -MMD -MP -MF $(@:.o=.d) -c -o $@ $<
 
 # Link
-$(BUILD)/$(OUT_NAME).out: $(BUILD) $(OBJECTS) $(LD_FILE)
+$(BUILD)/$(OUT_NAME).out: $(BUILD) $(PROFILE_STAMP) $(OBJECTS) $(LD_FILE)
 	@echo LD $(notdir $@)
 	@$(CC) -o $@ $(LDFLAGS) $(OBJECTS) -Wl,--start-group $(LIBS) -Wl,--end-group
 	@$(SIZE) $@
@@ -578,7 +660,7 @@ endif
 
 # MBR + bootloader hex. The old `_nosd` name meant "no SoftDevice", but was
 # easily mistaken for "no SD card support"; `_mbr` names what is present.
-$(BUILD)/$(OUT_NAME)_mbr.hex: $(BUILD)/$(OUT_NAME).hex
+$(BUILD)/$(OUT_NAME)_mbr.hex: $(BUILD)/$(OUT_NAME).hex $(MBR_HEX) tools/hexmerge.py
 	@echo Create $(notdir $@)
 	@$(PYTHON) tools/hexmerge.py -o $@ $<:0: $(MBR_HEX):0:
 ifneq ($(MCU_SUB_VARIANT),nrf52)
@@ -586,17 +668,17 @@ ifneq ($(MCU_SUB_VARIANT),nrf52)
 endif
 
 # Bootloader self-update UF2 containing the MBR + bootloader.
-$(BUILD)/update-$(OUT_NAME)_mbr.uf2: $(BUILD)/$(OUT_NAME)_mbr.hex
+$(BUILD)/update-$(OUT_NAME)_mbr.uf2: $(BUILD)/$(OUT_NAME)_mbr.hex lib/uf2/utils/uf2conv.py
 	@echo Create $(notdir $@)
-	$(PYTHON) lib/uf2/utils/uf2conv.py -f $(UF2_FAMILY_ID_BOOTLOADER) -c -o $@ $^
+	$(PYTHON) lib/uf2/utils/uf2conv.py -f $(UF2_FAMILY_ID_BOOTLOADER) -c -o $@ $<
 
 # merge bootloader and sd hex together
-$(BUILD)/$(MERGED_FILE).hex: $(BUILD)/$(OUT_NAME).hex
+$(BUILD)/$(MERGED_FILE).hex: $(BUILD)/$(OUT_NAME).hex $(SD_HEX) tools/hexmerge.py
 	@echo Create $(notdir $@)
 	@$(PYTHON) tools/hexmerge.py -o $@ $< $(SD_HEX)
 
 # Create pkg zip file for bootloader+SD combo to use with DFU CDC
-$(BUILD)/$(MERGED_FILE).zip: $(BUILD)/$(OUT_NAME).hex
+$(BUILD)/$(MERGED_FILE).zip: $(BUILD)/$(OUT_NAME).hex $(SD_HEX)
 	@$(NRFUTIL) dfu genpkg --dev-type 0x0052 --dev-revision $(DFU_DEV_REV) --bootloader $< --softdevice $(SD_HEX) $@
 
 #-------------- Artifacts --------------

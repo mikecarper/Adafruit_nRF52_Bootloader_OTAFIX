@@ -1,5 +1,91 @@
 # Adafruit nRF52 Bootloader with Enhanced OTA DFU
 
+## Changes in OTAFIX 2.4.4
+
+- BLE application DATA reception now clears this bootloader's local connection
+  latency and best-effort disables inherited slave latency for the active
+  connection. This does **not** request a new GAP interval or override the
+  phone's accepted link parameters; it makes the target attend every available
+  connection event while DATA is active. Two bonded XIAO nRF52840 transfers
+  improved from about 0.88 kB/s to 3.52--3.53 kB/s while the controller still
+  reported the same 30 ms interval and latency 4. Errors from either local
+  SoftDevice option fail open so older supported stacks retain the usable link.
+  The policy is explicitly entered by `RECEIVE_APP_DATA`, restored on START,
+  validation, completion, error, close, or disconnect, and re-applied after a
+  connection-parameter update only while that live DATA phase remains active.
+- `tools/otafix_legacy_ble_dfu.py` adapts its protocol PRN/write window up or
+  down only at exact cumulative receipt boundaries. Every increase is a
+  bounded adjacent-level probe; a failed probe rolls back once and blocks
+  further increases for that transfer instead of oscillating. The helper also
+  waits at most three seconds for BlueZ's separately cached characteristic
+  view of the acquired ATT MTU to catch up. The wait requires the exact same
+  service collection and characteristic object, rejects malformed capability
+  values and clock bounds, aborts on disconnect, and safely retains 20-byte
+  writes on timeout. Progress distinguishes bytes sent from bytes confirmed by
+  an exact receipt or final RECEIVE response, and reports DATA-phase timing
+  separately from end-to-end DFU timing. This sender adaptation is deliberately
+  separate from GAP connection-parameter negotiation. An older connected-time
+  GAP request was removed because a PHY or data-length procedure could make it
+  return busy and reset a fatal-checking bootloader; do not reintroduce an
+  unconditional connection update. The optional `--lab-pre-start-pause`
+  exposes a bounded hardware-test window after identity/MTU checks but before
+  the first DFU write. It does not negotiate anything itself and remains zero
+  in production; a lab harness must verify any single connection update before
+  allowing START.
+- TinyUSB keeps its normal drain-to-empty event behavior for USB control, CDC,
+  and MSC traffic. An MSC WRITE10 callback that consumes fewer bytes than it
+  received now retains its endpoint buffer outside the global USB event queue
+  and is retried once on the next bootloader-loop pass. Each buffered retry has
+  a monotonic generation which survives transport reset; BOT/bus reset clears
+  the buffered work, and a stale main-loop snapshot cannot consume a different
+  WRITE accepted after that reset. This prevents
+  bootloader staging from chaining ten complete page erases into one
+  approximately 850 ms `tud_task()` call without starving unrelated USB
+  events.
+- Application and bootloader-staging updates use the proven complete-page NVMC
+  erase. Hardware A/B testing found that exact OTAFIX 2.4.2 accepted and synced
+  the first application UF2 sector, while exact 2.4.3 disconnected on that
+  sector after switching to partial-page erases. A later 2.4.4 candidate
+  restored complete-page erasure but still failed because it limited the
+  *entire* TinyUSB task to one event per loop. The corrected scheduler drains
+  every real USB event and limits only the deferred MSC retry. Each retry now
+  performs at most one complete page erase (about 85 ms on nRF52840/833), with
+  a complete USB queue drain between busy retries.
+- Legacy serial DFU completes a page-rounded erase of the entire destination
+  bank during START_DFU preparation, before reporting ready or accepting DATA.
+  An attempted USB optimization that moved later page erases into the ordered
+  DATA stream disconnected a real XIAO transfer at a page boundary, so both
+  USB CDC and hardware-UART builds retain the proven erase-free DATA path. The
+  expected multi-second START preparation is intentional, and each page erase
+  feeds an inherited watchdog.
+- OTAFIX 2.4.3 USB application reception contains the partial-page regression
+  and may be unable to bootstrap this fix from an updater UF2. Recover it over
+  BLE with the exact-board combined SoftDevice-and-bootloader Legacy DFU ZIP,
+  or use a hardware programmer. OTAFIX 2.4.2 uses the working complete-page
+  application erase and safe upfront Legacy serial erase, but still lacks the
+  new staging scheduler. Ordinary UF2 application updates are safe again after
+  2.4.4 is installed. Do not retry a truncated application before replacing an
+  affected 2.4.3 bootloader.
+
+The XIAO failure used for the second scheduler correction was not a released
+2.4.4 image. Its exact INFO string was
+`0.11.0-OTAFIX2.4.3-3-gffb1580-dirty-test-version-0x02040401`, identifying a
+dirty candidate built from `ffb1580` with packed test version `0x02040401`.
+The installed bootloader-only Legacy DFU ZIP was
+`xiao-2.4.4-cleanhandoff-bootloader-only.zip` (SHA-256
+`fcd7933afdc3c9dd8d24707084f5106b3612ed162939c02d68440f518d6fdbf6`);
+its 40 KiB bootloader payload has SHA-256
+`652bb243654bd3d500392e43d015f325061ccb56c418d862f410306c06238b6d`.
+That candidate already called `nrfx_nvmc_page_erase()`, but carried the global
+one-event TinyUSB budget. It disconnected during the first application-sector
+transaction, before a complete image or application-completion handoff existed.
+Its BLE-only recovery state was therefore the intended fail-closed result, not
+evidence of a late handoff bug. The first MSC-local retry qualification build
+used packed test version `0x02040402`. The command-lifecycle and generation-
+bound reset hardening described above uses the distinct packed test version
+`0x02040403`, so hardware readback cannot confuse those candidates. Test-only
+candidates are not release artifacts.
+
 ## Changes in OTAFIX 2.4.3
 
 - The MBR bootloader/SoftDevice replacement path now clears its stale BLE-entry
@@ -12,9 +98,20 @@
   page erase.
 - Application UF2 reception invalidates the saved application state before its
   first target-page erase, programs only after erase completion, and accepts a
-  retransmitted block only when flash already contains the same bytes. nRF52840
-  and nRF52833 page erases use Nordic's supported 2 ms partial-erase minimum so
-  TinyUSB and an inherited watchdog run between slices.
+  retransmitted block only when flash already contains the same bytes. OTAFIX
+  2.4.3 attempted to split nRF52840/833 page erases into 2 ms partial-NVMC
+  retries; hardware testing later proved that path unsafe, so OTAFIX 2.4.4
+  restores complete-page erasure.
+- Application UF2 completion now waits until the final WRITE10 status has
+  reached the host and then honors an explicit eject, physical disconnect, or
+  one second without further filesystem/SCSI activity. `SYNCHRONIZE CACHE`
+  restarts that idle interval rather than disconnecting immediately because
+  Linux can still have virtual-FAT bios queued after its status. This lets
+  `cp`/`sync` finish before reset. TinyUSB reports every valid command's full
+  CBW-to-CSW lifetime, including delayed WRITE10 data, READ10, and built-in
+  commands; BOT/bus reset explicitly releases an abandoned command without
+  blessing an image or a half-completed eject. Validated bootloader-family UF2
+  keeps its immediate Nordic `COPY_BL` handoff.
 - A mounted no-application USB recovery session exits when VBUS is removed, so
   its reset can select battery-powered BLE recovery without a physical reset
   button.
@@ -24,6 +121,12 @@
   startup directly, retain GCC's size-reducing builtins, and use one whole-program
   LTO partition. Nonrelease CI and dirty-tree qualification builds carry an
   explicit test-only packed version instead of producing release candidates.
+- Make intermediates are guarded by a content-hashed build-profile stamp. A
+  repeated identical build reuses its object cache, while changing SoftDevice,
+  signing keys or policy, dual-bank/UF2/DFU/debug options, the USB enumeration
+  timeout, source selection, or compiler/linker flags forces recompilation and
+  relinking. Public artifact names remain unchanged; use a distinct `BUILD=`
+  directory when retaining multiple feature variants side by side.
 
 ## Changes in OTAFIX 2.4.2
 
@@ -370,16 +473,18 @@ handling even though a USB capture shows successful bulk OUT transactions.
 Upgrade the TinyUSB core and controller driver together. OTAFIX keeps the
 compatible vendored driver and pins a minimal backport of upstream TinyUSB
 commit `6af4ee2c5` for the independent post-SoftDevice HFCLK retry. The
-`mikecarper/tinyusb` fork's `otafix-0.12-nrf5x` branch contains only the two
-nRF5x fixes on the pinned TinyUSB 0.12-era base, making the backport
-reproducible from a clean clone without unrelated core changes.
+`mikecarper/tinyusb` fork's `otafix-0.12-nrf5x` branch contains the two nRF5x
+controller fixes on the pinned TinyUSB 0.12-era base plus an MSC-local deferred
+WRITE10 retry used by this bootloader's flash-erasure state machine. The generic
+TinyUSB task retains its upstream drain-to-empty behavior. This keeps the
+backport reproducible from a clean clone without unrelated core changes.
 
 If the first valid UF2 flash sector instead makes an older bootloader reset,
 while ordinary non-UF2 disk traffic remains stable, the recovery path may have
 entered USB with the SoftDevice still enabled. Direct NVMC access is forbidden
 in that state. Current builds explicitly disable the SoftDevice before TinyUSB
-startup and use 2 ms partial page erases; install the corrected bootloader over
-BLE or SWD before retrying application UF2. A bootloader-only Legacy DFU update
+startup and use the hardware-proven complete-page erase; install the corrected
+bootloader over BLE or SWD before retrying application UF2. A bootloader-only Legacy DFU update
 uses the first 40 KiB of the application bank as staging, so reinstall the
 exact application afterward.
 

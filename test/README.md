@@ -85,13 +85,62 @@ The UF2 write-state test verifies that the bootloader atomically clears the
 application-valid settings word before erasing any out-of-order target page,
 and that each page erase and block program remains a separate retryable phase.
 This keeps an interrupted image unbootable even while its vector page is still
-intact. nRF52840/833 application erases run in 2 ms partial-NVMC slices so USB
-and an inherited watchdog run between slices. The test covers busy retries,
-idempotent committed-block retransmission, completion counting, terminal
-geometry/kind aborts, and clearing every transfer/page mask at an explicit
-USB/MSC session reset. The production caller compares retransmitted
-application bytes with flash before accepting them; a conflicting
-same-geometry image remains fail-closed.
+intact. Hardware A/B testing showed that OTAFIX 2.4.3's partial-NVMC application
+erase could disconnect a XIAO nRF52840 on its first UF2 sector, while OTAFIX
+2.4.2's complete-page erase accepted and synced the identical sector. The
+regression tests therefore require the proven complete-page path and reject the
+partial-erase helper. TinyUSB retains its normal global drain-to-empty behavior.
+Only an MSC WRITE10 callback that consumed fewer bytes than it received is
+deferred outside the USB event queue, and at most one previously pending MSC
+retry runs after each complete real-event drain. Deferred work is bound to a
+monotonic generation so a retry sampled before BOT/bus reset cannot consume a
+new WRITE accepted while the real-event queue drains. The task-budget model
+covers that reset/new-command race as well as
+the ten page erases used by bootloader staging and proves they require ten loop
+passes with at most one roughly 85 ms erase per pass instead of one
+approximately 850 ms stall. It does not model every block in an application
+image. The separate write-state test uses compact synthetic geometry to cover
+busy retries, idempotent committed-block retransmission, completion counting,
+terminal geometry/kind aborts, and clearing every transfer/page mask at an
+explicit USB/MSC session reset. The production caller compares retransmitted
+application bytes with flash before accepting them; a conflicting same-geometry
+image remains fail-closed.
+
+The hardware lineage has two distinct first-sector failures. Released OTAFIX
+2.4.3 (`243b061`) introduced the unsafe 2 ms partial-NVMC erase path; exact
+OTAFIX 2.4.2 (`20f976f`) accepted and synced the same sector with a complete
+page erase. The later XIAO candidate identified by
+`0.11.0-OTAFIX2.4.3-3-gffb1580-dirty-test-version-0x02040401` had already
+restored `nrfx_nvmc_page_erase()`, but its global one-event TinyUSB budget still
+failed. The exact installed bootloader-only ZIP SHA-256 was
+`fcd7933afdc3c9dd8d24707084f5106b3612ed162939c02d68440f518d6fdbf6`;
+the embedded 40 KiB bootloader SHA-256 was
+`652bb243654bd3d500392e43d015f325061ccb56c418d862f410306c06238b6d`.
+It failed before image completion, so that case is an MSC receive/retry
+scheduling failure rather than the clean application-handoff path tested below.
+Packed test version `0x02040402` identifies the first corrected MSC-local retry
+candidate lineage. Command-lifecycle and generation-bound reset hardening uses
+the distinct packed version `0x02040403` for current qualification.
+
+The UF2 clean-handoff regression keeps a completed application invalid until
+TinyUSB has acknowledged the final write and either the volume stays idle for
+one second, an explicit eject status reaches the host, or the host physically
+disconnects. Later FAT/directory writes and `SYNCHRONIZE CACHE` move the idle
+boundary; cache sync is deliberately not an immediate reset boundary because
+Linux can still have virtual-FAT bios queued after its status. Bootloader-family
+UF2 keeps its immediate validated `COPY_BL` path. The model pins the full
+CBW-to-CSW lifecycle for delayed WRITE10, READ10, and built-in commands, plus a
+BOT/bus reset which releases an abandoned command and incomplete eject without
+blessing or cancelling a complete pending image. Abort/session-reset paths
+still cancel rather than bless an incomplete image.
+
+The Legacy serial DFU erase regression guards the separate CDC/UART contract in
+both the single- and dual-bank implementations. Every page covering the full
+announced image is erased during START preparation, before the ready callback;
+the DATA path writes into that prepared bank without any erase state or page
+boundary stall. The test also pins the page-alignment/round-up behavior and
+checks that this serial correction did not replace MSC's separately retryable
+one-complete-page erase phase.
 
 The pstorage regression compiles the production raw driver against a deterministic SoftDevice flash
 mock. It verifies that an immediate `NRF_ERROR_BUSY` waits for and ignores the preceding operation's
@@ -117,13 +166,68 @@ the prior transport callback. Completed BLE, UF2, and CDC application updates
 all tear down their active transport and reset before application startup, so
 none direct-jumps with live USB, SoftDevice, or radio state. The same guard
 requires non-BLE recovery to disable the SoftDevice before TinyUSB/direct NVMC,
-uses Nordic's supported 2 ms partial-erase minimum, and keeps no-application
-USB recovery sensitive to VBUS removal so it can fall back to BLE.
+uses a complete-page erase rather than the hardware-failing partial path, and
+keeps no-application USB recovery sensitive to VBUS removal so it can fall back
+to BLE.
 
 The BLE-advertising regression pins the 31-byte Legacy DFU layout. Flags and the
 128-bit DFU service UUID must be inserted before the local name, leaving eight
 name bytes. Longer board names, including MeshTower V2's `TOWER_V2_OTA`, must
 use the shortened-name AD type instead of silently dropping the UUID.
+
+The Make build-profile regression uses a stub Arm toolchain, so it runs on a
+host without Arm GCC 14. It proves that identical profiles reuse objects while
+changes to the SoftDevice, signing policy or public key, dual-bank/UF2/DFU/debug
+features, USB timeout, source selection, or compiler/linker flags rewrite a
+content-hashed stamp and force both recompilation and relinking. The persisted
+stamp contains only a SHA-256 digest. The same regression pins nonrelease CI to
+the documented corrected `0x02040403` qualification lineage and rejects reuse
+of failed candidate ID `0x02040401` as an active override.
+
+The BLE-connection-policy regression keeps connection-parameter ownership with
+the central and forbids a fatal CONNECTED-time GAP update. It requires both
+DATA-phase latency options to remain fail-open and re-applies them after a
+central connection-parameter update only while firmware DATA is active, so an
+update cannot silently restore the bonded-path throughput regression or undo
+the intentional flash-priority latency during START erasure. It also requires
+every DATA exit (validation, final/error callback, transport close, disconnect,
+and a new START) to restore both local and negotiated-slave-latency policy.
+
+The Legacy BLE DFU host regression exercises the identity-gated recovery
+client without hardware. It binds the exact ZIP bytes to their SHA-256 and
+manifest/init CRC, requires address/name/service/DIS-model identity, rejects
+short, ahead, stale, missing, malformed, and out-of-order receipts, and covers
+both application and SoftDevice-plus-bootloader package geometry. Adaptive PRN
+changes occur only at exact cumulative receipt boundaries; zero and nonfinite
+timing samples are rejected. Its levels are
+bounded by packet size: 20--60-byte accumulated writes use 8/16/32, 64-byte
+writes use 8/16, and larger direct-to-pstorage writes use 4/8 so they cannot
+outrun the target's eight-packet lazy-erase FIFO. Two clean exact receipts
+within a 125 ms notification allowance plus the actual payload time at 1600
+B/s trigger one adjacent safe-level probe. Two clean neutral receipts at a
+nonmaximum window can trigger the same bounded probe, avoiding a
+receipt-overhead trap seen at 864--871 B/s with 244-byte XIAO writes. One clean
+receipt slower than the same allowance plus 800 B/s payload time demotes one
+level. A probe keeps a first sample
+that is over 10 percent better, rolls back a first sample that is over 10
+percent worse (or materially slow), and otherwise compares at most two probe
+receipts against the lower-window baseline. A failed probe or a real slow
+demotion from a previously kept level blocks every further increase for that
+DFU session, even after fast-looking jitter, while additional slow exact
+receipts may continue down through the remaining safe levels. This prevents
+PRN churn without disabling the initial probe or safe downward negotiation.
+The host vectors pin both the physically observed 2110
+B/s fast path and the 870 B/s
+neutral path, including improved, degraded, rollback, and no-reprobe cases,
+while proving 244-byte writes never exceed PRN8. BlueZ readiness vectors
+require an exact service/characteristic identity, strict integer capability
+values, finite bounded polling, and canonical disconnect-race failures. DATA
+progress separately records sent, exact-receipt-confirmed, and final-response-
+confirmed bytes, while phase timing includes the final RECEIVE response.
+The lab-only pre-START pause is finite and nonnegative, performs no DFU write,
+and fails if the exact link disconnects while paused. It exists so an external
+hardware harness can prove one bounded connection update before START; it is
+not an in-DATA speed-control mechanism.
 
 The retained-peer-data regression compiles the exact S132 v6, S140 v7, and S140 v6 Nordic types used by
 nRF52832, nRF52833, and nRF52840 and pins the Bluefruit BLEDfu ABI: 60 bytes of peer data at

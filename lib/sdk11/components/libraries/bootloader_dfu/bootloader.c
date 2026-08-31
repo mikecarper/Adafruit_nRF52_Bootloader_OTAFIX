@@ -148,8 +148,20 @@ static void wait_for_events(void)
     // skip if usb is not inited ( e.g OTA / finializing sd/bootloader )
     if ( tusb_inited() )
     {
+      // Snapshot a prior-loop MSC busy retry before draining the real USB
+      // event queue. A retry first created by this tud_task() pass waits until
+      // the next pass, so bootloader staging performs at most one full-page
+      // erase between complete USB servicing opportunities.
+#if CFG_TUD_MSC && CFG_TUD_MSC_DEFERRED_WRITE_RETRY
+      uint32_t msc_retry_generation = 0;
+      bool const msc_retry_pending =
+        tud_msc_write10_retry_snapshot(&msc_retry_generation);
+#endif
       tud_task();
       tud_cdc_write_flush();
+#if CFG_TUD_MSC && CFG_TUD_MSC_DEFERRED_WRITE_RETRY
+      if (msc_retry_pending) tud_msc_write10_retry(msc_retry_generation);
+#endif
     }
 
     // Exit startup DFU once USB was actually unplugged (VBUS gone), not on a

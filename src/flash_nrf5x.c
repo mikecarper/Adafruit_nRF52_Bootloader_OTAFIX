@@ -30,8 +30,6 @@
 #include "dfu_types.h"
 
 #define FLASH_CACHE_INVALID_ADDR  0xffffffff
-#define FLASH_PARTIAL_ERASE_MS    2u
-
 static uint32_t _fl_addr = FLASH_CACHE_INVALID_ADDR;
 static uint8_t _fl_buf[CODE_PAGE_SIZE] __attribute__((aligned(4)));
 
@@ -70,34 +68,6 @@ void flash_nrf5x_erase (uint32_t dst, uint32_t len)
         nrfx_nvmc_page_erase(addr);
         inherited_watchdog_feed();
     }
-}
-
-bool flash_nrf5x_erase_step(uint32_t dst, bool begin)
-{
-    uint32_t const page_addr = dst & ~(CODE_PAGE_SIZE - 1);
-#if defined(NRF_NVMC_PARTIAL_ERASE_PRESENT)
-    // A full nRF52840/833 page erase blocks flash execution for roughly 85 ms.
-    // Split application erases into short NVMC slices so USB can service the
-    // host and an inherited application watchdog can be fed between slices.
-    // Nordic's supported driver configurations use 2 ms as the minimum; 1 ms
-    // has known timing problems on some nRF52840 revisions.
-    if (begin)
-    {
-        if (nrfx_nvmc_page_partial_erase_init(page_addr, FLASH_PARTIAL_ERASE_MS) != NRFX_SUCCESS)
-        {
-            return false;
-        }
-    }
-
-    inherited_watchdog_feed();
-    bool const complete = nrfx_nvmc_page_partial_erase_continue();
-    inherited_watchdog_feed();
-    return complete;
-#else
-    (void)begin;
-    flash_nrf5x_erase(page_addr, CODE_PAGE_SIZE);
-    return true;
-#endif
 }
 
 void flash_nrf5x_invalidate_app_settings(void)

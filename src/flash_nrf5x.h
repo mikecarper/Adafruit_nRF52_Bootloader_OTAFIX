@@ -35,7 +35,6 @@
 #endif
 
 void flash_nrf5x_erase (uint32_t dst, uint32_t len);
-bool flash_nrf5x_erase_step (uint32_t dst, bool begin);
 void flash_nrf5x_discard (void);
 void flash_nrf5x_invalidate_app_settings (void);
 void flash_nrf5x_write (uint32_t dst, void const *src, uint32_t len, bool need_erase);

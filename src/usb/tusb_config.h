@@ -51,6 +51,8 @@
 /*------------- Core -------------*/
 #define CFG_TUD_ENDOINT0_SIZE       64
 
+#define CFG_TUD_MSC_DEFERRED_WRITE_RETRY 1
+
 //------------- Class enabled -------------//
 #define CFG_TUD_CDC                 1
 #if !defined(SIGNED_FW) || defined(FORCE_UF2)

@@ -447,24 +447,18 @@ static bool erase_bootloader_staging(WriteState* state) {
   }
 #endif
 
-  flash_nrf5x_erase(BOOTLOADER_ADDR_NEW_RECEIVED + state->bootloaderEraseOffset, CODE_PAGE_SIZE);
+  uint32_t const page_addr = BOOTLOADER_ADDR_NEW_RECEIVED + state->bootloaderEraseOffset;
+  flash_nrf5x_erase(page_addr, CODE_PAGE_SIZE);
   state->bootloaderEraseOffset += CODE_PAGE_SIZE;
-  if (state->bootloaderEraseOffset < DFU_BL_IMAGE_MAX_SIZE) {
-    return false;
-  }
+  state->bootloaderStagingErased = state->bootloaderEraseOffset >= DFU_BL_IMAGE_MAX_SIZE;
 
-  state->bootloaderStagingErased = true;
-  return true;
+  // Return busy after every page, including the last one. TinyUSB then yields
+  // to the bootloader main loop before either erasing another page or writing
+  // the first staged block, bounding each retry to one full-page erase.
+  return false;
 }
 
 static bool prepare_app_block(UF2_Block const* block, WriteState* state) {
-  if (state->appEraseInProgress) {
-    if (flash_nrf5x_erase_step(state->appEraseAddress, false)) {
-      state->appEraseInProgress = false;
-    }
-    return false;
-  }
-
   uint32_t const page = (block->targetAddr - USER_FLASH_START) / CODE_PAGE_SIZE;
   switch (uf2_app_flash_next_action(&state->appSettingsInvalidated,
                                     state->appErasedMask, page)) {
@@ -480,11 +474,12 @@ static bool prepare_app_block(UF2_Block const* block, WriteState* state) {
     }
 
     case UF2_APP_FLASH_ERASE_PAGE:
-      // Return busy between short partial-erase steps so TinyUSB can run and an
-      // inherited watchdog can be fed. TinyUSB retries this same sector until
-      // the page is complete, then once more to program the block.
-      state->appEraseAddress = block->targetAddr;
-      state->appEraseInProgress = !flash_nrf5x_erase_step(block->targetAddr, true);
+      // Complete exactly one page erase, then return busy. Hardware A/B testing
+      // proved the partial-NVMC retry path introduced in OTAFIX 2.4.3 can drop
+      // the USB mass-storage device on its first application sector. A complete
+      // page erase is the known-good nRF52 path; the MSC-local busy scheduler
+      // yields to the main loop before this sector is retried and programmed.
+      flash_nrf5x_erase(block->targetAddr, CODE_PAGE_SIZE);
       return false;
 
     case UF2_APP_FLASH_PROGRAM_BLOCK:

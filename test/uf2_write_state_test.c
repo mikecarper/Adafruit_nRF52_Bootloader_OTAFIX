@@ -15,11 +15,10 @@ enum {
 typedef struct {
   uint32_t num_blocks;
   uint32_t num_written;
-  uint32_t erase_address;
+  uint32_t bootloader_erase_offset;
   uint8_t update_kind;
   bool aborted;
   bool settings_invalidated;
-  bool erase_in_progress;
   uint8_t written_mask[(TEST_MAX_BLOCKS + 7) / 8];
   uint8_t erased_mask[4];
 } TestState;
@@ -108,8 +107,7 @@ static void test_explicit_session_reset(void) {
   TestState state = {0};
 
   state.settings_invalidated = true;
-  state.erase_address = 0x26000;
-  state.erase_in_progress = true;
+  state.bootloader_erase_offset = 0x2000;
   state.erased_mask[0] = 0x03;
   assert(prepare(&state, 4, 0, TEST_APP_KIND) == UF2_TRANSFER_ACCEPT);
   uf2_transfer_commit(0, &state.num_written, state.written_mask);
@@ -118,8 +116,7 @@ static void test_explicit_session_reset(void) {
   uf2_transfer_reset(&state, sizeof(state));
   assert(!state.aborted);
   assert(!state.settings_invalidated);
-  assert(!state.erase_in_progress);
-  assert(state.erase_address == 0);
+  assert(state.bootloader_erase_offset == 0);
   assert(state.num_blocks == 0);
   assert(state.num_written == 0);
   assert(state.update_kind == 0);
