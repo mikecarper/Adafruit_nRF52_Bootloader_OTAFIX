@@ -26,8 +26,10 @@
 | thinknode_m6 | ELECROW ThinkNodeM6 | 0x239A:0x00DA | https://www.elecrow.com |
 | wio_tracker_l1 | Seeed TRACKER L1 | 0x2886:0x1667 | https://www.seeedstudio.com/ |
 | wiscore_rak3401 | WisBlock RAK3401 | 0x239A:0x0029 | https://docs.rakwireless.com/product-categories/wisblock/rak3401/overview/ |
+| wiscore_rak3401_rak13302_w25q16 | WisBlock RAK3401 + RAK13302 + W25Q16 | 0x239A:0x0029 | https://docs.rakwireless.com/product-categories/wisblock/rak3401/overview/ |
 | wiscore_rak4631_board | WisBlock RAK4631 Board | 0x239A:0x0029 | https://store.rakwireless.com/collections/wisblock-core |
 | wiscore_rak4631_board_rak15001_slot_c | WisBlock RAK4631 + RAK15001 (Sensor Slot C) | 0x239A:0x0029 | https://docs.rakwireless.com/product-categories/wisblock/rak15001/overview/ |
+| wiscore_rak4631_w25q16 | WisBlock RAK4631 + W25Q16 | 0x239A:0x0029 | https://docs.rakwireless.com/product-categories/wisblock/rak4631/overview/ |
 | wismesh_tag | WisMesh Tag | 0x239A:0x0029 | https://store.rakwireless.com/products/wismesh-tag-meshtastic-gps-lora-tracker-ip66 |
 | xiao_nrf52840_ble | Seeed XIAO nRF52840 | 0x2886:0x0044 | https://www.seeedstudio.com/ |
 | xiao_nrf52840_ble_sense | Seeed XIAO nRF52840 | 0x2886:0x0045 | https://www.seeedstudio.com/ |

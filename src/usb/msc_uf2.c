@@ -308,7 +308,10 @@ int32_t tud_msc_write10_cb (uint8_t lun, uint32_t lba, uint32_t offset, uint8_t*
 {
   (void) lun;
 
+  TU_ASSERT(offset == 0, -1);
+
   uint32_t count = 0;
+
   while ( count < bufsize )
   {
     int written;

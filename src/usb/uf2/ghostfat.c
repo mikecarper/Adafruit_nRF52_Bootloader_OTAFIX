@@ -28,6 +28,7 @@
 
 #include "uf2.h"
 #include "uf2_app_flash.h"
+#include "uf2_current_echo.h"
 #include "uf2_transfer_state.h"
 #include "bootloader_image.h"
 #if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_BOOTLOADER_UPDATE)
@@ -210,6 +211,7 @@ STATIC_ASSERT(UF2_SECTORS == ((UF2_SIZE/2) / 256)); // Not a requirement ... ens
 #define FS_START_FAT1_SECTOR      (FS_START_FAT0_SECTOR + BPB_SECTORS_PER_FAT)
 #define FS_START_ROOTDIR_SECTOR   (FS_START_FAT1_SECTOR + BPB_SECTORS_PER_FAT)
 #define FS_START_CLUSTERS_SECTOR  (FS_START_ROOTDIR_SECTOR + ROOT_DIR_SECTOR_COUNT)
+#define CURRENT_UF2_FIRST_LBA     (FS_START_CLUSTERS_SECTOR + NUM_FILES - 1)
 
 
 static FAT_BootBlock const BootBlock = {
@@ -491,10 +493,20 @@ static bool prepare_app_block(UF2_Block const* block, WriteState* state) {
 
 int write_block(uint32_t block_no, uint8_t* data, WriteState* state) {
   UF2_Block* block = (void*)data;
-  (void)block_no;
 
   if (state->aborted) {
     return -1;
+  }
+
+  // CURRENT.UF2 is synthesized from flash on reads and is not a writable
+  // firmware file. Windows can replay cached sectors from this physical extent
+  // in the same WRITE10 that begins a newly copied UF2; accepting those sectors
+  // would latch the wrong transfer geometry or program stale application data.
+  // A saved CURRENT.UF2 copied as a new file uses other clusters and remains a
+  // valid application transfer.
+  if (uf2_current_lba_is_synthetic(block_no, CURRENT_UF2_FIRST_LBA,
+                                   UF2_SECTORS)) {
+    return BPB_SECTOR_SIZE;
   }
 
   if (!is_uf2_block(block)) {

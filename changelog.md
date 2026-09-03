@@ -1,5 +1,10 @@
 # Adafruit nRF52 Bootloader Changelog
 
+## Unreleased
+
+- Treat the synthetic `CURRENT.UF2` disk extent as read-only so Windows cached sectors cannot corrupt a new UF2 copy; a saved `CURRENT.UF2` copied back as a new file remains installable.
+- Keep TinyUSB shut down after a USB probe falls back to BLE DFU, including delayed SoftDevice power events and direct USB callbacks.
+
 ## 0.6.2 - 2021.09.10
 
 - Add new board "LED Glasses Driver nRF52840"

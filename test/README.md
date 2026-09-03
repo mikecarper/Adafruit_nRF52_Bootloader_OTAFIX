@@ -106,6 +106,11 @@ explicit USB/MSC session reset. The production caller compares retransmitted
 application bytes with flash before accepting them; a conflicting same-geometry
 image remains fail-closed.
 
+The synthetic physical `CURRENT.UF2` extent is pinned read-only at its first,
+middle, and last sectors, including malformed or changed host data and a
+multi-sector write crossing its tail. A saved `CURRENT.UF2` copied to clusters
+beyond that extent remains a normal application transfer.
+
 The hardware lineage has two distinct first-sector failures. Released OTAFIX
 2.4.3 (`243b061`) introduced the unsafe 2 ms partial-NVMC erase path; exact
 OTAFIX 2.4.2 (`20f976f`) accepted and synced the same sector with a complete

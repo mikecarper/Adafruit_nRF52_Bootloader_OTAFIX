@@ -45,19 +45,33 @@
 extern void tusb_hal_nrf_power_event(uint32_t event);
 
 static bool _nrfx_power_initialized = false;
+// Read from USB/POWER interrupt context and written from the bootloader's main
+// context.  Volatile keeps the transport gate observable across that boundary;
+// usb_teardown() additionally disables USBD_IRQn before lowering it.
+static volatile bool _usb_transport_active = false;
+
+bool usb_transport_active(void) {
+  return _usb_transport_active;
+}
 
 // power callback when SD is not enabled
 static void power_event_handler(nrfx_power_usb_evt_t event) {
-  tusb_hal_nrf_power_event((uint32_t) event);
+  if (_usb_transport_active) {
+    tusb_hal_nrf_power_event((uint32_t) event);
+  }
 }
 
 // Forward USB interrupt events to TinyUSB IRQ Handler
 void USBD_IRQHandler(void) {
-  tud_int_handler(0);
+  if (_usb_transport_active) {
+    tud_int_handler(0);
+  }
 }
 
 //------------- IMPLEMENTATION -------------//
 void usb_init(bool cdc_only) {
+  _usb_transport_active = true;
+
   // 0, 1 is reserved for SD
   NVIC_SetPriority(USBD_IRQn, 2);
 
@@ -111,8 +125,20 @@ void usb_init(bool cdc_only) {
 }
 
 void usb_teardown(void) {
+  // A later BLE SoftDevice start can emit USB DETECTED/READY events while VBUS
+  // remains present. Mark the transport inactive before simulating removal so
+  // those SOC events cannot resurrect a TinyUSB stack that DFU already left.
+  // Disable the peripheral IRQ first: if an uncleared USBD event preempted after
+  // the gate was lowered, the inactive handler would return without servicing
+  // it and the level-sensitive IRQ could immediately repend/tail-chain.
+  NVIC_DisableIRQ(USBD_IRQn);
+  NVIC_ClearPendingIRQ(USBD_IRQn);
+  _usb_transport_active = false;
+  __DMB();
+
   // Simulate an disconnect which cause pullup disable, USB perpheral disable and hclk disable
   tusb_hal_nrf_power_event(NRFX_POWER_USB_EVT_REMOVED);
+  NVIC_ClearPendingIRQ(USBD_IRQn);
 
   // A USB probe can be followed by enabling the SoftDevice for BLE. Release the
   // direct nrfx POWER interrupt first so the SoftDevice can own that peripheral.
