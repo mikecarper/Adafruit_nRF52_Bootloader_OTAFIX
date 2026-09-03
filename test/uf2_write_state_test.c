@@ -4,6 +4,7 @@
 #include <stdio.h>
 
 #include "uf2_app_flash.h"
+#include "uf2_current_echo.h"
 #include "uf2_transfer_state.h"
 
 enum {
@@ -149,6 +150,72 @@ static void test_app_flash_phases(void) {
          UF2_APP_FLASH_PROGRAM_BLOCK);
 }
 
+static void test_current_uf2_extent_is_read_only(void) {
+  enum {
+    FIRST_LBA = 523,
+    CURRENT_SECTORS = 3728,
+  };
+
+  // The decision is based only on physical disk location. The bytes may be a
+  // cached CURRENT block, a modified UF2 block, or malformed disk data without
+  // changing the result or latching transfer state.
+  TestState state = {
+      .num_blocks = 7,
+      .num_written = 3,
+      .update_kind = TEST_APP_KIND,
+  };
+  assert(uf2_current_lba_is_synthetic(FIRST_LBA, FIRST_LBA,
+                                      CURRENT_SECTORS));
+  assert(uf2_current_lba_is_synthetic(FIRST_LBA + CURRENT_SECTORS / 2,
+                                      FIRST_LBA, CURRENT_SECTORS));
+  assert(uf2_current_lba_is_synthetic(FIRST_LBA + CURRENT_SECTORS - 1,
+                                      FIRST_LBA, CURRENT_SECTORS));
+  assert(state.num_blocks == 7);
+  assert(state.num_written == 3);
+  assert(state.update_kind == TEST_APP_KIND);
+  assert(!state.aborted);
+
+  assert(!uf2_current_lba_is_synthetic(FIRST_LBA - 1, FIRST_LBA,
+                                       CURRENT_SECTORS));
+  assert(!uf2_current_lba_is_synthetic(FIRST_LBA + CURRENT_SECTORS,
+                                       FIRST_LBA, CURRENT_SECTORS));
+  assert(!uf2_current_lba_is_synthetic(FIRST_LBA, FIRST_LBA, 0));
+
+  // Subtraction after the lower-bound check avoids an overflowing exclusive
+  // end calculation even when the synthetic extent reaches UINT32_MAX.
+  assert(uf2_current_lba_is_synthetic(UINT32_MAX, UINT32_MAX - 2, 3));
+  assert(!uf2_current_lba_is_synthetic(UINT32_MAX - 3,
+                                       UINT32_MAX - 2, 3));
+}
+
+static void test_current_tail_crossing_and_saved_copy(void) {
+  enum {
+    FIRST_LBA = 523,
+    CURRENT_SECTORS = 3728,
+    WRITE_FIRST_LBA = FIRST_LBA + CURRENT_SECTORS - 3,
+  };
+
+  // Pocket/Windows HIL shape: the first three sectors of an eight-sector
+  // WRITE10 are the physical CURRENT tail. Every later sector is outside the
+  // synthetic file and follows the ordinary non-UF2/UF2 processing path.
+  for (uint32_t i = 0; i < 8; ++i) {
+    bool const ignored = uf2_current_lba_is_synthetic(
+        WRITE_FIRST_LBA + i, FIRST_LBA, CURRENT_SECTORS);
+    assert(ignored == (i < 3));
+  }
+
+  // A saved CURRENT.UF2 copied back as a new file is allocated beyond the
+  // physical extent. Its block zero is therefore accepted as a normal transfer.
+  uint32_t const copied_file_lba = FIRST_LBA + CURRENT_SECTORS + 3;
+  assert(!uf2_current_lba_is_synthetic(copied_file_lba, FIRST_LBA,
+                                       CURRENT_SECTORS));
+  TestState state = {0};
+  assert(prepare(&state, 8, 0, TEST_APP_KIND) == UF2_TRANSFER_ACCEPT);
+  assert(state.num_blocks == 8);
+  assert(state.update_kind == TEST_APP_KIND);
+  assert(!state.aborted);
+}
+
 int main(void) {
   test_busy_retry_and_completion();
   test_committed_duplicate_is_reported();
@@ -156,6 +223,8 @@ int main(void) {
   test_abort_is_terminal();
   test_explicit_session_reset();
   test_app_flash_phases();
+  test_current_uf2_extent_is_read_only();
+  test_current_tail_crossing_and_saved_copy();
   puts("uf2 write state tests passed");
   return 0;
 }

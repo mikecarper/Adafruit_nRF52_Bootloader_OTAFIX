@@ -144,7 +144,15 @@
   The `heltec_mesh_tower_v2_sdcard` target reads the authenticated contiguous sector run named by retained RAM from the onboard microSD socket and applies either a full MeshCore `.mota` image or an in-place delta. The card holds the download, while application writes remain bounded below InternalFS at `0xED000`. Build it with `make BOARD=heltec_mesh_tower_v2_sdcard`; it must be paired with MeshCore's SD-card firmware target.
 
 - **Raw-QSPI MeshCore repeater self-updates**
-  Exact-board targets for XIAO nRF52840 BLE/Sense, original LilyGo T-Echo, ThinkNode M1/M6, Wio Tracker L1, SenseCAP Solar Node P1, and RAK4631 with a RAK15001 in sensor Slot C can read a verified raw `.mota` from external flash and apply either a full image or an in-place delta. They must be paired with the matching MeshCore QSPI repeater build; a board merely exposing QSPI-named GPIO is not supported. Build the RAK target with `make BOARD=wiscore_rak4631_board_rak15001_slot_c`. It uses 8 MHz standard SPI over the nRF52840 QSPI peripheral, requires the exact `C8:40:15` GD25Q16 JEDEC ID, and leaves QSPI IO2/IO3 disconnected. WP# and HOLD# use the module's onboard pull-ups, so the bootloader does not drive WB_IO4. The Slot C deployment contract avoids the RAK12501 GNSS module's RESET/1PPS lines whether GNSS occupies its supported Slot A or D. Do not combine this target with Ethernet, SD, or another WisBlock SPI module: WisBlock sensor slots share SPI and chip-select, so those configurations must use their own update storage/transport. The ordinary RAK4631 target retains internal staging. RAK3401 is excluded because its required RAK13302 radio uses the same SPI bus and chip-select as RAK15001. Heltec T114 is excluded because its public schematics mark the MX25R1635F U9 footprint optional, so the standard target cannot assume it is populated.
+  Exact-board targets for XIAO nRF52840 BLE/Sense, original LilyGo T-Echo, ThinkNode M1/M6, Wio Tracker L1, SenseCAP Solar Node P1, and qualified RAK external-flash configurations can read a verified raw `.mota` from external flash and apply either a full image or an in-place delta. They must be paired with the matching MeshCore QSPI repeater build; a board merely exposing QSPI-named GPIO is not supported.
+
+  The RAK15001 Slot C target remains `wiscore_rak4631_board_rak15001_slot_c`. It uses 8 MHz standard SPI over the nRF52840 QSPI peripheral, requires the exact `C8:40:15` GD25Q16 JEDEC ID, and leaves QSPI IO2/IO3 disconnected. WP# and HOLD# use the module's onboard pull-ups, so the bootloader does not drive WB_IO4. The Slot C deployment contract avoids the RAK12501 GNSS module's RESET/1PPS lines whether GNSS occupies its supported Slot A or D. Do not combine it with Ethernet, SD, or another WisBlock SPI module because the sensor slots share SPI and chip-select.
+
+  The RAK3401/RAK13302 target is `wiscore_rak3401_rak13302_w25q16`. It shares SCK P0.03, MOSI P0.30, and MISO P0.29 with the 1 W radio, gives the W25Q16 its own CS on P0.31, and drives the radio's active-low NSS on P0.26 high before any flash wake or QSPI access. It requires exact JEDEC `EF:40:15` at 8 MHz and leaves QSPI IO2/IO3 disconnected, so the breakout must hold WP# and HOLD# high. The dedicated mapping leaves the Slot A GPS UART/PPS pins untouched. Pair it only with MeshCore environment `RAK_3401_repeater_rak13302_w25q16_lora_ota` and hardware ID `RAK3401_RAK13302_W25Q16`; other RAK3401 builds retain internal staging and do not advertise this external store.
+
+  The matching RAK4631 target is `wiscore_rak4631_w25q16`. It uses the same W25Q16 SCK/MOSI/MISO/CS pins, exact JEDEC signature, and 8 MHz clock, but has no auxiliary-CS guard because the RAK4631's internal LoRa radio is on a separate SPI bus. Its mapping also leaves Slot A GPS UART/PPS untouched. Pair it only with MeshCore environment `RAK_4631_repeater_w25q16_lora_ota` and hardware ID `RAK4631_W25Q16`; it is not interchangeable with either the ordinary RAK4631 or RAK15001 Slot C loader.
+
+  The ordinary RAK4631 and RAK3401 targets retain internal staging. Heltec T114 is excluded because its public schematics mark the MX25R1635F U9 footprint optional, so the standard target cannot assume it is populated.
 
 - **Fail-closed bootloader UF2 updates**
   Bootloader self-update files now carry a board-bound manifest and a CRC32 over the complete bootloader region. The receiver verifies the UICR addresses, legacy VID/PID, unique DFU device identity, manifest, and CRC before asking the MBR to copy the image. This distinguishes boards such as the T1, T096, T114, and MeshTower even though their factory bootloaders share a VID/PID. A bootloader containing this check intentionally rejects older self-update UF2 files that do not have the manifest; newly generated files remain installable by older bootloaders.
@@ -248,15 +256,23 @@ Download the UF2 file for your board (they can be found in the releases with fil
 See the [OTAFIX releases](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases) and use a release whose notes explicitly list your exact board and required internal, SD, or QSPI apply mode.
 
 When migrating a RAK4631 from the ordinary `wiscore_rak4631_board` bootloader to
-`wiscore_rak4631_board_rak15001_slot_c`, do **not** use the canonical slot-C
-bootloader-update UF2 for the first migration. A current board-bound ordinary RAK4631
-bootloader expects the DFU device name `4631_DFU`, while the slot-C target is intentionally
-identified as `4631_15001C_DFU`, so it rejects that cross-target UF2. Use the exact slot-C
-OTAFIX combined bootloader + SoftDevice package ending in `_s140_<version>.zip` through
-serial DFU or a compatible BLE DFU client, or flash the exact slot-C image with SWD. A
-MeshCore application Serial DFU ZIP updates only the application and is not a substitute.
-Reinstall the matching slot-C MeshCore application after this one-time bootloader migration;
-subsequent canonical slot-C bootloader-update UF2 files can then be used normally.
+`wiscore_rak4631_board_rak15001_slot_c` or `wiscore_rak4631_w25q16`, do **not** use
+the new target's canonical bootloader-update UF2 for the first migration. A current
+board-bound ordinary RAK4631 bootloader expects the DFU device name `4631_DFU`, while
+the RAK15001 and W25Q16 targets use `4631_15001C_DFU` and `4631_W25Q16_DFU`,
+respectively, so it rejects either cross-target UF2. Use the exact target's OTAFIX
+combined bootloader + SoftDevice package ending in `_s140_<version>.zip` through serial
+DFU or a compatible BLE DFU client, or flash the exact image with SWD. A MeshCore
+application Serial DFU ZIP updates only the application and is not a substitute.
+Reinstall the matching MeshCore application after this one-time bootloader migration;
+subsequent canonical exact-target bootloader-update UF2 files can then be used normally.
+
+The RAK3401 W25Q16 target has the same one-time identity boundary. The ordinary
+`wiscore_rak3401` bootloader uses `3401_DFU`, while
+`wiscore_rak3401_rak13302_w25q16` uses `3401_W25Q16_DFU`; neither accepts the other's
+board-bound bootloader-update UF2. Install the exact combined bootloader + SoftDevice
+package through serial/BLE DFU or SWD first, then reinstall the matching MeshCore
+application. Do not substitute the ordinary RAK3401 or RAK4631 image.
 
 The direct preview.7 links below are retained for their original board targets, but preview.7 has only a
 brief USB recovery probe and predates raw-QSPI apply support. Use preview.8 or newer for the 30-second USB

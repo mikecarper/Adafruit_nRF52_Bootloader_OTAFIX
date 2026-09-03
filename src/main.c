@@ -76,6 +76,7 @@
 
 void usb_init(bool cdc_only);
 void usb_teardown(void);
+bool usb_transport_active(void);
 
 // tinyusb function that handles power event (detected, ready, removed)
 // We must call it within SD's SOC event handler, or set it as power event handler if SD is not enabled.
@@ -643,7 +644,7 @@ uint32_t proc_soc(void) {
                      (soc_evt == NRF_EVT_POWER_USB_POWER_READY) ? NRFX_POWER_USB_EVT_READY :
                      (soc_evt == NRF_EVT_POWER_USB_REMOVED) ? NRFX_POWER_USB_EVT_REMOVED : -1;
 
-    if (usbevt >= 0) {
+    if (usbevt >= 0 && usb_transport_active()) {
       tusb_hal_nrf_power_event((uint32_t)usbevt);
     }
 #endif

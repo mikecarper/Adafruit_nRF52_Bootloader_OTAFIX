@@ -91,7 +91,11 @@ idempotent committed-block retransmission, completion counting, terminal
 geometry/kind aborts, and clearing every transfer/page mask at an explicit
 USB/MSC session reset. The production caller compares retransmitted
 application bytes with flash before accepting them; a conflicting
-same-geometry image remains fail-closed.
+same-geometry image remains fail-closed. The synthetic physical
+`CURRENT.UF2` extent is pinned read-only at its first, middle, and last sectors,
+including malformed or changed host data and a multi-sector write crossing its
+tail. A saved `CURRENT.UF2` copied to clusters beyond that extent remains a
+normal application transfer.
 
 The pstorage regression compiles the production raw driver against a deterministic SoftDevice flash
 mock. It verifies that an immediate `NRF_ERROR_BUSY` waits for and ignores the preceding operation's

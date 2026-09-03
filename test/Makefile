@@ -97,7 +97,8 @@ usb_wait_test: usb_wait_test.c $(SRC)/usb/usb_wait.c $(SRC)/usb/usb_wait.h
 	$(CC) $(CFLAGS) -DUSB_WAIT_HOST_TEST -I $(SRC)/usb usb_wait_test.c $(SRC)/usb/usb_wait.c -o $@
 
 uf2_write_state_test: uf2_write_state_test.c $(SRC)/usb/uf2/uf2_app_flash.h \
-                      $(SRC)/usb/uf2/uf2_transfer_state.h
+                      $(SRC)/usb/uf2/uf2_transfer_state.h \
+                      $(SRC)/usb/uf2/uf2_current_echo.h
 	$(CC) $(CFLAGS) -I $(SRC)/usb/uf2 uf2_write_state_test.c -o $@
 
 dfu_entry_test: dfu_entry_test.c $(SRC)/dfu_entry.h

@@ -72,6 +72,16 @@ _Static_assert(MOTA_QSPI_SCK_PIN != NRF_QSPI_PIN_NOT_CONNECTED &&
                  MOTA_QSPI_IO0_PIN != NRF_QSPI_PIN_NOT_CONNECTED &&
                  MOTA_QSPI_IO1_PIN != NRF_QSPI_PIN_NOT_CONNECTED,
                "QSPI SCK, CSN, IO0, and IO1 pins must be connected");
+#if defined(MOTA_QSPI_AUX_CSN_PIN)
+_Static_assert(MOTA_QSPI_AUX_CSN_PIN != NRF_QSPI_PIN_NOT_CONNECTED &&
+                 MOTA_QSPI_AUX_CSN_PIN != MOTA_QSPI_SCK_PIN &&
+                 MOTA_QSPI_AUX_CSN_PIN != MOTA_QSPI_CSN_PIN &&
+                 MOTA_QSPI_AUX_CSN_PIN != MOTA_QSPI_IO0_PIN &&
+                 MOTA_QSPI_AUX_CSN_PIN != MOTA_QSPI_IO1_PIN &&
+                 MOTA_QSPI_AUX_CSN_PIN != MOTA_QSPI_IO2_PIN &&
+                 MOTA_QSPI_AUX_CSN_PIN != MOTA_QSPI_IO3_PIN,
+               "QSPI auxiliary CSN must be connected and distinct from the flash bus pins");
+#endif
 
 static void feed_watchdogs(void) {
   if (NRF_WDT->RUNSTATUS != 0) {
@@ -133,6 +143,17 @@ static __attribute__((noinline)) bool wait_memory_ready(uint32_t max_steps) {
   }
   return false;
 }
+
+#if defined(MOTA_QSPI_AUX_CSN_PIN)
+static void deselect_aux_device(void) {
+  // Preload high before changing direction so an active-low device sharing
+  // SCK/IO0/IO1 never observes a select pulse during flash initialization.
+  QSPI_GPIO_PORT(MOTA_QSPI_AUX_CSN_PIN)->OUTSET =
+    1u << QSPI_GPIO_INDEX(MOTA_QSPI_AUX_CSN_PIN);
+  QSPI_GPIO_PORT(MOTA_QSPI_AUX_CSN_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_AUX_CSN_PIN)] =
+    QSPI_PIN_CNF_OUTPUT_H0H1;
+}
+#endif
 
 static void configure_qspi_pins(bool enable) {
   const uint32_t pin_cnf = enable ? QSPI_PIN_CNF_H0H1 : QSPI_PIN_CNF_DEFAULT;
@@ -209,6 +230,12 @@ static void select_qspi_pins(bool enable) {
 }
 
 bool ota_qspi_init(void) {
+  #if defined(MOTA_QSPI_AUX_CSN_PIN)
+  // Keep the other active-low SPI device deselected before any wake clocks or
+  // QSPI peripheral activity. Leave it driven high until the application
+  // deliberately reconfigures its radio after handoff.
+  deselect_aux_device();
+  #endif
   if (g_capacity != 0) {
     return true;
   }

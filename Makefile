@@ -116,12 +116,11 @@ ifneq ($(ARM_GCC_SUPPORTED),1)
   $(error Arm GNU Toolchain 14.2.Rel1 or newer is required; found '$(ARM_GCC_VERSION)')
 endif
 
-# Set make directory command, Windows tries to create a directory named "-p" if that flag is there.
-ifneq ($(OS), Windows_NT)
-  MKDIR = mkdir -p
-else
-  MKDIR = mkdir
-endif
+# Object directories are created by multiple independent pattern rules. Plain
+# Windows `mkdir` fails when another parallel job creates the same directory
+# first, while cmd.exe does not accept the POSIX `-p` option. Python is already
+# a required build dependency, so use its idempotent cross-platform primitive.
+MKDIR = $(PYTHON) -c "import os,sys; os.makedirs(sys.argv[1], exist_ok=True)"
 
 RM = rm -rf
 CP = cp
