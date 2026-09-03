@@ -509,7 +509,7 @@ struct dip_reader {
   uint16_t chunk_len, chunk_pos;
 };
 
-// Keep tinf's tiny state off the boot stack and bound both record buffers.
+// Keep the record buffers off the boot stack and bound their storage.
 // The input is strictly shorter than the corresponding <=1 KiB output.
 static uint8_t g_dip_input[DIP_CHUNK_SIZE];
 static uint8_t g_dip_output[DIP_CHUNK_SIZE];

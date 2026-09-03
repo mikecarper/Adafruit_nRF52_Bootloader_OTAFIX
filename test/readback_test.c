@@ -285,7 +285,8 @@ int main(int argc, char** argv) {
     printf("[4] malformed detools bounds/geometry: ");
     {
         stage_flash();
-        struct apply_ctx c = {0, 4, 0, MOTA_NRF52_APP_BASE, g_write_start, 0};
+        struct apply_ctx c = {.patch_len = 4, .ws_lo = MOTA_NRF52_APP_BASE,
+                              .ws_hi = g_write_start};
         uint8_t byte = 0;
         int bounds_ok = dt_mr(&c, &byte, UINTPTR_MAX, 1) < 0 &&
                         dt_mw(&c, UINTPTR_MAX, &byte, 1) < 0 &&

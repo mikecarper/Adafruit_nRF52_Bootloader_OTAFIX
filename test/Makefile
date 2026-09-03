@@ -32,6 +32,32 @@ readback_test: readback_test.c $(SRC)/ota_delta.c $(SRC)/detools/detools.c $(SRC
                $(SRC)/ota_delta.h $(SRC)/ota_layout.h
 	$(CC) $(CFLAGS) -DOTA_DELTA_HOST_TEST $(INC) readback_test.c $(SRC)/detools/detools.c $(SRC)/sha256.c -o $@
 
+# Explicit codec-enabled builds: unlike the default suites these exercise DIP1
+# through the real apply entry point. CFLAGS propagate ASan/UBSan from sanitize.
+CODEC3_DEPS = codec3_apply_test.c readback_test.c $(SRC)/ota_delta.c \
+              $(SRC)/ota_delta.h $(SRC)/ota_layout.h $(SRC)/ota_bl_info.h \
+              $(SRC)/detools/detools.c $(SRC)/sha256.c $(SRC)/tinf/tinflate.c $(SRC)/tinf/tinf.h
+
+codec3_apply_test: $(CODEC3_DEPS)
+	$(CC) $(CFLAGS) -DOTA_DELTA_HOST_TEST -DMOTA_DEFLATE_CODEC=1 $(INC) \
+		codec3_apply_test.c $(SRC)/detools/detools.c $(SRC)/sha256.c $(SRC)/tinf/tinflate.c -o $@
+
+codec3_disabled_test: $(CODEC3_DEPS)
+	$(CC) $(CFLAGS) -DOTA_DELTA_HOST_TEST $(INC) \
+		codec3_apply_test.c $(SRC)/detools/detools.c $(SRC)/sha256.c -o $@
+
+codec3_internal_test: $(CODEC3_DEPS) $(SRC)/usb/uf2/bootloader_image.c
+	$(CC) $(CFLAGS) -DOTA_DELTA_HOST_TEST -DMOTA_DEFLATE_CODEC=1 \
+		-DMOTA_INTERNAL_BOOTLOADER_UPDATE -DUSB_DESC_VID=0x239A -DUSB_DESC_UF2_PID=0x0029 \
+		-DDEVICE_NAME='"3401_DFU"' $(INC) codec3_apply_test.c $(SRC)/detools/detools.c \
+		$(SRC)/sha256.c $(SRC)/tinf/tinflate.c $(SRC)/usb/uf2/bootloader_image.c -o $@
+
+codec3-check: codec3_apply_test codec3_disabled_test codec3_internal_test
+	python3 codec3_apply_test.py ./codec3_apply_test ./codec3_disabled_test ./codec3_internal_test
+
+tinf_fixed_test: tinf_fixed_test.c $(SRC)/tinf/tinflate.c $(SRC)/tinf/tinf.h
+	$(CC) $(CFLAGS) -I $(SRC) tinf_fixed_test.c $(SRC)/tinf/tinflate.c -o $@
+
 readback_test_v7: readback_test.c $(SRC)/ota_delta.c $(SRC)/detools/detools.c $(SRC)/sha256.c \
                   $(SRC)/ota_delta.h $(SRC)/ota_layout.h
 	$(CC) $(CFLAGS) -DOTA_DELTA_HOST_TEST -DMOTA_NRF52_APP_BASE=0x00027000u $(INC) \
@@ -120,8 +146,8 @@ pstorage_busy_test: pstorage_busy_test.c $(PSTORAGE_SRC) $(wildcard pstorage_stu
 	$(CC) $(CFLAGS) -Wno-int-to-pointer-cast -DNRF52_SERIES $(PSTORAGE_INC) \
 		pstorage_busy_test.c $(PSTORAGE_SRC) -o $@
 
-check: apply_sim readback_test readback_test_v7 readback_internal_test bootloader_image_test sd_apply_test qspi_apply_test bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test softdevice_fwid_test qspi_alignment_test qspi_wake_test usb_wait_test uf2_write_state_test dfu_entry_test peer_data_layout_test peer_data_layout_nrf52_test peer_data_layout_nrf52833_test pstorage_busy_test
-	python3 tinf_fixed_test.py
+check: apply_sim readback_test readback_test_v7 readback_internal_test bootloader_image_test sd_apply_test qspi_apply_test bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test softdevice_fwid_test qspi_alignment_test qspi_wake_test usb_wait_test uf2_write_state_test dfu_entry_test peer_data_layout_test peer_data_layout_nrf52_test peer_data_layout_nrf52833_test pstorage_busy_test codec3-check tinf_fixed_test
+	python3 tinf_fixed_test.py ./tinf_fixed_test
 	python3 version_derivation_test.py
 	python3 build_profile_test.py
 	python3 manifest_patcher_test.py
@@ -181,5 +207,6 @@ sanitize:
 
 clean:
 	rm -f apply_sim readback_test readback_test_v7 readback_internal_test bootloader_image_test sd_apply_test qspi_apply_test bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test softdevice_fwid_test qspi_alignment_test qspi_wake_test usb_wait_test uf2_write_state_test dfu_entry_test peer_data_layout_test peer_data_layout_nrf52_test peer_data_layout_nrf52833_test pstorage_busy_test
+	rm -f codec3_apply_test codec3_disabled_test codec3_internal_test tinf_fixed_test
 
-.PHONY: check sanitize clean
+.PHONY: check codec3-check sanitize clean
