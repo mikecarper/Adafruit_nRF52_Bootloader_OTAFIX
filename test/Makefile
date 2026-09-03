@@ -120,6 +120,7 @@ pstorage_busy_test: pstorage_busy_test.c $(PSTORAGE_SRC) $(wildcard pstorage_stu
 		pstorage_busy_test.c $(PSTORAGE_SRC) -o $@
 
 check: apply_sim readback_test readback_test_v7 readback_internal_test bootloader_image_test sd_apply_test qspi_apply_test bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test softdevice_fwid_test qspi_alignment_test qspi_wake_test usb_wait_test uf2_write_state_test dfu_entry_test peer_data_layout_test peer_data_layout_nrf52_test peer_data_layout_nrf52833_test pstorage_busy_test
+	python3 tinf_fixed_test.py
 	python3 version_derivation_test.py
 	python3 build_profile_test.py
 	python3 manifest_patcher_test.py
