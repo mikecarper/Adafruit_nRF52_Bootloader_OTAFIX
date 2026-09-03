@@ -455,6 +455,30 @@ int main(int argc, char **argv) {
   long     expected_len = load("vectors/new.img", &expected);
   int      failures     = 0;
 
+  printf("[codec guard] %s unsupported codecs and capability mask: ", STORE_NAME);
+  {
+    const uint8_t original_codec = delta[64u];
+    const uint8_t unsupported[] = {1u, 3u, 255u};
+    const uint16_t expected_mask = (1u << CODEC_FULL) | (1u << CODEC_INPLACE);
+    int ok = g_mota_bl_info.codec_mask == expected_mask;
+    for (size_t i = 0; i < sizeof(unsupported); i++) {
+      reset_device(base, (uint32_t)base_len);
+      delta[64u] = unsupported[i];
+      if (!stage_external_mota(delta, (uint32_t)delta_len)) return 2;
+      bool bad_applied = ota_delta_check_and_apply();
+      ok = ok && !bad_applied && g_bank0 == BANK_VALID_APP_V && g_settings_writes == 0 &&
+           g_gpregret == 0 && g_gpregret2 == 0xB3u &&
+           memcmp(FLASH + MOTA_NRF52_APP_BASE, base, (size_t)base_len) == 0;
+    }
+    delta[64u] = original_codec;
+    if (ok) {
+      printf("PASS - only supported codecs advertised; old application untouched\n");
+    } else {
+      printf("FAIL - unknown codec advertised or passed the pre-apply guard\n");
+      failures++;
+    }
+  }
+
   printf("[1] %s detools delta: ", STORE_NAME);
   reset_device(base, (uint32_t)base_len);
   if (!stage_external_mota(delta, (uint32_t)delta_len)) {

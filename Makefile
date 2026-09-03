@@ -215,11 +215,6 @@ C_SRC += \
   src/sha256.c \
   src/detools/detools.c \
 
-ifeq ($(MOTA_DEFLATE_CODEC),1)
-C_SRC += src/tinf/tinflate.c
-CFLAGS += -DMOTA_DEFLATE_CODEC=1
-endif
-
 # if using a signed firmware
 ifeq ($(SIGNED_FW), 1)
 C_SRC += \

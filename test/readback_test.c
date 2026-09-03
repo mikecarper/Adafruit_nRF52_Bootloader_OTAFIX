@@ -279,6 +279,34 @@ int main(int argc, char** argv) {
         }
     }
 
+    // Codec identifiers are an explicit allowlist, not an invitation to feed an
+    // unknown payload to detools. This includes the withdrawn codec-3 format.
+    printf("[codec guard] unsupported codecs and capability mask: ");
+    {
+        const uint8_t original_codec = g_mota[64u];
+        const uint8_t unsupported[] = {1u, 3u, 255u};
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+        const uint16_t expected_mask = (1u << CODEC_FULL) | (1u << CODEC_INPLACE);
+#else
+        const uint16_t expected_mask = 1u << CODEC_INPLACE;
+#endif
+        int ok = g_mota_bl_info.codec_mask == expected_mask;
+        for (size_t i = 0; i < sizeof(unsupported); i++) {
+            g_mota[64u] = unsupported[i];
+            bool bad_applied = run_case(0, &committed, &matches);
+            ok = ok && !bad_applied && g_bank0 == 0x01 && g_settings_writes == 0 &&
+                 g_gpregret == 0 && g_gpregret2 == 0xB3u &&
+                 memcmp(FLASH + MOTA_NRF52_APP_BASE, g_base, g_base_n) == 0;
+        }
+        g_mota[64u] = original_codec;
+        if (ok) {
+            printf("PASS - only supported codecs advertised; old application untouched\n");
+        } else {
+            printf("FAIL - unknown codec advertised or passed the pre-apply guard\n");
+            fails++;
+        }
+    }
+
 #if !defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
     // [4] Malformed callback ranges, wrapped container geometry, and an oversized detools memory geometry
     // must be rejected without invalidating or changing the current application.

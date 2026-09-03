@@ -1,8 +1,17 @@
 # Bootloader DEFLATE size investigation (2026-09-03)
 
-## Result
+## Decision: bootloader experiment removed
 
-Keep `MOTA_DEFLATE_CODEC` **off by default**. The size-optimized full-DEFLATE
+The bootloader DEFLATE experiment has been removed, including the decoder,
+record buffers, codec-3 capability, build options and experiment-only tests.
+Ordinary CRLE in-place deltas and bootloader updates remain supported. MeshCore
+radio-transfer compression and its application-side inflater are unaffected.
+
+The results below are an archived investigation of the removed implementation,
+not instructions for enabling a feature in the current tree. Its code and
+protocol notes remain recoverable from Git history at `87fcca6`.
+
+The size-optimized full-DEFLATE
 prototype did not fit the existing bootloader flash envelope on RAK3401,
 T1000-E, T096 or T114. The fixed-Huffman decoder is smaller, but is not a
 general drop-in solution: its baseline RAK3401 build still overflows and the
@@ -60,9 +69,9 @@ and LTO-link recipes were checked with `make -n -B`: the final optimization was
 | `-Oz -fno-inline-small-functions -fno-inline-functions-called-once` | Not measured | Not measured / 44,828 |
 
 None improved on the baseline. The equal plain `-Os`/`-Oz` results were real
-compiler outcomes, not ineffective Make overrides. This evidence supports
-keeping the smaller fixed decoder as an experiment, but not enabling it across
-these targets or weakening validation to squeeze in full DEFLATE.
+compiler outcomes, not ineffective Make overrides. These results led to removal
+of the experiment rather than enabling it across these targets or weakening
+validation to squeeze in full DEFLATE.
 
 ### Reproduction identity
 
@@ -107,14 +116,14 @@ This substitutes only the decompressor for sizing; it is **not** a new wire
 protocol implementation or a deployable full-DEFLATE image. Profile 1 remains
 fixed-only. A full implementation needs explicit profile/capability negotiation
 and matching encoder/app integration before any such packages can be sent.
-See [the current contract](../src/tinf/README.otafix.md).
+See [the archived experimental contract](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/blob/87fcca6dff14d50f453cbb305a5c4a348d511915/src/tinf/README.otafix.md).
 
 Full tinf's local tree state is approximately 1,256 bytes on ARM, with another
 320-byte code-length array and 32-byte offsets array in its deepest helper
 path, before frames and callers. The bootloader's default stack is 8 KiB;
 full integration would still need call-chain/interrupt margin qualification.
 
-## Verification scope
+## Historical investigation verification
 
 The decoder-off merged tree passed the host regression suite and linked the
 six baseline boards above. The fixed implementation passed 1,271 real apply

@@ -19,9 +19,6 @@
   #include "usb/uf2/bootloader_image.h"
 #endif
 #include "detools/detools.h"
-#if defined(MOTA_DEFLATE_CODEC)
-  #include "tinf/tinf.h"
-#endif
 #include <string.h>
 #include <stdint.h>
 
@@ -58,17 +55,7 @@
 #endif
 
 #if defined(MOTA_BOOTLOADER_UPDATE_ENABLED)
-  #if defined(MOTA_DEFLATE_CODEC)
-    #define MOTA_BOOT_UPDATE_CODEC_MASK ((1u << CODEC_FULL) | (1u << CODEC_INPLACE) | (1u << 3))
-  #else
-    #define MOTA_BOOT_UPDATE_CODEC_MASK ((1u << CODEC_FULL) | (1u << CODEC_INPLACE))
-  #endif
-#endif
-
-#if defined(MOTA_DEFLATE_CODEC)
-  #define MOTA_DEFLATE_CODEC_MASK (1u << 3)
-#else
-  #define MOTA_DEFLATE_CODEC_MASK 0u
+  #define MOTA_BOOT_UPDATE_CODEC_MASK ((1u << CODEC_FULL) | (1u << CODEC_INPLACE))
 #endif
 
 // Capability marker the running MeshCore app scans for (see ota_bl_info.h). `used` + the reference in
@@ -78,16 +65,16 @@ __attribute__((used, aligned(4))) const mota_bl_info_t g_mota_bl_info = {
    MOTA_BL_MAGIC7},
   MOTA_BL_APPLY_ABI,
 #if defined(MOTA_SD_CARD)
-  (uint16_t)((1u << 0) | (1u << 2) | MOTA_DEFLATE_CODEC_MASK), // SD: full images and in-place deltas
+  (uint16_t)((1u << 0) | (1u << 2)), // SD: full images and in-place deltas
   {MOTA_SD_STORAGE_FLAGS, 0, 0, 0},  // retained-auth SD source
 #elif defined(MOTA_QSPI_FLASH)
-  (uint16_t)((1u << 0) | (1u << 2) | MOTA_DEFLATE_CODEC_MASK), // QSPI: full images and in-place deltas
+  (uint16_t)((1u << 0) | (1u << 2)), // QSPI: full images and in-place deltas
   {MOTA_QSPI_STORAGE_FLAGS, 0, 0, 0},
 #elif defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
-  (uint16_t)((1u << 0) | (1u << 2) | MOTA_DEFLATE_CODEC_MASK), // internal staging: bootloader full image + app in-place delta
+  (uint16_t)((1u << 0) | (1u << 2)), // internal staging: bootloader full image + app in-place delta
   {MOTA_BOOT_UPDATE_STORAGE_FLAGS, 0, 0, 0},
 #else
-  (uint16_t)((1u << 2) | MOTA_DEFLATE_CODEC_MASK), // internal flash: in-place deltas only
+  (uint16_t)(1u << 2), // internal flash: in-place deltas only
   {MOTA_BL_STORAGE_STAGE_CEILING, 0, 0, 0}, // GPREGRET2 selects the safe staging ceiling
 #endif
 };
@@ -104,7 +91,6 @@ static const uint8_t APRV[4]    = {'A', 'P', 'R', 'V'};
 #define MFLAG_BOOTLOADER 0x04u
 #define CODEC_FULL    0u
 #define CODEC_INPLACE 2u
-#define CODEC_INPLACE_DEFLATE 3u
 #define PAGE          MOTA_NRF52_FLASH_PAGE
 
 // ---- platform flash / settings / gpregret abstraction --------------------------------------------
@@ -299,7 +285,7 @@ static uint32_t rd_u32(const uint8_t *p) {
   return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
-#if defined(MOTA_BOOTLOADER_UPDATE_ENABLED) || defined(MOTA_DEFLATE_CODEC)
+#if defined(MOTA_BOOTLOADER_UPDATE_ENABLED)
 static uint16_t rd_u16(const uint8_t *p) {
   return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
 }
@@ -491,127 +477,11 @@ static void cerase(uint32_t addr, uint32_t n) { // detools calls this page-align
   }
 }
 
-#if defined(MOTA_DEFLATE_CODEC)
-// Codec 3 is intentionally narrower than general DEFLATE so it fits in the
-// fixed bootloader envelope. Each compressed record is exactly one final
-// fixed-Huffman block. Independent 1 KiB records bound both history and RAM.
-#define DIP_HEADER_SIZE       32u
-#define DIP_CHUNK_SIZE        1024u
-#define DIP_MAX_DECODED_SIZE  0x00100000u
-#define DIP_RECORD_RAW        0x8000u
-#define DIP_RECORD_LENGTH     0x7FFFu
-#define DIP_VERSION           1u
-#define DIP_PROFILE_FIXED_1K  1u
-
-struct dip_reader {
-  uint32_t source_addr, source_len, source_pos;
-  uint32_t decoded_len, decoded_pos;
-  uint16_t chunk_len, chunk_pos;
-};
-
-// Keep the record buffers off the boot stack and bound their storage.
-// The input is strictly shorter than the corresponding <=1 KiB output.
-static uint8_t g_dip_input[DIP_CHUNK_SIZE];
-static uint8_t g_dip_output[DIP_CHUNK_SIZE];
-
-static void dip_reader_init(struct dip_reader *r, uint32_t source_addr,
-                            uint32_t source_len, uint32_t decoded_len) {
-  r->source_addr = source_addr;
-  r->source_len  = source_len;
-  r->source_pos  = 0;
-  r->decoded_len = decoded_len;
-  r->decoded_pos = 0;
-  r->chunk_len   = 0;
-  r->chunk_pos   = 0;
-}
-
-static int dip_fill(struct dip_reader *r) {
-  if (r->chunk_pos != r->chunk_len || r->decoded_pos >= r->decoded_len ||
-      r->source_pos > r->source_len || r->source_len - r->source_pos < 2u) {
-    return 0;
-  }
-  uint8_t record_bytes[2];
-  inherited_watchdog_feed();
-  if (!staged_read(r->source_addr + r->source_pos, record_bytes,
-                   sizeof(record_bytes))) {
-    return 0;
-  }
-  r->source_pos += sizeof(record_bytes);
-  const uint16_t record     = rd_u16(record_bytes);
-  const uint16_t stored_len = record & DIP_RECORD_LENGTH;
-  uint32_t       decoded_len = r->decoded_len - r->decoded_pos;
-  if (decoded_len > DIP_CHUNK_SIZE) {
-    decoded_len = DIP_CHUNK_SIZE;
-  }
-  if (stored_len == 0 || r->source_pos > r->source_len ||
-      stored_len > r->source_len - r->source_pos) {
-    return 0;
-  }
-
-  if ((record & DIP_RECORD_RAW) != 0) {
-    if (stored_len != decoded_len ||
-        !staged_read(r->source_addr + r->source_pos, g_dip_output,
-                     stored_len)) {
-      return 0;
-    }
-  } else {
-    if (stored_len >= decoded_len ||
-        !staged_read(r->source_addr + r->source_pos, g_dip_input,
-                     stored_len) ||
-        tinf_uncompress_fixed(g_dip_output, decoded_len, g_dip_input,
-                              stored_len) != TINF_OK) {
-      return 0;
-    }
-  }
-  r->source_pos += stored_len;
-  r->chunk_len = (uint16_t)decoded_len;
-  r->chunk_pos = 0;
-  return 1;
-}
-
-static int dip_read(struct dip_reader *r, uint8_t *dst, uint32_t len) {
-  if (r->decoded_pos > r->decoded_len || len > r->decoded_len - r->decoded_pos) {
-    return 0;
-  }
-  while (len) {
-    if (r->chunk_pos == r->chunk_len && !dip_fill(r)) {
-      return 0;
-    }
-    uint32_t count = r->chunk_len - r->chunk_pos;
-    if (count > len) {
-      count = len;
-    }
-    memcpy(dst, g_dip_output + r->chunk_pos, count);
-    dst += count;
-    len -= count;
-    r->chunk_pos += (uint16_t)count;
-    r->decoded_pos += count;
-  }
-  return 1;
-}
-
-static int dip_finish(struct dip_reader *r) {
-  while (r->decoded_pos < r->decoded_len) {
-    if (r->chunk_pos == r->chunk_len && !dip_fill(r)) {
-      return 0;
-    }
-    uint32_t count = r->chunk_len - r->chunk_pos;
-    r->chunk_pos = r->chunk_len;
-    r->decoded_pos += count;
-  }
-  return r->chunk_pos == r->chunk_len && r->source_pos == r->source_len;
-}
-#endif
-
 // ---- detools in-place callbacks (region addresses are 0-based; base sits at workspace offset 0) ---
 struct apply_ctx {
   uint32_t patch_addr, patch_len, patch_pos;
   uint32_t ws_lo, ws_hi; // workspace = [ws_lo, ws_hi); ws_hi == mota start (never written)
   int      step;
-#if defined(MOTA_DEFLATE_CODEC)
-  uint8_t           patch_codec;
-  struct dip_reader dip;
-#endif
 };
 static int dt_ws_addr(const struct apply_ctx *c, uintptr_t off, size_t n, uint32_t *addr) {
   uint32_t span = c->ws_hi - c->ws_lo;
@@ -669,15 +539,6 @@ static int dt_pr(void *a, uint8_t *dst, size_t n) {
     return -DETOOLS_IO_FAILED;
   }
   inherited_watchdog_feed();
-#if defined(MOTA_DEFLATE_CODEC)
-  if (c->patch_codec == CODEC_INPLACE_DEFLATE) {
-    if (!dip_read(&c->dip, dst, (uint32_t)n)) {
-      return -DETOOLS_IO_FAILED;
-    }
-    c->patch_pos += (uint32_t)n;
-    return DETOOLS_OK;
-  }
-#endif
   if (!staged_read(c->patch_addr + c->patch_pos, dst, (uint32_t)n)) {
     return -DETOOLS_IO_FAILED;
   }
@@ -757,78 +618,6 @@ static int dt_geometry_ok(const struct mota_min *m, uint32_t body_len, uint32_t 
   return dt_geometry_values_ok(m, body_len, ws_span, fixed, memory, segment,
                                shift, from, to);
 }
-
-#if defined(MOTA_DEFLATE_CODEC)
-static int dip_header_u32(struct dip_reader *r, uint32_t *out) {
-  uint8_t b;
-  if (!dip_read(r, &b, 1)) {
-    return 0;
-  }
-  uint32_t value = b & 0x3Fu;
-  uint32_t shift = 6;
-  while ((b & 0x80u) != 0) {
-    if (!dip_read(r, &b, 1)) {
-      return 0;
-    }
-    const uint32_t bits = b & 0x7Fu;
-    if (shift >= 32 || bits > (UINT32_MAX >> shift)) {
-      return 0;
-    }
-    value |= bits << shift;
-    shift += 7;
-  }
-  if (value > 0x7FFFFFFFu) {
-    return 0;
-  }
-  *out = value;
-  return 1;
-}
-
-// Parse the authenticated cleartext wrapper, inflate every record before the
-// commit point, and require its duplicated geometry to equal the decoded
-// detools header. No malformed compressed byte can survive until app writes.
-static int dip_geometry_ok(const struct mota_min *m, uint32_t body_len,
-                           uint32_t ws_span, uint32_t *decoded_size_out) {
-  static const uint8_t magic[4] = {'D', 'I', 'P', '1'};
-  uint8_t              h[DIP_HEADER_SIZE];
-  if (m->payload_size <= sizeof(h) ||
-      !staged_read(m->payload_addr, h, sizeof(h)) ||
-      memcmp(h, magic, sizeof(magic)) != 0 || h[4] != DIP_VERSION ||
-      h[5] != DIP_PROFILE_FIXED_1K || rd_u16(h + 6) != DIP_CHUNK_SIZE) {
-    return 0;
-  }
-
-  const uint32_t decoded_size = rd_u32(h + 8);
-  const uint32_t memory       = rd_u32(h + 12);
-  const uint32_t segment      = rd_u32(h + 16);
-  const uint32_t shift        = rd_u32(h + 20);
-  const uint32_t from         = rd_u32(h + 24);
-  const uint32_t to           = rd_u32(h + 28);
-  if (decoded_size < 2 || decoded_size > DIP_MAX_DECODED_SIZE) {
-    return 0;
-  }
-
-  struct dip_reader r;
-  dip_reader_init(&r, m->payload_addr + sizeof(h), m->payload_size - sizeof(h),
-                  decoded_size);
-  uint8_t  fixed;
-  uint32_t actual_memory, actual_segment, actual_shift, actual_from, actual_to;
-  if (!dip_read(&r, &fixed, 1) || !dip_header_u32(&r, &actual_memory) ||
-      !dip_header_u32(&r, &actual_segment) ||
-      !dip_header_u32(&r, &actual_shift) ||
-      !dip_header_u32(&r, &actual_from) ||
-      !dip_header_u32(&r, &actual_to) || actual_memory != memory ||
-      actual_segment != segment || actual_shift != shift || actual_from != from ||
-      actual_to != to ||
-      !dt_geometry_values_ok(m, body_len, ws_span, fixed, memory, segment, shift,
-                             from, to) ||
-      !dip_finish(&r)) {
-    return 0;
-  }
-  *decoded_size_out = decoded_size;
-  return 1;
-}
-#endif
 
 // ---- `.mota` parse (fixed fields only) + EndF base location --------------------------------------
 static int parse_mota_at(uint32_t addr, uint32_t limit, struct mota_min *o) {
@@ -1708,11 +1497,7 @@ bool ota_delta_check_and_apply(void) {
   // Any pre-apply rejection clears the approval (this `.mota` is not applicable) and boots normally.
   uint32_t body_len;
   uint8_t  base32[32];
-  int      codec_supported = m.codec_id == CODEC_INPLACE;
-#if defined(MOTA_DEFLATE_CODEC)
-  codec_supported = codec_supported || m.codec_id == CODEC_INPLACE_DEFLATE;
-#endif
-  if (m.is_full || !codec_supported || m.image_size == 0 || m.image_size > app_limit - APP_BASE) {
+  if (m.is_full || m.codec_id != CODEC_INPLACE || m.image_size == 0 || m.image_size > app_limit - APP_BASE) {
     gpregret2_set(0xB3);
     goto reject;
   }
@@ -1734,16 +1519,7 @@ bool ota_delta_check_and_apply(void) {
 #else
   const uint32_t workspace_span = mota_addr - APP_BASE;
 #endif
-  uint32_t decoded_patch_len = m.payload_size;
-#if defined(MOTA_DEFLATE_CODEC)
-  int geometry_ok = m.codec_id == CODEC_INPLACE_DEFLATE
-                      ? dip_geometry_ok(&m, body_len, workspace_span,
-                                        &decoded_patch_len)
-                      : dt_geometry_ok(&m, body_len, workspace_span);
-#else
-  int geometry_ok = dt_geometry_ok(&m, body_len, workspace_span);
-#endif
-  if (!geometry_ok) {
+  if (!dt_geometry_ok(&m, body_len, workspace_span)) {
     gpregret2_set(0xB9);
     goto reject;
   }
@@ -1762,7 +1538,7 @@ bool ota_delta_check_and_apply(void) {
 
   struct apply_ctx c;
   c.patch_addr = m.payload_addr;
-  c.patch_len  = decoded_patch_len;
+  c.patch_len  = m.payload_size;
   c.patch_pos  = 0;
   c.ws_lo      = APP_BASE;
 #if defined(MOTA_SD_CARD)
@@ -1778,26 +1554,14 @@ bool ota_delta_check_and_apply(void) {
   c.ws_hi = mota_addr; // workspace stays strictly below internal mota
 #endif
   c.step = 0;
-#if defined(MOTA_DEFLATE_CODEC)
-  c.patch_codec = m.codec_id;
-  if (m.codec_id == CODEC_INPLACE_DEFLATE) {
-    dip_reader_init(&c.dip, m.payload_addr + DIP_HEADER_SIZE,
-                    m.payload_size - DIP_HEADER_SIZE, decoded_patch_len);
-  }
-#endif
   int r = detools_apply_patch_in_place_callbacks(dt_mr, dt_mw, dt_me, dt_ss,
-                                                  dt_sg, dt_pr,
-                                                  (size_t)decoded_patch_len, &c);
+                                                dt_sg, dt_pr, (size_t)m.payload_size, &c);
   cache_flush();
   if (r < 0) {
     gpregret2_set(0x90 | ((uint32_t)(-r) & 0x0F));
     return finish_apply(false);
   }
-  if (c.patch_pos != c.patch_len
-#if defined(MOTA_DEFLATE_CODEC)
-      || (m.codec_id == CODEC_INPLACE_DEFLATE && !dip_finish(&c.dip))
-#endif
-  ) {
+  if (c.patch_pos != c.patch_len) {
     gpregret2_set(0x99);
     return finish_apply(false);
   }

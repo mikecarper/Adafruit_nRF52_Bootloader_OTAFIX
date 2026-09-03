@@ -15,21 +15,11 @@ make check        # apply the committed vector (apply_sim) + the LTO-readback re
 make sanitize     # rebuild and run the complete host suite with ASan and UBSan
 ```
 
-`make codec3-check` explicitly compiles the opt-in codec 3 on and off and runs
-the real application-update entry point with raw, compressed, and mixed DIP1
-records. Profile 1 uses independent 1 KiB records with one final fixed-Huffman
-block per compressed record. Both legacy internal staging and shared internal
-bootloader-update staging are covered, including codec-2 compatibility and
-capability advertisement. Malformed wrapper geometry, record sizes, final
-records, manifest flags, truncations, and trailing input must be rejected before
-application invalidation; a final image hash mismatch must leave the bank
-invalid. Vectors are generated independently with Python's zlib around the
-committed detools patch and target image.
-
-The standalone tinf tests use a native batch runner with exact-sized allocations,
-not a shared library loaded into Python. Both it and the codec-3 integration
-harnesses inherit `CFLAGS`, so `make sanitize` instruments the actual decoders,
-including the standalone valid, malformed, truncated, and random input cases.
+The internal, SD, and QSPI application tests also verify the advertised codec
+mask and reject unsupported codecs (including codec 3) before invalidating or
+changing the running application. Ordinary codec-2 updates, malformed detools
+geometry checks, and the existing full-image/bootloader-update safeguards remain
+covered. All native harnesses inherit `CFLAGS` for `make sanitize`.
 
 Debug an arbitrary scenario (e.g. the real firmware that misbehaved on a device):
 

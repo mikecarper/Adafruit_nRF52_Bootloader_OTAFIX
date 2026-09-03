@@ -4,7 +4,7 @@
 
 - Treat the synthetic `CURRENT.UF2` disk extent as read-only so Windows cached sectors cannot corrupt a new UF2 copy; a saved `CURRENT.UF2` copied back as a new file remains installable.
 - Keep TinyUSB shut down after a USB probe falls back to BLE DFU, including delayed SoftDevice power events and direct USB callbacks.
-- Preserve the optional, default-off codec-3 fixed-DEFLATE experiment, with explicit compressed-apply and malformed-input regression tests. See `src/tinf/README.otafix.md` for its restricted profile and unchanged flash limits.
+- Remove the bootloader-only DEFLATE experiment, its codec-3 capability, decoder, record buffers and build options after the flash-size investigation. Ordinary CRLE in-place deltas, bootloader updates, USB/QSPI fixes and the flash layout are unchanged; MeshCore radio-transfer compression is unaffected.
 
 ## 0.6.2 - 2021.09.10
 
