@@ -46,14 +46,33 @@ static void test_wake_precedes_activation(void) {
   char *init = strstr(source, "bool ota_qspi_init(void)");
   char *wake = init == NULL ? NULL : strstr(init, "wake_flash_gpio();");
   char *awake = init == NULL ? NULL : strstr(init, "g_awake = true;");
-  char *unsafe = init == NULL ? NULL : strstr(init, "g_power_off_safe = false;");
   char *select = init == NULL ? NULL : strstr(init, "select_qspi_pins(true);");
   char *activate = init == NULL ? NULL : strstr(init, "NRF_QSPI_TASK_ACTIVATE");
-  assert(init != NULL && wake != NULL && awake != NULL && unsafe != NULL &&
-         select != NULL && activate != NULL);
-  assert(wake < awake && wake < unsafe && awake < select && unsafe < select &&
-         select < activate);
+  assert(init != NULL && wake != NULL && awake != NULL && select != NULL &&
+         activate != NULL);
+  assert(wake < awake && awake < select && select < activate);
   assert(strstr(init, "custom_instruction(0xAB") == NULL);
+  free(source);
+}
+
+static void test_switched_rail_release_guard(void) {
+  char *source = load_source();
+  char *init = strstr(source, "bool ota_qspi_init(void)");
+  char *power_on = init == NULL ? NULL : strstr(init, "MOTA_QSPI_POWER_ACTIVE);");
+  char *settle = power_on == NULL ? NULL : strstr(power_on, "nrf_delay_ms(2);");
+  char *wake = settle == NULL ? NULL : strstr(settle, "wake_flash_gpio();");
+  char *deinit = strstr(source, "void ota_qspi_deinit(void)");
+  char *released = deinit == NULL ? NULL : strstr(deinit, "bool flash_released = !g_awake;");
+  char *sleep = released == NULL ? NULL : strstr(released, "custom_instruction(QSPI_DPD_ENTER");
+  char *power_guard = sleep == NULL ? NULL : strstr(sleep, "if (flash_released)");
+  char *power_off = power_guard == NULL ? NULL : strstr(power_guard, "nrf_gpio_pin_write(MOTA_QSPI_POWER_PIN");
+
+  assert(init != NULL && power_on != NULL && settle != NULL && wake != NULL);
+  assert(power_on < settle && settle < wake);
+  assert(deinit != NULL && released != NULL && sleep != NULL && power_guard != NULL && power_off != NULL);
+  assert(released < sleep && sleep < power_guard && power_guard < power_off);
+  assert(strstr(source, "g_powered") == NULL);
+  assert(strstr(source, "g_power_off_safe") == NULL);
   free(source);
 }
 
@@ -134,11 +153,58 @@ static void test_rak_w25q16_profiles(void) {
   free(rak4631_cmake);
 }
 
+static void test_new_qspi_board_profiles(void) {
+  char *techo = load_file("../src/boards/lilygo_techo_lite/board.h",
+                          "src/boards/lilygo_techo_lite/board.h");
+  char *techo_make = load_file("../src/boards/lilygo_techo_lite/board.mk",
+                               "src/boards/lilygo_techo_lite/board.mk");
+  char *techo_cmake = load_file("../src/boards/lilygo_techo_lite/board.cmake",
+                                "src/boards/lilygo_techo_lite/board.cmake");
+  char *pca = load_file("../src/boards/pca10056/board.h",
+                        "src/boards/pca10056/board.h");
+  char *pca_make = load_file("../src/boards/pca10056/board.mk",
+                             "src/boards/pca10056/board.mk");
+  char *pca_cmake = load_file("../src/boards/pca10056/board.cmake",
+                              "src/boards/pca10056/board.cmake");
+
+  assert(strstr(techo, "BUTTON_DFU     _PINNUM(0, 24)") != NULL);
+  assert(strstr(techo, "BUTTON_DFU_OTA _PINNUM(0, 24)") != NULL);
+  assert(strstr(techo, "MOTA_QSPI_POWER_PIN    PIN_LDO_ENABLE") != NULL);
+  assert(strstr(techo, "MOTA_QSPI_POWER_ACTIVE 1") != NULL);
+  assert(strstr(techo, "MOTA_QSPI_SCK_PIN      _PINNUM(0, 4)") != NULL);
+  assert(strstr(techo, "MOTA_QSPI_CSN_PIN      _PINNUM(0, 12)") != NULL);
+  assert(strstr(techo_make, "DEVICE_NAME='\"LTEL_DFU\"'") != NULL);
+  assert(strstr(techo_make, "-DMOTA_QSPI_FLASH=1") != NULL);
+  assert(strstr(techo_cmake, "set(DEVICE_NAME LTEL_DFU)") != NULL);
+  assert(strstr(techo_cmake, "set(MOTA_QSPI_FLASH ON)") != NULL);
+
+  assert(strstr(pca, "BUTTON_DFU     11") != NULL);
+  assert(strstr(pca, "BUTTON_DFU_OTA 12") != NULL);
+  assert(strstr(pca, "MOTA_QSPI_SCK_PIN            19") != NULL);
+  assert(strstr(pca, "MOTA_QSPI_CSN_PIN            17") != NULL);
+  assert(strstr(pca, "MOTA_QSPI_JEDEC_MANUFACTURER 0xC2u") != NULL);
+  assert(strstr(pca, "MOTA_QSPI_JEDEC_MEMORY_TYPE  0x28u") != NULL);
+  assert(strstr(pca, "MOTA_QSPI_JEDEC_CAPACITY     0x17u") != NULL);
+  assert(strstr(pca_make, "DEVICE_NAME='\"N056_DFU\"'") != NULL);
+  assert(strstr(pca_make, "-DMOTA_QSPI_FLASH=1") != NULL);
+  assert(strstr(pca_cmake, "set(DEVICE_NAME N056_DFU)") != NULL);
+  assert(strstr(pca_cmake, "set(MOTA_QSPI_FLASH ON)") != NULL);
+
+  free(techo);
+  free(techo_make);
+  free(techo_cmake);
+  free(pca);
+  free(pca_make);
+  free(pca_cmake);
+}
+
 int main(void) {
   test_opcode_and_timing();
   test_wake_precedes_activation();
+  test_switched_rail_release_guard();
   test_aux_deselect_precedes_wake();
   test_rak_w25q16_profiles();
-  puts("QSPI pre-activation wake and shared-bus profiles: PASS");
+  test_new_qspi_board_profiles();
+  puts("QSPI wake, switched-rail safety, and board profiles: PASS");
   return 0;
 }

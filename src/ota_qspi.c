@@ -52,10 +52,6 @@ static bool     g_active;
 static bool     g_awake;
 static uint32_t g_capacity;
 static uint8_t  g_bounce[256] __attribute__((aligned(4)));
-#if defined(MOTA_QSPI_POWER_PIN)
-static bool g_powered;
-static bool g_power_off_safe;
-#endif
 
 _Static_assert((sizeof(g_bounce) & (OTA_QSPI_DMA_ALIGNMENT - 1u)) == 0,
                "QSPI bounce buffer size must be word aligned");
@@ -245,11 +241,7 @@ bool ota_qspi_init(void) {
   #if defined(MOTA_QSPI_POWER_PIN)
   nrf_gpio_cfg_output(MOTA_QSPI_POWER_PIN);
   nrf_gpio_pin_write(MOTA_QSPI_POWER_PIN, MOTA_QSPI_POWER_ACTIVE);
-  if (!g_powered) {
-    g_powered = true;
-    g_power_off_safe = true;
-    nrf_delay_ms(2);
-  }
+  nrf_delay_ms(2);
   #endif
 
   nrf_qspi_int_disable(NRF_QSPI, 0xFFFFFFFFu);
@@ -261,9 +253,6 @@ bool ota_qspi_init(void) {
   // interrupted by reset.  Even if ACTIVATE times out, deinit must not remove
   // its rail until SR1 proves WIP clear and deep power-down succeeds.
   g_awake = true;
-  #if defined(MOTA_QSPI_POWER_PIN)
-  g_power_off_safe = false;
-  #endif
   select_qspi_pins(true);
 
   const nrf_qspi_prot_conf_t protocol = {
@@ -329,9 +318,6 @@ void ota_qspi_deinit(void) {
     if (wait_memory_ready(QSPI_RECOVERY_WAIT_STEPS) &&
         custom_instruction(QSPI_DPD_ENTER, NRF_QSPI_CINSTR_LEN_1B, NULL)) {
       nrf_delay_us(QSPI_DPD_RELEASE_GUARD_US);
-      #if defined(MOTA_QSPI_POWER_PIN)
-      g_power_off_safe = true;
-      #endif
       flash_released = true;
     }
   }
@@ -353,10 +339,8 @@ void ota_qspi_deinit(void) {
   g_capacity = 0;
 
   #if defined(MOTA_QSPI_POWER_PIN)
-  if (g_powered && g_power_off_safe) {
+  if (flash_released) {
     nrf_gpio_pin_write(MOTA_QSPI_POWER_PIN, MOTA_QSPI_POWER_ACTIVE ? 0u : 1u);
-    g_powered = false;
-    g_power_off_safe = false;
   }
   #endif
 }

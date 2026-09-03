@@ -48,9 +48,9 @@
 #define MOTA_QSPI_IO2_PIN            22
 #define MOTA_QSPI_IO3_PIN            23
 #define MOTA_QSPI_SCK_FREQ           NRF_QSPI_FREQ_32MDIV4 // 8 MHz
-#define MOTA_QSPI_JEDEC_MANUFACTURER 0xC2
-#define MOTA_QSPI_JEDEC_MEMORY_TYPE  0x28
-#define MOTA_QSPI_JEDEC_CAPACITY     0x17
+#define MOTA_QSPI_JEDEC_MANUFACTURER 0xC2u
+#define MOTA_QSPI_JEDEC_MEMORY_TYPE  0x28u
+#define MOTA_QSPI_JEDEC_CAPACITY     0x17u
 
 //--------------------------------------------------------------------+
 // BLE OTA
