@@ -52,6 +52,11 @@ and validation overhead, including flash initializers for writable data.
 The fixed-only implementation is the smaller fallback, not proof that general
 DEFLATE cannot fit any target.
 
+The [2026-09-03 complete-bootloader size measurements](../../docs/deflate-sizing.md)
+record the full/fixed comparison and compiler flag trials. Those trials did not
+make full DEFLATE fit the four measured internal/display targets, and fixed
+decoding also has insufficient or marginal room there.
+
 Full DEFLATE must not silently broaden profile 1. Dynamic/stored/multiblock
 support needs a separately specified profile and a way for the sender to know
 the installed bootloader supports it. The existing codec-3 bit alone does not
