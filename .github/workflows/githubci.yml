@@ -153,7 +153,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: mikecarper/motatool
-          ref: 11f67eef8f1dffba9cbb7d102777cc7134be3821
+          ref: 9eef6e53173317f63d8cd6e61fb4f70b20129ab0
           path: _motatool
 
       - name: Download bootloader artifacts

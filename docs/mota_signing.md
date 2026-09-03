@@ -38,6 +38,22 @@ automatically installed. Verify the exact physical board and storage profile;
 `heltec_mesh_tower_v2` and `heltec_mesh_tower_v2_sdcard` are not
 interchangeable.
 
+The official bundle includes the `gat562` selector for the GAT562 30S Kit,
+Mesh Tracker Pro, EVB Pro / 30S Pod, and Solar Relay carriers. It uses board ID
+`0x239A0029`, device name `GAT562_DFU`, hardware ID
+`NRF_BL_239A0029_GAT562_DFU`, derived package target `0xD50D2D44`, and the
+internal `0x0A` storage profile. Its qualified image uses S140 6.1.1 (family
+140, FWID `0x00B6`, application base `0x00026000`, and layout ABI 1). Do not
+use it for the GAT562 Mesh Watch 13; that carrier has populated QSPI flash and
+requires a separate exact profile.
+
+Older GAT562 installations that still report the legacy `4631_DFU` identity
+cannot accept this package remotely: exact identity matching deliberately
+prevents a bootloader package from changing board identity. Migrate once with
+the exact GAT562 bootloader through local USB/BLE DFU or SWD. After that
+GAT562-bound bootloader reports `GAT562_DFU`, later signed `gat562` packages can
+use the remote bootloader-update flow.
+
 ## Menu-driven release check and LoRa update
 
 `tools/otafix_mota_update.py` reads `get bootloader.ver` and `ota bootloader`
@@ -115,7 +131,7 @@ file mode:
 ```bash
 git clone https://github.com/mikecarper/motatool.git
 cd motatool
-git checkout 11f67eef8f1dffba9cbb7d102777cc7134be3821
+git checkout 9eef6e53173317f63d8cd6e61fb4f70b20129ab0
 cargo build --release --locked
 umask 077
 ./target/release/motatool keygen --out custom-otafix.key

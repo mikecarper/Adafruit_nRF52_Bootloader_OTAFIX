@@ -15,6 +15,7 @@ import zipfile
 
 
 QUALIFIED_BOARDS = (
+    "gat562",
     "heltec_mesh_pocket",
     "heltec_mesh_tower_v2",
     "heltec_mesh_tower_v2_sdcard",
@@ -239,6 +240,13 @@ Then follow the explicit bootloader installation workflow. Always select the
 exact board and storage profile. In particular, heltec_mesh_tower_v2 and
 heltec_mesh_tower_v2_sdcard are not interchangeable even though they share a
 wire target ID.
+
+The gat562 profile covers the GAT562 30S Kit, Mesh Tracker Pro, EVB Pro / 30S
+Pod, and Solar Relay carriers. It does not cover the GAT562 Mesh Watch 13,
+which has populated QSPI flash and requires a separate exact storage profile.
+An older GAT562 bootloader reporting legacy 4631_DFU needs a one-time local
+USB/BLE DFU or SWD migration to the exact GAT562 bootloader before it can use
+remote gat562 packages; exact identity matching cannot perform that migration.
 
 Every package is exactly {MOTA_SIZE} bytes, signed, board-bound, and verified
 against the public key. See manifest.json and SHA256SUMS for the inventory.
