@@ -71,12 +71,18 @@ scratch erase, both full and in-place successor codecs, readback/full-image veri
 power cuts, and preservation of ordinary SD application updates through `0xED000` even though bootloader
 scratch begins at `0xE0000`.
 
-The bootloader-image tests require the authoritative `BLMF`+`BLM2` envelope in the final 76 bytes of the
-raw image, reject a relocated-only envelope and a 75-byte undersized input, and prove decoy bytes cannot
-override the fixed record. The format-3 suites additionally reject outer/embedded version disagreement,
-equal-version and downgrade candidates, SoftDevice FWID, application-base, and layout mismatch, invalid
-version channels, and loss of either required successor codec. `manifest_patcher_test.py` independently
-enforces the same fixed offset in the HEX post-link tool.
+The bootloader-image tests require a board-bound, whole-image-CRC `BLMF`, accept
+the historical relocated BLMF-only recovery form, and require `BLM2`
+compatibility metadata to occupy the final 76-byte canonical envelope whenever
+that metadata is consumed. They reject undersized input, ambiguous valid
+identities, malformed v2 metadata, and decoys. The format-3 suites additionally
+reject outer/embedded version disagreement, SoftDevice FWID, application-base,
+and layout mismatch and loss of either required successor codec, while proving
+that compatible equal-version reinstalls and downgrades are accepted.
+`manifest_patcher_test.py` independently enforces the fixed v2 offset in the
+HEX post-link tool. `dfu_image_policy_test` checks the equivalent Legacy DFU
+role/split policy against application vectors, staged SoftDevice metadata, and
+the exact board identity.
 
 `cf2_guard_test.py` exercises the supported OTAFIX CF2 wrapper with raw BIN and UF2 images using the
 production `0x9F50` CF2 / `0x9FB4` manifest layout. It preserves read-only inspection, refuses
@@ -89,7 +95,11 @@ is accepted, and VBUS removal stops the wait immediately.
 
 The UF2 write-state test verifies that the bootloader atomically clears the
 application-valid settings word before erasing any out-of-order target page,
-and that each page erase and block program remains a separate retryable phase.
+that different UF2 block numbers cannot alias one flash destination, and that
+completion requires contiguous application coverage plus valid vectors. It
+also keeps application-family UF2 writes out of the SoftDevice: pre-application
+blocks are accepted only when they byte-match installed flash, preserving a
+copied `CURRENT.UF2` without permitting an implicit SoftDevice migration.
 This keeps an interrupted image unbootable even while its vector page is still
 intact. Hardware A/B testing showed that OTAFIX 2.4.3's partial-NVMC application
 erase could disconnect a XIAO nRF52840 on its first UF2 sector, while OTAFIX
@@ -200,6 +210,19 @@ The BLE-advertising regression pins the 31-byte Legacy DFU layout. Flags and the
 name bytes. Longer board names, including MeshTower V2's `TOWER_V2_OTA`, must
 use the shortened-name AD type instead of silently dropping the UUID.
 
+The BLE Device Information regression preserves the historical manufacturer,
+model, and firmware characteristic registration order. Their value handles
+remain `0x0018`, `0x001A`, and `0x001C`, respectively, so bonded phones and
+BlueZ hosts with a cached Legacy DFU GATT layout can still identify an updated
+bootloader. The compact implementation keeps each value in SoftDevice-owned
+storage rather than retaining pointers to initialization data.
+
+The LF-clock regression requires `board_init()` to stop, select, and start the
+internal RC oscillator in that order. It separately pins the SoftDevice BLE
+configuration to calibrated LFRC with the 16/2 calibration intervals and
+250-ppm accuracy. A board definition therefore cannot silently make boot
+timers or BLE recovery depend on a missing or misconfigured external crystal.
+
 The Make build-profile regression uses a stub Arm toolchain, so it runs on a
 host without Arm GCC 14. It proves that identical profiles reuse objects while
 changes to the SoftDevice, signing policy or public key, dual-bank/UF2/DFU/debug
@@ -207,7 +230,22 @@ features, USB timeout, source selection, or compiler/linker flags rewrite a
 content-hashed stamp and force both recompilation and relinking. The persisted
 stamp contains only a SHA-256 digest. The same regression pins nonrelease CI to
 the documented corrected `0x02040403` qualification lineage and rejects reuse
-of failed candidate ID `0x02040401` as an active override.
+of failed candidate ID `0x02040401` as an active override. It also pins both CI
+toolchain installs to Arm GNU Toolchain 14.2.Rel1, requires Make and CMake to
+build the signed-plus-dual-bank `heltec_t096` and `heltec_t114` profiles, keeps
+`-Oz`, and rejects the unsafe `-fmerge-all-constants` and optional
+`-fipa-pta` size flags. It also prevents restoration of the obsolete global
+`-fno-ipa-modref` workaround now that every bundled Nordic SVC wrapper carries
+its own `noipa` and memory barriers.
+
+The all-board helper regression keeps each board in an isolated build
+directory and resolves the exact current `OUT_NAME`; an older versioned `.out`
+left beside it can neither cause a false failure nor be reported as the current
+result. CI's board matrix remains the permanent compile/link envelope check for
+every curated target. The UF2 source guard also pins compact, label-only
+recovery volumes on internal, QSPI, and microSD self-update targets. Those
+targets still accept raw UF2 writes, while ordinary targets retain
+`INFO_UF2.TXT`, `INDEX.HTM`, and synthetic `CURRENT.UF2`.
 
 The BLE-connection-policy regression keeps connection-parameter ownership with
 the central and forbids a fatal CONNECTED-time GAP update. It requires both

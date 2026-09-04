@@ -50,6 +50,7 @@ SOFTWARE.
 
 #define MAX_BLOCKS (CFG_UF2_FLASH_SIZE / 256 + 100)
 #define UF2_APP_PAGE_COUNT ((USER_FLASH_END - USER_FLASH_START) / CODE_PAGE_SIZE)
+#define UF2_FLASH_BLOCK_COUNT (CFG_UF2_FLASH_SIZE / 256U)
 
 enum {
     UF2_UPDATE_KIND_NONE = 0,
@@ -61,14 +62,19 @@ typedef struct {
     uint32_t numBlocks;
     uint32_t numWritten;
     uint32_t bootloaderEraseOffset;
+    uint32_t appMaximumWrittenEnd;
+    uint32_t appStart;
+    uint32_t appSize;
 
     uint8_t updateKind;
     bool aborted;
     bool has_uicr;
     bool bootloaderStagingErased;
     bool appSettingsInvalidated;
+    bool appValidated;
 
     uint8_t writtenMask[MAX_BLOCKS / 8 + 1];
+    uint8_t targetMask[(UF2_FLASH_BLOCK_COUNT + 7) / 8];
     uint8_t appErasedMask[(UF2_APP_PAGE_COUNT + 7) / 8];
 } WriteState;
 

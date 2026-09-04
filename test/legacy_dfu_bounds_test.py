@@ -32,32 +32,11 @@ def require_start_bounds(path: Path) -> None:
     start = function_source(source, "uint32_t dfu_start_pkt_handle(")
     idle = start.index("DFU_STATE_IDLE != m_dfu_state")
     copy = start.index("m_start_packet = *(p_packet->params.start_packet)")
-    populated = start.index("const uint8_t populated_mode")
-    matched_mode = start.index("m_start_packet.dfu_update_mode != populated_mode")
-    nonempty = start.index("populated_mode == 0")
-    known_mode = start.index("populated_mode > DFU_UPDATE_APP")
-    bootloader_bound = start.index(
-        "m_start_packet.bl_image_size > DFU_BL_IMAGE_MAX_SIZE"
-    )
-    softdevice_bound = start.index(
-        "m_start_packet.sd_image_size > DFU_IMAGE_MAX_SIZE_FULL - m_start_packet.bl_image_size"
-    )
-    total_bound = start.index(
-        "m_start_packet.app_image_size > DFU_IMAGE_MAX_SIZE_FULL -"
-    )
-    total = start.index("m_image_size = m_start_packet.sd_image_size")
-    if not (
-        idle
-        < copy
-        < populated
-        < matched_mode
-        < nonempty
-        < known_mode
-        < bootloader_bound
-        < softdevice_bound
-        < total_bound
-        < total
-    ):
+    validated = start.index("dfu_start_packet_validate(&m_start_packet")
+    assigned = start.index("&m_image_size", validated)
+    region_bound = start.index("m_image_size > DFU_IMAGE_MAX_SIZE_FULL", assigned)
+    functions = start.index("m_functions.", region_bound)
+    if not idle < copy < validated < assigned < region_bound < functions:
         raise AssertionError(
             f"{path.name} does not validate image layout and components before adding them"
         )
@@ -84,44 +63,74 @@ def require_start_bounds(path: Path) -> None:
         raise AssertionError(f"{path.name} does not bound INIT arithmetic before copying")
 
     callback = function_source(source, "static void pstorage_callback_handler(")
-    callback_ota_gate = callback.index("if ( is_ota() )")
-    data_ready = callback.index("m_dfu_state = DFU_STATE_RX_DATA_PKT", callback_ota_gate)
+    signed_callback = callback.index("#ifdef SIGNED_FW")
+    data_ready = callback.index("m_dfu_state = DFU_STATE_RX_DATA_PKT", signed_callback)
     init_notify = callback.index("m_data_pkt_cb(INIT_PACKET", data_ready)
-    if not callback_ota_gate < data_ready < init_notify:
-        raise AssertionError(f"{path.name} does not finish signed preparation as INIT")
+    unsigned_callback = callback.index("#else", init_notify)
+    if not signed_callback < data_ready < init_notify < unsigned_callback:
+        raise AssertionError(
+            f"{path.name} does not finish every signed preparation as INIT"
+        )
 
-    signed_start = start.index("#ifdef SIGNED_FW", total)
-    ota_gate = start.index("if ( is_ota() )", signed_start)
-    ready_without_erase = start.index("m_dfu_state = DFU_STATE_RDY", ota_gate)
+    signed_start = start.index("#ifdef SIGNED_FW", assigned)
+    ready_without_erase = start.index("m_dfu_state = DFU_STATE_RDY", signed_start)
     start_notify = start.index("m_data_pkt_cb(START_PACKET", ready_without_erase)
-    serial_fallback = start.index("else", start_notify)
-    signed_end = start.index("#endif", serial_fallback)
-    start_prepare = start.index("m_functions.prepare(m_image_size)", signed_end)
+    unsigned_branch = start.index("#else", start_notify)
+    start_prepare = start.index("m_functions.prepare(m_image_size)", unsigned_branch)
     if not (
         signed_start
-        < ota_gate
         < ready_without_erase
         < start_notify
-        < serial_fallback
-        < signed_end
+        < unsigned_branch
         < start_prepare
     ):
-        raise AssertionError(f"{path.name} erases for signed unauthenticated BLE START")
+        raise AssertionError(f"{path.name} erases for an unauthenticated signed START")
 
     complete = function_source(source, "uint32_t dfu_init_pkt_complete(")
     prevalidate = complete.index("dfu_init_prevalidate")
-    ota_gate = complete.index("if ( is_ota() )", prevalidate)
-    authenticated_prepare = complete.index("m_functions.prepare(m_image_size)", ota_gate)
-    serial_fallback = complete.index("else", authenticated_prepare)
-    data_ready = complete.index("m_dfu_state = DFU_STATE_RX_DATA_PKT", serial_fallback)
+    signed_branch = complete.index("#ifdef SIGNED_FW", prevalidate)
+    authenticated_prepare = complete.index("m_functions.prepare(m_image_size)", signed_branch)
+    unsigned_branch = complete.index("#else", authenticated_prepare)
+    data_ready = complete.index("m_dfu_state = DFU_STATE_RX_DATA_PKT", unsigned_branch)
     if not (
         prevalidate
-        < ota_gate
+        < signed_branch
         < authenticated_prepare
-        < serial_fallback
+        < unsigned_branch
         < data_ready
     ):
-        raise AssertionError(f"{path.name} prepares signed BLE flash before INIT authentication")
+        raise AssertionError(f"{path.name} does not defer signed flash preparation until INIT")
+
+    validate = function_source(source, "uint32_t dfu_image_validate(")
+    integrity = validate.index("dfu_init_postvalidate")
+    role = validate.index("dfu_image_policy_validate", integrity)
+    activate = validate.index("DFU_STATE_WAIT_4_ACTIVATE", role)
+    if not integrity < role < activate:
+        raise AssertionError(f"{path.name} activates bytes without role/layout validation")
+
+
+def require_shared_start_validator() -> None:
+    source = (ROOT / "src/dfu_image_policy.c").read_text()
+    validator = function_source(source, "uint32_t dfu_start_packet_validate(")
+    populated = validator.index("uint8_t const populated_mode")
+    matched_mode = validator.index("start_packet->dfu_update_mode != populated_mode")
+    alignment = validator.index("sizeof(uint32_t) - 1U")
+    bootloader_bound = validator.index(
+        "start_packet->bl_image_size > DFU_BL_IMAGE_MAX_SIZE"
+    )
+    first_add = validator.index("__builtin_add_overflow(start_packet->sd_image_size")
+    second_add = validator.index("__builtin_add_overflow(image_size")
+    total = validator.index("*image_size_out = image_size")
+    if not (
+        populated
+        < matched_mode
+        < alignment
+        < bootloader_bound
+        < first_add
+        < second_add
+        < total
+    ):
+        raise AssertionError("shared START validator performs unsafe size arithmetic")
 
 
 def require_serial_framing_bounds() -> None:
@@ -199,23 +208,39 @@ def require_serial_framing_bounds() -> None:
 
 
 def main() -> None:
+    require_shared_start_validator()
     require_start_bounds(DFU_ROOT / "dfu_single_bank.c")
     require_start_bounds(DFU_ROOT / "dfu_dual_bank.c")
     require_serial_framing_bounds()
 
     ble = (DFU_ROOT / "dfu_transport_ble.c").read_text()
+    append = function_source(ble, "static bool accum_append(")
+    available = append.index("sizeof(m_accum_buf) - m_accum_len")
+    copy_len = append.index("MIN(length, available)", available)
+    copy = append.index("memcpy(m_accum_buf + m_accum_len", copy_len)
+    flush = append.index("accum_flush(p_dfu)", copy)
+    if not available < copy_len < copy < flush:
+        raise AssertionError("BLE accumulator copy is not capacity-bounded")
+
+    accum_flush = function_source(ble, "static bool accum_flush(")
+    aligned_prefix = accum_flush.index("m_accum_len & ~(sizeof(uint32_t) - 1U)")
+    retain_suffix = accum_flush.index("memmove(m_accum_buf")
+    if aligned_prefix >= retain_suffix or "0xFF" in accum_flush:
+        raise AssertionError("BLE accumulator pads or loses a partial-word suffix")
+
     app_data = function_source(ble, "static void app_data_process(")
-    oversize = app_data.index(
-        "if (m_accum_active && pkt_len > sizeof(m_accum_buf))"
-    )
-    flush = app_data.index("accum_flush(p_dfu);", oversize)
-    bounded_branch = app_data.index("else if (m_accum_active)", flush)
-    remaining = app_data.index(
-        "if (m_accum_len + pkt_len > sizeof(m_accum_buf))", bounded_branch
-    )
-    copy = app_data.index("memcpy(m_accum_buf + m_accum_len", remaining)
-    if not oversize < flush < bounded_branch < remaining < copy:
-        raise AssertionError("BLE accumulator bounds no longer dominate its packet copy")
+    total_bound = app_data.index("pkt_len > (m_reported_image_size - received)")
+    append_call = app_data.index("accum_append(p_dfu, p_data, pkt_len)")
+    if total_bound >= append_call:
+        raise AssertionError("BLE accepts DATA beyond the authenticated START length")
+
+    ble_events = function_source(ble, "static void on_ble_evt(")
+    disconnected = ble_events.index("case BLE_GAP_EVT_DISCONNECTED:")
+    clear_suffix = ble_events.index("m_accum_len = 0", disconnected)
+    mtu = ble_events.index("case BLE_GATTS_EVT_EXCHANGE_MTU_REQUEST:")
+    floor_mtu = ble_events.index("((att_mtu - 3U) & 0xFFFCU) + 3U", mtu)
+    if not disconnected < clear_suffix < mtu < floor_mtu:
+        raise AssertionError("BLE reconnect suffix or MTU floor policy regressed")
 
     start_data = function_source(ble, "static void start_data_process(")
     validated = start_data.index("err_code = dfu_start_pkt_handle(&update_packet);")

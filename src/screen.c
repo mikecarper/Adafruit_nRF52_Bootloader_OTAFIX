@@ -41,6 +41,21 @@
   #define COL0(r, g, b)           ((((r) >> 3) << 11) | (((g) >> 2) << 5) | ((b) >> 3))
   #define COL(c)                  COL0((c >> 16) & 0xff, (c >> 8) & 0xff, c & 0xff)
 
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+enum {
+  COLOR_BLACK  = 0,
+  COLOR_GREEN  = 1,
+  COLOR_BLUE   = 2,
+  COLOR_ORANGE = COLOR_GREEN,
+  COLOR_PURPLE = COLOR_BLUE,
+};
+
+const uint16_t palette[] = {
+  COL(0x000000),
+  COL(0x78dc52),
+  COL(0x003fad),
+};
+#else
 enum {
   COLOR_BLACK  = 0,
   COLOR_WHITE  = 1,
@@ -75,6 +90,7 @@ const uint16_t palette[] = {
   COL(0x91463d), // 14
   COL(0x000000), // 15
 };
+#endif
 
   // The defaults preserve the 240x135 ST7789 layout. Smaller displays override
   // only the coordinates that differ in their board definition.

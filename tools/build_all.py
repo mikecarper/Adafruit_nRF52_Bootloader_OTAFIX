@@ -55,6 +55,12 @@ def parse_args():
         action="store_true",
         help="keep existing per-board build directories",
     )
+    parser.add_argument(
+        "--build-root",
+        type=Path,
+        default=Path("_build"),
+        help="per-board build root, relative to the repository by default",
+    )
     args = parser.parse_args()
     if args.jobs < 1 or args.make_jobs < 1:
         parser.error("--jobs and --make-jobs must be positive")
@@ -95,16 +101,17 @@ def image_sizes(size_tool, image):
     return text_size + data_size, data_size + bss_size
 
 
-def build_board(board, make_jobs, test_version, size_tool):
-    command = ["make", f"-j{make_jobs}", f"BOARD={board}"]
+def build_board(board, make_jobs, test_version, size_tool, build_root):
+    board_build = build_root / f"build-{board}"
+    make_args = [f"BOARD={board}", f"BUILD={board_build}"]
     if test_version is not None:
-        command.extend(
+        make_args.extend(
             [
                 "MOTA_BOOTLOADER_TEST_BUILD=1",
                 f"MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE={test_version}",
             ]
         )
-    command.append("all")
+    command = ["make", f"-j{make_jobs}", *make_args, "all"]
 
     start_time = time.monotonic()
     result = subprocess.run(
@@ -119,13 +126,30 @@ def build_board(board, make_jobs, test_version, size_tool):
     if result.returncode != 0:
         return board, False, duration, "-", "-", result.stdout
 
-    images = sorted((REPO_ROOT / "_build" / f"build-{board}").glob("*.out"))
-    if len(images) != 1:
-        detail = f"expected one .out image, found {len(images)}\n{result.stdout}"
+    name_result = subprocess.run(
+        ["make", "--silent", *make_args, "print-OUT_NAME"],
+        cwd=REPO_ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    prefix = "OUT_NAME = "
+    output_names = [
+        line[len(prefix) :]
+        for line in name_result.stdout.splitlines()
+        if line.startswith(prefix)
+    ]
+    if name_result.returncode != 0 or len(output_names) != 1:
+        detail = f"could not resolve current output name\n{name_result.stdout}{result.stdout}"
+        return board, False, duration, "-", "-", detail
+
+    image = board_build / f"{output_names[0]}.out"
+    if not image.is_file():
+        detail = f"expected current output {image}\n{result.stdout}"
         return board, False, duration, "-", "-", detail
 
     try:
-        flash_size, sram_size = image_sizes(size_tool, images[0])
+        flash_size, sram_size = image_sizes(size_tool, image)
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         return board, False, duration, "-", "-", f"size failed: {error}\n{result.stdout}"
 
@@ -140,8 +164,28 @@ def main():
         print(f"error: {error}", file=sys.stderr)
         return 2
 
-    build_root = REPO_ROOT / "_build"
+    build_root = args.build_root
+    if not build_root.is_absolute():
+        build_root = REPO_ROOT / build_root
+    build_root = build_root.resolve()
+    if build_root == REPO_ROOT or build_root == Path(build_root.anchor):
+        print(f"error: refusing unsafe build root {build_root}", file=sys.stderr)
+        return 2
     if not args.keep_build:
+        try:
+            relative_build_root = build_root.relative_to(REPO_ROOT)
+        except ValueError:
+            print(
+                f"error: --build-root outside the repository requires --keep-build: {build_root}",
+                file=sys.stderr,
+            )
+            return 2
+        if not relative_build_root.parts[0].startswith("_build"):
+            print(
+                f"error: refusing to clear non-build directory {build_root}",
+                file=sys.stderr,
+            )
+            return 2
         shutil.rmtree(build_root, ignore_errors=True)
 
     boards = sorted(entry.name for entry in (REPO_ROOT / "src" / "boards").iterdir() if entry.is_dir())
@@ -159,7 +203,12 @@ def main():
     with ThreadPoolExecutor(max_workers=worker_count) as executor:
         futures = {
             executor.submit(
-                build_board, board, args.make_jobs, args.test_version, size_tool
+                build_board,
+                board,
+                args.make_jobs,
+                args.test_version,
+                size_tool,
+                build_root,
             ): board
             for board in boards
         }

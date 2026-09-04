@@ -851,7 +851,7 @@ def main() -> int:
             "OTAFIX menu",
             [
                 "Refresh version and latest-release check",
-                "Download, verify, and install latest over LoRa",
+                "Download, verify, and install latest over LoRa (upgrade/reinstall/rollback)",
                 "Show bootloader identity",
                 "Exit",
             ],
@@ -860,15 +860,14 @@ def main() -> int:
         if action.startswith("Refresh"):
             current, _, identity = query_node(meshcli, target_port)
             release = fetch_latest_release()
-            relation = "update available" if current.order < release.version.order else "current"
+            if current.order < release.version.order:
+                relation = "upgrade available"
+            elif current.order == release.version.order:
+                relation = "equal-version reinstall available"
+            else:
+                relation = "rollback to latest public release available"
             print(f"Installed {current.label}; latest {release.version.label}: {relation}.")
         elif action.startswith("Download"):
-            if current.order >= release.version.order:
-                print(
-                    "No newer public bootloader is available. The device enforces "
-                    "strictly increasing signed bootloader versions."
-                )
-                continue
             motatool = command_path(args.motatool, "motatool")
             install_update(
                 args, meshcli, motatool, target_port, current, identity, release

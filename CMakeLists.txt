@@ -52,7 +52,6 @@ if (NOT DEFINED CMAKE_BUILD_TYPE OR CMAKE_BUILD_TYPE STREQUAL "")
 endif ()
 
 project(Adafruit_nRF52_Bootloader C ASM)
-include(CheckCCompilerFlag)
 
 if(NOT CMAKE_C_COMPILER_ID STREQUAL "GNU" OR
    CMAKE_C_COMPILER_VERSION VERSION_LESS "14.2")
@@ -65,12 +64,15 @@ add_executable(bootloader
   # src
   src/dfu_ble_svc.c
   src/dfu_init.c
+  src/dfu_image_policy.c
+  src/bootloader_settings_guard.c
   src/flash_nrf5x.c
   src/main.c
   src/screen.c
   src/images.c
   src/ota_delta.c
   src/sha256.c
+  src/usb/uf2/bootloader_image.c
   src/detools/detools.c
   src/boards/boards.c
   # nrfx
@@ -84,7 +86,6 @@ add_executable(bootloader
   ${SDK11_DIR}/libraries/bootloader_dfu/dfu_transport_serial.c
   ${SDK11_DIR}/libraries/bootloader_dfu/dfu_transport_ble.c
   ${SDK11_DIR}/ble/ble_services/ble_dfu/ble_dfu.c
-  ${SDK11_DIR}/ble/ble_services/ble_dis/ble_dis.c
   ${SDK11_DIR}/drivers_nrf/pstorage/pstorage_raw.c
   # latest sdk
   ${SDK_DIR}/libraries/timer/app_timer.c
@@ -179,7 +180,6 @@ target_include_directories(bootloader PUBLIC
   ${SDK11_DIR}/drivers_nrf/pstorage
   ${SDK11_DIR}/ble/common
   ${SDK11_DIR}/ble/ble_services/ble_dfu
-  ${SDK11_DIR}/ble/ble_services/ble_dis
   # later sdk with updated drivers
   ${SDK_DIR}/libraries/timer
   ${SDK_DIR}/libraries/scheduler
@@ -207,16 +207,19 @@ target_link_options(bootloader PUBLIC
   -L${NRFX_DIR}/mdk
   -flto
   -flto-partition=one
+  -fno-partial-inlining
+  -Oz
   -fno-jump-tables
   -nostartfiles
   --specs=nosys.specs --specs=nano.specs
   )
 target_compile_options(bootloader PUBLIC
   -mabi=aapcs
-  -Os
+  -Oz
   -fno-jump-tables
   -flto
   -flto-partition=one
+  -fno-partial-inlining
   -fshort-enums
   -fstack-usage
   -fno-strict-aliasing
@@ -236,14 +239,6 @@ target_compile_options(bootloader PUBLIC
   # Suppress warning caused by SDK
   -Wno-unused-parameter -Wno-expansion-to-defined -Wno-array-bounds
   )
-
-# Nordic's legacy SVC wrappers have broken inline-assembly constraints. GCC 11's
-# IPA mod/ref pass can otherwise optimize away arguments prepared for an SVC.
-check_c_compiler_flag("-fno-ipa-modref" COMPILER_SUPPORTS_FNO_IPA_MODREF)
-if (COMPILER_SUPPORTS_FNO_IPA_MODREF)
-  target_compile_options(bootloader PUBLIC -fno-ipa-modref)
-  target_link_options(bootloader PUBLIC -fno-ipa-modref)
-endif ()
 
 target_compile_definitions(bootloader PUBLIC
   DETOOLS_CONFIG_COMPRESSION_NONE=0
@@ -309,7 +304,6 @@ else ()
     src/usb/usb.c
     src/usb/usb_desc.c
     src/usb/usb_wait.c
-    src/usb/uf2/bootloader_image.c
     src/usb/uf2/bootloader_manifest.c
     src/usb/uf2/ghostfat.c
     # TinyUSB

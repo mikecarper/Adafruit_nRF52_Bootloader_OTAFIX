@@ -68,10 +68,29 @@ typedef struct {
   uint16_t layout_abi;
 } bootloader_image_info_t;
 
+typedef enum {
+  BOOTLOADER_IMAGE_INVALID = 0,
+  BOOTLOADER_IMAGE_LEGACY,
+  BOOTLOADER_IMAGE_V2,
+} bootloader_image_format_t;
+
 uint32_t bootloader_image_crc32(uint8_t const* image, size_t image_size, size_t crc_offset);
+bool bootloader_image_vectors_valid(uint8_t const* image, uint32_t image_size,
+                                    uint32_t code_start, uint32_t code_size);
 bool bootloader_extension_validate(bootloader_update_extension_t const* extension);
+// Accepts the board-bound BLMF format used by preview.8 and newer. This is the
+// local/manual recovery predicate and deliberately permits forward or reverse
+// version movement. bootloader_image_info() additionally requires canonical
+// BLM2 compatibility metadata.
 bool bootloader_image_validate(uint8_t const* image, uint32_t image_start, uint32_t image_size,
                                uint32_t expected_board_id, char const* expected_device_name);
+// Classifies an authenticated BLMF exactly once for remote-update policy.
+// Historical relocated BLMF-only images are legacy; a damaged extension at
+// the canonical BLMF+BLM2 location is invalid rather than a legacy fallback.
+bootloader_image_format_t bootloader_image_classify(
+  uint8_t const* image, uint32_t image_start, uint32_t image_size,
+  uint32_t expected_board_id, char const* expected_device_name,
+  bootloader_image_info_t* info_out);
 bool bootloader_image_info(uint8_t const* image, uint32_t image_start, uint32_t image_size,
                            uint32_t expected_board_id, char const* expected_device_name,
                            bootloader_image_info_t* info_out);

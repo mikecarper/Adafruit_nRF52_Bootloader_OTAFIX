@@ -32,6 +32,14 @@ static void write_u32(size_t offset, uint32_t value) {
   image[offset + 3] = (uint8_t)(value >> 24);
 }
 
+static void seal_manifest(size_t manifest_offset) {
+  size_t const crc_offset =
+    manifest_offset + offsetof(bootloader_update_manifest_t, crc32);
+  write_u32(crc_offset, 0);
+  write_u32(crc_offset,
+            bootloader_image_crc32(image, sizeof(image), crc_offset));
+}
+
 static void make_valid_image(void) {
   memset(image, 0xFF, sizeof(image));
   write_u32(0, 0x20040000UL);
@@ -74,9 +82,7 @@ static void make_valid_image(void) {
   write_u16(ext + offsetof(bootloader_update_extension_t, compat_flags), 0u);
   write_u32(ext + offsetof(bootloader_update_extension_t, reserved), 0u);
 
-  uint32_t const crc =
-    bootloader_image_crc32(image, sizeof(image), MANIFEST_OFFSET + offsetof(bootloader_update_manifest_t, crc32));
-  write_u32(MANIFEST_OFFSET + offsetof(bootloader_update_manifest_t, crc32), crc);
+  seal_manifest(MANIFEST_OFFSET);
 }
 
 int main(void) {
@@ -88,6 +94,9 @@ int main(void) {
   bootloader_image_info_t info;
   assert(bootloader_image_info(image, IMAGE_START, IMAGE_SIZE, EXPECTED_BOARD_ID,
                                expected_device_name, &info));
+  assert(bootloader_image_classify(image, IMAGE_START, IMAGE_SIZE,
+                                   EXPECTED_BOARD_ID, expected_device_name,
+                                   &info) == BOOTLOADER_IMAGE_V2);
   assert(info.boot_version == TEST_BOOT_VERSION && info.softdevice_family == 140u &&
          info.softdevice_fwid == 0x00B6u && info.app_base == 0x00026000u &&
          info.layout_abi == BOOTLOADER_UPDATE_LAYOUT_ABI);
@@ -128,20 +137,33 @@ int main(void) {
   assert(!bootloader_image_validate(image, IMAGE_START, IMAGE_SIZE, EXPECTED_BOARD_ID,
                                     expected_device_name));
 
-  // A self-consistent-looking envelope at any old/scanned location is not
-  // authoritative. New BLM2 candidates must carry it in the final 76 bytes.
+  // A board-bound BLMF-only preview remains valid at its historical scanned
+  // location for deliberate local recovery. It has no authoritative BLM2
+  // compatibility metadata.
   make_valid_image();
   memcpy(image + FALSE_MANIFEST_OFFSET, image + MANIFEST_OFFSET,
          sizeof(bootloader_update_envelope_t));
   memset(image + MANIFEST_OFFSET, 0xFF, sizeof(bootloader_update_envelope_t));
-  assert(!bootloader_image_validate(image, IMAGE_START, IMAGE_SIZE, EXPECTED_BOARD_ID,
-                                    expected_device_name));
+  seal_manifest(FALSE_MANIFEST_OFFSET);
+  assert(bootloader_image_validate(image, IMAGE_START, IMAGE_SIZE, EXPECTED_BOARD_ID,
+                                   expected_device_name));
+  assert(!bootloader_image_info(image, IMAGE_START, IMAGE_SIZE, EXPECTED_BOARD_ID,
+                                expected_device_name, &info));
+  assert(bootloader_image_classify(image, IMAGE_START, IMAGE_SIZE,
+                                   EXPECTED_BOARD_ID, expected_device_name,
+                                   &info) == BOOTLOADER_IMAGE_LEGACY);
 
   make_valid_image();
   write_u32(MANIFEST_OFFSET + sizeof(bootloader_update_manifest_t) +
             offsetof(bootloader_update_extension_t, magic1), 0u);
-  assert(!bootloader_image_validate(image, IMAGE_START, IMAGE_SIZE, EXPECTED_BOARD_ID,
-                                    expected_device_name));
+  seal_manifest(MANIFEST_OFFSET);
+  assert(bootloader_image_validate(image, IMAGE_START, IMAGE_SIZE, EXPECTED_BOARD_ID,
+                                   expected_device_name));
+  assert(!bootloader_image_info(image, IMAGE_START, IMAGE_SIZE, EXPECTED_BOARD_ID,
+                                expected_device_name, &info));
+  assert(bootloader_image_classify(image, IMAGE_START, IMAGE_SIZE,
+                                   EXPECTED_BOARD_ID, expected_device_name,
+                                   &info) == BOOTLOADER_IMAGE_INVALID);
 
   make_valid_image();
   write_u32(MANIFEST_OFFSET + sizeof(bootloader_update_manifest_t) +
@@ -150,8 +172,10 @@ int main(void) {
   write_u32(MANIFEST_OFFSET + offsetof(bootloader_update_manifest_t, crc32),
             bootloader_image_crc32(image, sizeof(image),
               MANIFEST_OFFSET + offsetof(bootloader_update_manifest_t, crc32)));
-  assert(!bootloader_image_validate(image, IMAGE_START, IMAGE_SIZE, EXPECTED_BOARD_ID,
-                                    expected_device_name));
+  assert(bootloader_image_validate(image, IMAGE_START, IMAGE_SIZE, EXPECTED_BOARD_ID,
+                                   expected_device_name));
+  assert(!bootloader_image_info(image, IMAGE_START, IMAGE_SIZE, EXPECTED_BOARD_ID,
+                                expected_device_name, &info));
 
   make_valid_image();
   write_u32(MANIFEST_OFFSET + sizeof(bootloader_update_manifest_t) +
@@ -160,8 +184,10 @@ int main(void) {
   write_u32(MANIFEST_OFFSET + offsetof(bootloader_update_manifest_t, crc32),
             bootloader_image_crc32(image, sizeof(image),
               MANIFEST_OFFSET + offsetof(bootloader_update_manifest_t, crc32)));
-  assert(!bootloader_image_validate(image, IMAGE_START, IMAGE_SIZE, EXPECTED_BOARD_ID,
-                                    expected_device_name));
+  assert(bootloader_image_validate(image, IMAGE_START, IMAGE_SIZE, EXPECTED_BOARD_ID,
+                                   expected_device_name));
+  assert(!bootloader_image_info(image, IMAGE_START, IMAGE_SIZE, EXPECTED_BOARD_ID,
+                                expected_device_name, &info));
 
   const size_t zero_u16_offsets[] = {
     offsetof(bootloader_update_extension_t, softdevice_family),
@@ -177,8 +203,10 @@ int main(void) {
               bootloader_image_crc32(
                 image, sizeof(image),
                 MANIFEST_OFFSET + offsetof(bootloader_update_manifest_t, crc32)));
-    assert(!bootloader_image_validate(image, IMAGE_START, IMAGE_SIZE,
-                                      EXPECTED_BOARD_ID, expected_device_name));
+    assert(bootloader_image_validate(image, IMAGE_START, IMAGE_SIZE,
+                                     EXPECTED_BOARD_ID, expected_device_name));
+    assert(!bootloader_image_info(image, IMAGE_START, IMAGE_SIZE,
+                                  EXPECTED_BOARD_ID, expected_device_name, &info));
   }
   make_valid_image();
   write_u32(MANIFEST_OFFSET + sizeof(bootloader_update_manifest_t) +
@@ -188,8 +216,10 @@ int main(void) {
             bootloader_image_crc32(
               image, sizeof(image),
               MANIFEST_OFFSET + offsetof(bootloader_update_manifest_t, crc32)));
-  assert(!bootloader_image_validate(image, IMAGE_START, IMAGE_SIZE,
-                                    EXPECTED_BOARD_ID, expected_device_name));
+  assert(bootloader_image_validate(image, IMAGE_START, IMAGE_SIZE,
+                                   EXPECTED_BOARD_ID, expected_device_name));
+  assert(!bootloader_image_info(image, IMAGE_START, IMAGE_SIZE, EXPECTED_BOARD_ID,
+                                expected_device_name, &info));
 
   // Local UF2 is the explicit migration/recovery path. Compatibility fields
   // must be present, but nonzero values may deliberately differ from the

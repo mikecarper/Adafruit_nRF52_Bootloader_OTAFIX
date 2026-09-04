@@ -2,6 +2,56 @@
 
 ## Changes in OTAFIX 2.4.4
 
+The current nonrelease hardware results, image margins, and measured DFU
+timings are recorded in
+[`docs/hardware-qualification-0x02040405.md`](docs/hardware-qualification-0x02040405.md).
+Candidate `0x02040404` is retained as a
+[disqualification record](docs/hardware-qualification-0x02040404.md) after its
+compact Device Information layout broke cached Legacy DFU handles.
+
+- Compatible bootloader releases can now be installed in either direction.
+  Signed `.mota` candidates still require exact outer/embedded version
+  agreement, and privileged `.mota` and Legacy DFU updates retain board
+  identity, SoftDevice FWID/family, application-base, layout-ABI, and complete
+  cryptographic/integrity validation. Neither path requires the candidate
+  version to be newer, so equal-version reinstall and deliberate rollback are
+  supported without weakening cross-board or cross-layout rejection. A
+  SoftDevice-only Legacy DFU is limited to an exact FWID/layout reinstall; a
+  SoftDevice migration requires its matching board-bound bootloader in the
+  same combined image.
+- Signed Legacy DFU no longer erases destination flash on the unauthenticated
+  START tuple. It authenticates the complete standard Nordic DFU 0.8 init
+  packet first, then prepares flash and reports INIT completion. Image role and
+  START split are rechecked from the received application vectors,
+  SoftDevice metadata, and board-bound bootloader envelope before activation.
+  `SIGNED_FW_KEY=<unencrypted-P-256-key.pem>` now creates a standard signed ZIP
+  through the modern-Python wrapper in `tools/generate_signed_legacy_dfu.py`;
+  a signed build without a private key deliberately emits no unsigned ZIP.
+- Bootloader settings are now CRC-sealed and committed geometry-first with the
+  validity marker last. Interrupted writes cannot turn erased geometry into an
+  enormous CRC range or pending swap. Application UF2 completion additionally
+  requires unique target addresses, contiguous coverage from the application
+  base, plausible vectors, and persists the actual image size and CRC.
+  Application-family UF2 blocks below that base must byte-match the installed
+  SoftDevice, so copying `CURRENT.UF2` remains harmless while SoftDevice
+  migration stays on the board-bound combined Legacy DFU path.
+- BLE DATA reassembly retains partial words between ATT fragments instead of
+  padding each fragment, bounds the stream to START's declared length, clears
+  non-resumable bytes on disconnect, and never rounds a negotiated MTU above
+  the peer request. The microSD SPI backend now has a bounded peripheral wait
+  and services only enabled inherited watchdog channels while polling.
+- Size-constrained production builds use GCC 14.2's `-Oz` with LTO and hardened
+  Nordic SVC wrappers, keeping both display-controller variants inside the
+  fixed bootloader envelope without nonconforming constant merging or the
+  optional whole-program points-to pass. The wrapper-local IPA barriers replace
+  the old image-wide `-fno-ipa-modref` workaround, allowing safe size recovery
+  in ordinary code.
+- Targets with internal, QSPI, or microSD bootloader self-update support expose
+  a compact, label-only UF2 recovery volume to keep the fail-closed updater
+  inside the fixed bootloader envelope. Drag-and-drop/raw UF2 writes still
+  work, but those targets do not synthesize `INFO_UF2.TXT`, `INDEX.HTM`, or
+  `CURRENT.UF2`; board/build identity remains available through USB descriptors
+  and the signed bootloader manifest. Other targets retain the three files.
 - BLE application DATA reception now clears this bootloader's local connection
   latency and best-effort disables inherited slave latency for the active
   connection. This does **not** request a new GAP interval or override the
@@ -164,8 +214,8 @@ candidates are not release artifacts.
 - **Authenticated SD source handoff without filesystem-sector ownership**
   New SD-capable bootloaders do not read or write a sector-1 handoff. Before resetting, the authenticated application writes one 72-byte `MOTASDA2` record at retained RAM `0x20006008` (inside an 80-byte application `PERSISTENT_RAM` region beginning at `0x20006000`). The record binds purpose and format, first LBA, the exact `ceil(container_length/512)` sector count, exact container length, application-observed card capacity, and SHA-256 of the complete container with only `APRV` bytes 201..204 normalized to zero; CRC32 and its complement cover bytes 0..63. OTAFIX copies and zero-consumes this record before its first SD access. The compact boot SPI reader bounds every access against the authenticated LBA/count/capacity geometry and the card itself, but does not issue a second CSD-capacity query; a replacement card with incompatible capacity therefore fails on the first out-of-range/card read, while identical authorized bytes on another card are not a substitution. Missing, stale, wrong-purpose, corrupt, power-cycled, or geometrically inconsistent records fail closed without SD access or application writes. Both ordinary format-2 SD application updates and format-3 SD bootloader updates require this authorization, so a removable card/controller cannot swap authenticated container A for self-consistent container B across reset. The format-3 path additionally retains the `MOTASDBL` internal-flash payload token at `0xE0000` as defense in depth before scratch compaction.
 
-- **Machine-bound bootloader compatibility and monotonic versions**
-  Every new 40 KiB raw bootloader ends with an authoritative 76-byte envelope at raw offset `0x9FB4` (`0xFDFB4` in flash). Bytes 0..43 remain the preview.12-compatible `BLMF` record and whole-image CRC; adjacent bytes 44..75 are `BLM2`/`SOFT` v2 metadata containing the true packed boot version, SoftDevice family/FWID, application base, layout ABI, zero compatibility flags, and zero reserved bytes. Linker assertions fix this envelope at the image end and prevent the 88-byte CF2 configuration from overlapping it. Remote bootloader updates require the signed outer version to equal the embedded version, exact runtime/installed SoftDevice and layout compatibility, and a version strictly newer than the installed v2 bootloader. The running bootloader reads the installed FWID with Nordic's required `SD_FWID_GET(MBR_SIZE)` base; using a zero base reads `0x200C` rather than the actual SoftDevice information field at `0x300C`. There is no signed remote rollback/migration flag; incompatible recovery remains an explicit local USB/BLE/SWD operation.
+- **Machine-bound bootloader compatibility and version metadata**
+  Every new 40 KiB raw bootloader ends with an authoritative 76-byte envelope at raw offset `0x9FB4` (`0xFDFB4` in flash). Bytes 0..43 remain the preview.12-compatible `BLMF` record and whole-image CRC; adjacent bytes 44..75 are `BLM2`/`SOFT` v2 metadata containing the true packed boot version, SoftDevice family/FWID, application base, layout ABI, zero compatibility flags, and zero reserved bytes. Linker assertions fix this envelope at the image end and prevent the 88-byte CF2 configuration from overlapping it. Preview.13 originally required strictly newer remote versions; OTAFIX 2.4.4 retains exact signed outer/embedded agreement and compatibility checks but intentionally permits forward, equal, or reverse version order. The running bootloader reads the installed FWID with Nordic's required `SD_FWID_GET(MBR_SIZE)` base; using a zero base reads `0x200C` rather than the actual SoftDevice information field at `0x300C`. Incompatible recovery remains an explicit exact-board combined Legacy DFU, local USB, or SWD operation.
 
   Released images are board-bound and must not be modified afterward with the generic CF2 patcher. Any CF2 mutation invalidates the whole-image CRC, and expanding the record can overwrite the fixed envelope. `tools/otafix_cf2.py IMAGE` is the supported read-only inspector and refuses protected mutation before invoking the bundled tool; direct bundled-patcher writes are unsupported. Board configuration changes belong in `pinconfig.c` before rebuilding and repatching the manifest CRC.
 
@@ -364,6 +414,24 @@ If there is another nRF52840-based board you would like to see supported please 
 
 The recommended way to install the bootloader is using the UF2 file.  
 Download the UF2 file for your board (they can be found in the releases with filenames beginning with `update-` and ending in `_mbr.uf2`), enter UF2 mode (usually by double pressing the reset button within 0.5s) and copy the UF2 file across. The `_mbr` artifact contains the MBR and bootloader; internal, SD-card, and QSPI apply support are determined by the exact board target. Packages ending in `_s140_<version>.zip` additionally contain the SoftDevice.
+
+For Bluetooth updates with Nordic's nRF Device Firmware Update app or another
+Legacy DFU client, select the exact-board application or combined
+SoftDevice+bootloader ZIP. These are Nordic **Legacy DFU** packages, not Secure
+DFU packages. Unsigned builds emit DFU 0.5 ZIPs. A signed-only build needs
+Python's `cryptography` package and an unencrypted NIST P-256 private key that
+matches `SIGNED_FW_QX`/`SIGNED_FW_QY`:
+
+```bash
+python3 -m pip install adafruit-nrfutil intelhex cryptography
+make BOARD=heltec_t096 SIGNED_FW=1 \
+  SIGNED_FW_QX='<32 comma-separated bytes>' \
+  SIGNED_FW_QY='<32 comma-separated bytes>' \
+  SIGNED_FW_KEY=/secure/path/signing-key.pem all
+```
+
+The resulting DFU 0.8 ZIP is signed in the standard Nordic Legacy format. The
+private key is used only for package generation and must not be committed.
 
 See the [OTAFIX releases](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases) and use a release whose notes explicitly list your exact board and required internal, SD, or QSPI apply mode.
 

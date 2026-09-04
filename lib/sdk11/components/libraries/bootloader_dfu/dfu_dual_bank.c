@@ -23,6 +23,7 @@
 #include "pstorage.h"
 #include "nrf_mbr.h"
 #include "dfu_init.h"
+#include "dfu_image_policy.h"
 #include "sdk_common.h"
 
 static dfu_state_t                  m_dfu_state;                /**< Current DFU state. */
@@ -69,9 +70,8 @@ static void pstorage_callback_handler(pstorage_handle_t * p_handle,
             {
                 m_functions.cleared();
 #ifdef SIGNED_FW
-                // Signed BLE reaches PREPARING only after INIT authentication;
-                // signed serial and all unsigned transports prepare at START.
-                if ( is_ota() )
+                // Every signed transport reaches PREPARING only after INIT
+                // authentication, so this completion belongs to INIT.
                 {
                     m_dfu_state = DFU_STATE_RX_DATA_PKT;
                     if (m_data_pkt_cb != NULL)
@@ -79,8 +79,7 @@ static void pstorage_callback_handler(pstorage_handle_t * p_handle,
                         m_data_pkt_cb(INIT_PACKET, result, p_data);
                     }
                 }
-                else
-#endif
+#else
                 {
                     m_dfu_state = DFU_STATE_RDY;
                     if (m_data_pkt_cb != NULL)
@@ -88,6 +87,7 @@ static void pstorage_callback_handler(pstorage_handle_t * p_handle,
                         m_data_pkt_cb(START_PACKET, result, p_data);
                     }
                 }
+#endif
             }
             break;
 
@@ -428,40 +428,12 @@ uint32_t dfu_start_pkt_handle(dfu_update_packet_t * p_packet)
 
     m_start_packet = *(p_packet->params.start_packet);
 
-    const uint8_t populated_mode =
-        (m_start_packet.sd_image_size ? DFU_UPDATE_SD : 0) |
-        (m_start_packet.bl_image_size ? DFU_UPDATE_BL : 0) |
-        (m_start_packet.app_image_size ? DFU_UPDATE_APP : 0);
-
-    // Valid modes are SD (1), BL (2), SD+BL (3), and APP (4). Selected
-    // components must be non-empty and unselected components must be empty.
-    if ((m_start_packet.dfu_update_mode != populated_mode) ||
-        (populated_mode == 0) || (populated_mode > DFU_UPDATE_APP))
-    {
-        return NRF_ERROR_NOT_SUPPORTED;
-    }
-
-    if (!(IS_WORD_SIZED(m_start_packet.sd_image_size) &&
-          IS_WORD_SIZED(m_start_packet.bl_image_size) &&
-          IS_WORD_SIZED(m_start_packet.app_image_size)))
-    {
-        // Image_sizes are not a multiple of 4 (word size).
-        return NRF_ERROR_NOT_SUPPORTED;
-    }
-
-    // Bound every untrusted component before adding them. Checking only the
-    // wrapped uint32_t total lets oversized SD+BL start packets bypass the
-    // flash-region limit and persist impossible swap geometry in settings.
-    if (m_start_packet.bl_image_size > DFU_BL_IMAGE_MAX_SIZE ||
-        m_start_packet.sd_image_size > DFU_IMAGE_MAX_SIZE_FULL - m_start_packet.bl_image_size ||
-        m_start_packet.app_image_size > DFU_IMAGE_MAX_SIZE_FULL -
-            m_start_packet.bl_image_size - m_start_packet.sd_image_size)
+    err_code = dfu_start_packet_validate(&m_start_packet, &m_image_size);
+    VERIFY_SUCCESS(err_code);
+    if (m_image_size > DFU_IMAGE_MAX_SIZE_FULL)
     {
         return NRF_ERROR_DATA_SIZE;
     }
-
-    m_image_size = m_start_packet.sd_image_size + m_start_packet.bl_image_size +
-                   m_start_packet.app_image_size;
 
     if (IS_UPDATING_SD(m_start_packet))
     {
@@ -493,23 +465,21 @@ uint32_t dfu_start_pkt_handle(dfu_update_packet_t * p_packet)
     VERIFY_SUCCESS(err_code);
 
 #ifdef SIGNED_FW
-    if ( is_ota() )
     {
         // The START tuple is not authenticated by the Legacy DFU protocol.
-        // BLE can defer preparation until the signed INIT packet is verified.
+        // Defer all destructive preparation until signed INIT is verified.
         m_dfu_state = DFU_STATE_RDY;
         if (m_data_pkt_cb != NULL)
         {
             m_data_pkt_cb(START_PACKET, NRF_SUCCESS, NULL);
         }
     }
-    else
-#endif
+#else
     {
-        // Unsigned DFU has no later authentication gate. Serial hosts also
-        // require this ordering because they wait for erase after START.
+        // Unsigned DFU has no later authentication gate.
         m_functions.prepare(m_image_size);
     }
+#endif
 
     return NRF_SUCCESS;
 }
@@ -627,15 +597,14 @@ uint32_t dfu_init_pkt_complete(void)
         if (err_code == NRF_SUCCESS)
         {
 #ifdef SIGNED_FW
-            if ( is_ota() )
             {
                 m_functions.prepare(m_image_size);
             }
-            else
-#endif
+#else
             {
                 m_dfu_state = DFU_STATE_RX_DATA_PKT;
             }
+#endif
         }
         else
         {
@@ -722,6 +691,12 @@ uint32_t dfu_image_validate()
                     err_code = dfu_init_postvalidate((uint8_t *)mp_storage_handle_active->block_id,
                                                      m_image_size,
                                                      &m_image_crc);
+                    VERIFY_SUCCESS(err_code);
+
+                    err_code = dfu_image_policy_validate(
+                        (uint8_t *)mp_storage_handle_active->block_id,
+                        m_image_size,
+                        &m_start_packet);
                     VERIFY_SUCCESS(err_code);
 
                     m_dfu_state = DFU_STATE_WAIT_4_ACTIVATE;

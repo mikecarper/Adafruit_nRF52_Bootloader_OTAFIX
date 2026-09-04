@@ -58,16 +58,20 @@ extern "C" {
 #else
 #define GCC_CAST_CPP
 #endif
+/* SVC consumes r0-r3 and may read pointed-to memory despite the empty C body.
+ * Block IPA from deleting caller argument setup; weak linkage coalesces the
+ * header-generated wrappers emitted by multiple translation units. */
 #define SVCALL(number, return_type, signature)          \
   _Pragma("GCC diagnostic push")                        \
   _Pragma("GCC diagnostic ignored \"-Wreturn-type\"")   \
+  __attribute__((noipa))                                \
   __attribute__((naked))                                \
-  __attribute__((unused))                               \
-  static return_type signature                          \
+  __attribute__((weak))                                 \
+  return_type signature                                 \
   {                                                     \
-    __asm(                                              \
+    __asm volatile(                                     \
         "svc %0\n"                                      \
-        "bx r14" : : "I" (GCC_CAST_CPP number) : "r0"   \
+        "bx r14" : : "I" (GCC_CAST_CPP number) : "r0", "memory" \
     );                                                  \
   }                                                     \
   _Pragma("GCC diagnostic pop")

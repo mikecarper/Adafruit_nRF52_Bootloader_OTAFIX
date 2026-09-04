@@ -4,6 +4,7 @@
 
 #include "nrf.h"
 #include "nrf_gpio.h"
+#include "nrf_wdt.h"
 #include "boards.h"
 #include <string.h>
 
@@ -11,13 +12,35 @@
 #define MOTA_SD_SPIM NRF_SPIM2
 #endif
 
+#ifndef MOTA_SD_SPI_WAIT_SPINS
+#define MOTA_SD_SPI_WAIT_SPINS 100000u
+#endif
+
 static uint8_t g_tx;
 static uint8_t g_rx;
 static uint8_t g_sector[512];
 static uint32_t g_sector_lba = UINT32_MAX;
 static bool g_block_addressing;
+static bool g_io_ok;
+
+static void feed_watchdogs(void) {
+  static uint16_t external_feed_divider;
+  if (nrf_wdt_started(NRF_WDT)) {
+    const uint32_t enabled = NRF_WDT->RREN & 0xFFu;
+    for (uint8_t channel = 0; channel < 8; channel++) {
+      if ((enabled & (1u << channel)) != 0) {
+        nrf_wdt_reload_request_set(NRF_WDT, channel);
+      }
+    }
+  }
+  if ((external_feed_divider++ & 0x0FFFu) == 0) {
+    board_watchdog_feed();
+  }
+}
 
 static uint8_t spi_byte(uint8_t value) {
+  if (!g_io_ok) return 0xFF;
+  feed_watchdogs();
   g_tx = value;
   MOTA_SD_SPIM->TXD.PTR = (uint32_t)(uintptr_t)&g_tx;
   MOTA_SD_SPIM->TXD.MAXCNT = 1;
@@ -25,7 +48,15 @@ static uint8_t spi_byte(uint8_t value) {
   MOTA_SD_SPIM->RXD.MAXCNT = 1;
   MOTA_SD_SPIM->EVENTS_END = 0;
   MOTA_SD_SPIM->TASKS_START = 1;
-  while (!MOTA_SD_SPIM->EVENTS_END) {}
+  uint32_t spins = MOTA_SD_SPI_WAIT_SPINS;
+  while (!MOTA_SD_SPIM->EVENTS_END && spins-- != 0) {
+    if ((spins & 0x3FFu) == 0) feed_watchdogs();
+  }
+  if (!MOTA_SD_SPIM->EVENTS_END) {
+    MOTA_SD_SPIM->TASKS_STOP = 1;
+    g_io_ok = false;
+    return 0xFF;
+  }
   return g_rx;
 }
 
@@ -62,6 +93,7 @@ static uint8_t command(uint8_t cmd, uint32_t arg, uint8_t crc) {
 
 bool ota_sd_init(void) {
   g_sector_lba = UINT32_MAX;
+  g_io_ok = true;
   nrf_gpio_cfg_output(MOTA_SD_CS_PIN);
   nrf_gpio_pin_set(MOTA_SD_CS_PIN);
   nrf_gpio_cfg_output(MOTA_SD_MOSI_PIN);
@@ -78,12 +110,13 @@ bool ota_sd_init(void) {
   MOTA_SD_SPIM->ENABLE = SPIM_ENABLE_ENABLE_Enabled;
 
   for (uint8_t i = 0; i < 12; i++) spi_byte(0xFF);
+  if (!g_io_ok) return false;
   uint8_t r = 0xFF;
   for (uint8_t i = 0; i < 20 && r != 0x01; i++) {
     r = command(0, 0, 0x95);
     deselect_card();
   }
-  if (r != 0x01) return false;
+  if (r != 0x01 || !g_io_ok) return false;
 
   bool v2 = false;
   r = command(8, 0x1AA, 0x87);
@@ -104,28 +137,30 @@ bool ota_sd_init(void) {
     r = command(41, v2 ? 0x40000000u : 0, 0x01); deselect_card();
     if (r == 0) { ready = true; break; }
   }
-  if (!ready) return false;
+  if (!ready || !g_io_ok) return false;
 
   r = command(58, 0, 0x01);
   if (r != 0) { deselect_card(); return false; }
   uint8_t ocr[4];
   for (uint8_t i = 0; i < 4; i++) ocr[i] = spi_byte(0xFF);
   deselect_card();
+  if (!g_io_ok) return false;
   g_block_addressing = (ocr[0] & 0x40u) != 0;
   if (!g_block_addressing) {
     r = command(16, 512, 0x01);
     deselect_card();
-    if (r != 0) return false;
+    if (r != 0 || !g_io_ok) return false;
   }
 
   MOTA_SD_SPIM->ENABLE = SPIM_ENABLE_ENABLE_Disabled;
   MOTA_SD_SPIM->FREQUENCY = SPIM_FREQUENCY_FREQUENCY_M8;
   MOTA_SD_SPIM->ENABLE = SPIM_ENABLE_ENABLE_Enabled;
-  return true;
+  return g_io_ok;
 }
 
 void ota_sd_deinit(void) {
   g_sector_lba = UINT32_MAX;
+  g_io_ok = false;
   MOTA_SD_SPIM->ENABLE = SPIM_ENABLE_ENABLE_Disabled;
   MOTA_SD_SPIM->PSEL.SCK = 0xFFFFFFFFu;
   MOTA_SD_SPIM->PSEL.MOSI = 0xFFFFFFFFu;
@@ -137,7 +172,7 @@ void ota_sd_deinit(void) {
 }
 
 bool ota_sd_read_sector(uint32_t sector, uint8_t out[512]) {
-  if (!g_block_addressing && sector > UINT32_MAX / 512u) return false;
+  if (!g_io_ok || (!g_block_addressing && sector > UINT32_MAX / 512u)) return false;
   uint32_t arg = g_block_addressing ? sector : sector * 512u;
   for (uint8_t attempt = 0; attempt < 3; attempt++) {
     uint8_t r = command(17, arg, 0x01);
@@ -147,11 +182,11 @@ bool ota_sd_read_sector(uint32_t sector, uint8_t out[512]) {
       token = spi_byte(0xFF);
       if (token != 0xFF) break;
     }
-    if (token != 0xFE) { deselect_card(); continue; }
+    if (token != 0xFE || !g_io_ok) { deselect_card(); continue; }
     for (uint32_t i = 0; i < 512; i++) out[i] = spi_byte(0xFF);
     spi_byte(0xFF); spi_byte(0xFF); // card CRC (transport integrity is rechecked by image SHA-256)
     deselect_card();
-    return true;
+    return g_io_ok;
   }
   return false;
 }

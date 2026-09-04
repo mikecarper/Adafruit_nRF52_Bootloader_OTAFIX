@@ -255,6 +255,20 @@ class BuildProfileTest(unittest.TestCase):
         self.assertIn(QUALIFICATION_VERSION, readme)
         self.assertIn(QUALIFICATION_VERSION, test_readme)
 
+    def test_ci_pins_gcc_14_2_and_builds_the_tightest_profiles(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        self.assertEqual(2, workflow.count("release: '14.2.Rel1'"))
+        self.assertIn('_build/signed-dualbank-$board', workflow)
+        self.assertIn('cmake-build-signed-dualbank-$board', workflow)
+
+        for build_file in (MAKEFILE, ROOT / "CMakeLists.txt"):
+            with self.subTest(build_file=build_file.name):
+                contents = build_file.read_text(encoding="utf-8")
+                self.assertIn("-Oz", contents)
+                self.assertNotIn("-fmerge-all-constants", contents)
+                self.assertNotIn("-fipa-pta", contents)
+                self.assertNotIn("-fno-ipa-modref", contents)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

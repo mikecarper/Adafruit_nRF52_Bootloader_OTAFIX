@@ -27,7 +27,8 @@ DFU_INIT_INC = -I $(SRC) -I ../lib/sdk11/components/libraries/bootloader_dfu \
 	-I ../lib/sdk/components/libraries/crc16 \
 	-I ../lib/nrfx/mdk -I $(SRC)/cmsis/include $(S140_V6_INC) \
 	-I ../lib/tinycrypt/lib/include
-DFU_INIT_FLAGS = -DNRF52840_XXAA -DS140 -DDFU_APP_DATA_RESERVED=0xA000
+DFU_INIT_FLAGS = -DNRF52840_XXAA -DS140 -DSVCALL_AS_NORMAL_FUNCTION \
+	-DDFU_APP_DATA_RESERVED=0xA000
 DFU_INIT_HOST_WARNINGS = -Wno-implicit-function-declaration -Wno-pointer-to-int-cast \
 	-Wno-unused-variable
 
@@ -113,42 +114,68 @@ qspi_wake_test: qspi_wake_test.c $(SRC)/ota_qspi_wake.h $(SRC)/ota_qspi.c
 usb_wait_test: usb_wait_test.c $(SRC)/usb/usb_wait.c $(SRC)/usb/usb_wait.h
 	$(CC) $(CFLAGS) -DUSB_WAIT_HOST_TEST -I $(SRC)/usb usb_wait_test.c $(SRC)/usb/usb_wait.c -o $@
 
+dfu_timeout_test: dfu_timeout_test.c $(SRC)/dfu_timeout.h
+	$(CC) $(CFLAGS) -I $(SRC) dfu_timeout_test.c -o $@
+
 uf2_write_state_test: uf2_write_state_test.c $(SRC)/usb/uf2/uf2_app_flash.h \
                       $(SRC)/usb/uf2/uf2_transfer_state.h \
                       $(SRC)/usb/uf2/uf2_current_echo.h
 	$(CC) $(CFLAGS) -I $(SRC)/usb/uf2 uf2_write_state_test.c -o $@
+
+bootloader_settings_guard_test: bootloader_settings_guard_test.c \
+                                $(SRC)/bootloader_settings_guard.c \
+                                $(SRC)/bootloader_settings_guard.h
+	$(CC) $(CFLAGS) -I $(SRC) \
+		-I ../lib/sdk11/components/libraries/bootloader_dfu \
+		-I ../lib/sdk/components/libraries/crc16 \
+		bootloader_settings_guard_test.c $(SRC)/bootloader_settings_guard.c -o $@
+
+dfu_image_policy_test: dfu_image_policy_test.c $(SRC)/dfu_image_policy.c \
+                       $(SRC)/dfu_image_policy.h $(SRC)/usb/uf2/bootloader_image.c
+	$(CC) $(CFLAGS) $(DFU_INIT_HOST_WARNINGS) $(DFU_INIT_FLAGS) \
+		-DDFU_IMAGE_POLICY_HOST_TEST -DMOTA_SOFTDEVICE_FAMILY=140 \
+		-DDEVICE_NAME='"T096_DFU"' $(DFU_INIT_INC) \
+		-I $(SRC)/boards -I $(SRC)/boards/heltec_t096 \
+		dfu_image_policy_test.c $(SRC)/dfu_image_policy.c \
+		$(SRC)/usb/uf2/bootloader_image.c -o $@
 
 dfu_entry_test: dfu_entry_test.c $(SRC)/dfu_entry.h
 	$(CC) $(CFLAGS) -I $(SRC) dfu_entry_test.c -o $@
 
 peer_data_layout_test: peer_data_layout_test.c $(SRC)/dfu_ble_peer_data_layout.h \
                        ../lib/sdk11/components/libraries/bootloader_dfu/dfu_ble_svc.h
-	$(CC) $(CFLAGS) -DNRF52840_XXAA -DS140 $(PEER_DATA_INC) $(S140_V6_INC) peer_data_layout_test.c -o $@
+	$(CC) $(CFLAGS) -DSVCALL_AS_NORMAL_FUNCTION -DNRF52840_XXAA -DS140 $(PEER_DATA_INC) $(S140_V6_INC) peer_data_layout_test.c -o $@
 
 peer_data_layout_nrf52_test: peer_data_layout_test.c $(SRC)/dfu_ble_peer_data_layout.h \
                              ../lib/sdk11/components/libraries/bootloader_dfu/dfu_ble_svc.h
-	$(CC) $(CFLAGS) -DNRF52 -DNRF52832_XXAA -DS132 $(PEER_DATA_INC) $(S132_V6_INC) peer_data_layout_test.c -o $@
+	$(CC) $(CFLAGS) -DSVCALL_AS_NORMAL_FUNCTION -DNRF52 -DNRF52832_XXAA -DS132 $(PEER_DATA_INC) $(S132_V6_INC) peer_data_layout_test.c -o $@
 
 peer_data_layout_nrf52833_test: peer_data_layout_test.c $(SRC)/dfu_ble_peer_data_layout.h \
                                 ../lib/sdk11/components/libraries/bootloader_dfu/dfu_ble_svc.h
-	$(CC) $(CFLAGS) -DNRF52833_XXAA -DS140 $(PEER_DATA_INC) $(S140_V7_INC) peer_data_layout_test.c -o $@
+	$(CC) $(CFLAGS) -DSVCALL_AS_NORMAL_FUNCTION -DNRF52833_XXAA -DS140 $(PEER_DATA_INC) $(S140_V7_INC) peer_data_layout_test.c -o $@
 
 pstorage_busy_test: pstorage_busy_test.c $(PSTORAGE_SRC) $(wildcard pstorage_stubs/*.h)
 	$(CC) $(CFLAGS) -Wno-int-to-pointer-cast -DNRF52_SERIES $(PSTORAGE_INC) \
 		pstorage_busy_test.c $(PSTORAGE_SRC) -o $@
 
-check: apply_sim readback_test readback_test_v7 readback_internal_test bootloader_image_test sd_apply_test qspi_apply_test bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test softdevice_fwid_test dfu_init_bounds_test dfu_init_signed_bounds_test qspi_alignment_test qspi_wake_test usb_wait_test uf2_write_state_test dfu_entry_test peer_data_layout_test peer_data_layout_nrf52_test peer_data_layout_nrf52833_test pstorage_busy_test
+check: apply_sim readback_test readback_test_v7 readback_internal_test bootloader_image_test sd_apply_test qspi_apply_test bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test softdevice_fwid_test dfu_init_bounds_test dfu_init_signed_bounds_test qspi_alignment_test qspi_wake_test usb_wait_test dfu_timeout_test uf2_write_state_test bootloader_settings_guard_test dfu_image_policy_test dfu_entry_test peer_data_layout_test peer_data_layout_nrf52_test peer_data_layout_nrf52833_test pstorage_busy_test
 	python3 version_derivation_test.py
 	python3 build_profile_test.py
+	python3 build_all_test.py
 	python3 manifest_patcher_test.py
 	python3 cf2_guard_test.py
 	python3 peer_data_linker_test.py
 	python3 bootloader_handoff_test.py
 	python3 ble_advertising_test.py
+	python3 ble_dis_layout_test.py
 	python3 ble_connection_policy_test.py
 	python3 serial_dfu_erase_test.py
+	python3 sd_spi_guard_test.py
+	python3 lfclk_source_test.py
+	python3 svc_ipa_guard_test.py
 	python3 legacy_dfu_bounds_test.py
 	python3 legacy_ble_dfu_host_test.py
+	python3 signed_legacy_package_test.py
 	python3 usb_descriptor_test.py
 	python3 usb_task_budget_test.py
 	python3 uf2_handoff_test.py
@@ -187,7 +214,13 @@ check: apply_sim readback_test readback_test_v7 readback_internal_test bootloade
 	@echo
 	./usb_wait_test
 	@echo
+	./dfu_timeout_test
+	@echo
 	./uf2_write_state_test
+	@echo
+	./bootloader_settings_guard_test
+	@echo
+	./dfu_image_policy_test
 	@echo
 	./dfu_entry_test
 	@echo
@@ -202,6 +235,6 @@ sanitize:
 	$(MAKE) CFLAGS="$(SANITIZER_CFLAGS)" check
 
 clean:
-	rm -f apply_sim readback_test readback_test_v7 readback_internal_test bootloader_image_test sd_apply_test qspi_apply_test bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test softdevice_fwid_test dfu_init_bounds_test dfu_init_signed_bounds_test qspi_alignment_test qspi_wake_test usb_wait_test uf2_write_state_test dfu_entry_test peer_data_layout_test peer_data_layout_nrf52_test peer_data_layout_nrf52833_test pstorage_busy_test
+	rm -f apply_sim readback_test readback_test_v7 readback_internal_test bootloader_image_test sd_apply_test qspi_apply_test bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test softdevice_fwid_test dfu_init_bounds_test dfu_init_signed_bounds_test qspi_alignment_test qspi_wake_test usb_wait_test dfu_timeout_test uf2_write_state_test bootloader_settings_guard_test dfu_image_policy_test dfu_entry_test peer_data_layout_test peer_data_layout_nrf52_test peer_data_layout_nrf52833_test pstorage_busy_test
 
 .PHONY: check sanitize clean

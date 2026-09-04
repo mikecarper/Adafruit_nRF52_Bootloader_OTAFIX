@@ -8,6 +8,7 @@
 # - SIGNED_FW          : if bootloader will ONLY accept signed firmware
 # - SIGNED_FW_QX       : Qx for signed firmware verification
 # - SIGNED_FW_QY       : Qy for signed firmware verification
+# - SIGNED_FW_KEY      : PEM private key used to sign generated Legacy DFU ZIPs
 # - DUALBANK_FW        : If bootloader will implement a dual bank feature to allow autorecover from failed
 # - FORCE_UF2          : if SIGNED_FW is 1, will force to include UF2 support (UNSECURE, UF2 does NOT validate signature!)
 # - DEFAULT_TO_OTA_DFU : if entering DFU, by default enter OTA DFU instead of Serial DFU
@@ -205,6 +206,8 @@ endif
 C_SRC += \
   src/dfu_ble_svc.c \
   src/dfu_init.c \
+  src/dfu_image_policy.c \
+  src/bootloader_settings_guard.c \
   src/flash_nrf5x.c \
   src/main.c \
   src/screen.c \
@@ -213,6 +216,7 @@ C_SRC += \
   src/ota_qspi.c \
   src/ota_sd_spi.c \
   src/sha256.c \
+  src/usb/uf2/bootloader_image.c \
   src/detools/detools.c \
 
 # if using a signed firmware
@@ -244,7 +248,6 @@ else
 C_SRC += $(SDK11_PATH)/libraries/bootloader_dfu/dfu_single_bank.c
 endif
 C_SRC += $(SDK11_PATH)/ble/ble_services/ble_dfu/ble_dfu.c
-C_SRC += $(SDK11_PATH)/ble/ble_services/ble_dis/ble_dis.c
 C_SRC += $(SDK11_PATH)/drivers_nrf/pstorage/pstorage_raw.c
 
 # Latest SDK files: peripheral drivers
@@ -278,7 +281,6 @@ C_SRC += src/boards/$(BOARD)/pinconfig.c
 C_SRC += \
 	src/usb/usb_desc.c \
 	src/usb/msc_uf2.c \
-	src/usb/uf2/bootloader_image.c \
 	src/usb/uf2/bootloader_manifest.c \
 	src/usb/uf2/ghostfat.c \
 	src/usb/usb.c \
@@ -334,7 +336,6 @@ IPATH += \
   $(SDK11_PATH)/drivers_nrf/pstorage \
   $(SDK11_PATH)/ble/common \
   $(SDK11_PATH)/ble/ble_services/ble_dfu \
-  $(SDK11_PATH)/ble/ble_services/ble_dis
 
 # later sdk with updated drivers
 IPATH += \
@@ -370,10 +371,11 @@ CFLAGS += \
 	-mfloat-abi=hard \
 	-mfpu=fpv4-sp-d16 \
 	-ggdb \
-	-Os \
+	-Oz \
 	-fno-jump-tables \
 	-flto \
 	-flto-partition=one \
+	-fno-partial-inlining \
 	-ffunction-sections \
 	-fdata-sections \
 	-fshort-enums \
@@ -399,18 +401,6 @@ CFLAGS += -DDETOOLS_CONFIG_COMPRESSION_NONE=0
 
 # Suppress warning caused by SDK
 CFLAGS += -Wno-unused-parameter -Wno-expansion-to-defined
-
-# Nordic Softdevice SDK header files contains inline assembler that has
-# broken constraints. As a result the IPA-modref pass, introduced in gcc-11,
-# is able to "prove" that arguments to wrapper functions generated with
-# the SVCALL() macro are unused and, as a result, the optimizer will remove
-# code within the callers that sets up these arguments (which results in
-# a broken bootloader). The broken headers come from Nordic-supplied zip
-# files and are not trivial to patch so, for now, we'll simply disable the
-# new gcc-11 inter-procedural optimizations.
-ifeq (,$(findstring unrecognized,$(shell $(CC) $(CFLAGS) -fno-ipa-modref 2>&1)))
-CFLAGS += -fno-ipa-modref
-endif
 
 # Defined Symbol (MACROS)
 CFLAGS += -D__HEAP_SIZE=0
@@ -581,7 +571,21 @@ INC_PATHS = $(addprefix -I,$(IPATH))
 .PHONY: all build-profile clean copy-artifact flash flash-dfu flash-sd flash-mbr dfu-flash sd mbr gdbflash gdb FORCE
 
 # default target to build
-all: $(BUILD)/$(OUT_NAME).out $(BUILD)/$(OUT_NAME)_mbr.hex $(BUILD)/update-$(OUT_NAME)_mbr.uf2 $(BUILD)/$(MERGED_FILE).hex $(BUILD)/$(MERGED_FILE).zip
+ifeq ($(SIGNED_FW),1)
+  ifneq ($(strip $(SIGNED_FW_KEY)),)
+    DEFAULT_DFU_ZIP = $(BUILD)/$(MERGED_FILE).zip
+  else
+    DEFAULT_DFU_ZIP = signed-package-skipped
+  endif
+else
+  DEFAULT_DFU_ZIP = $(BUILD)/$(MERGED_FILE).zip
+endif
+
+all: $(BUILD)/$(OUT_NAME).out $(BUILD)/$(OUT_NAME)_mbr.hex $(BUILD)/update-$(OUT_NAME)_mbr.uf2 $(BUILD)/$(MERGED_FILE).hex $(DEFAULT_DFU_ZIP)
+
+.PHONY: signed-package-skipped
+signed-package-skipped:
+	@echo "Signed firmware built without a DFU ZIP; set SIGNED_FW_KEY to generate one"
 
 # Materialize just the profile guard. This is useful to audit build-cache
 # behavior without invoking the cross compiler.
@@ -676,9 +680,27 @@ $(BUILD)/$(MERGED_FILE).hex: $(BUILD)/$(OUT_NAME).hex $(SD_HEX) tools/hexmerge.p
 	@echo Create $(notdir $@)
 	@$(PYTHON) tools/hexmerge.py -o $@ $< $(SD_HEX)
 
-# Create pkg zip file for bootloader+SD combo to use with DFU CDC
+# Create a bootloader+SD package for standard Nordic Legacy DFU clients. A
+# signed-only bootloader must never publish an unsigned package by accident.
+ifeq ($(SIGNED_FW),1)
+  ifeq ($(strip $(SIGNED_FW_KEY)),)
+.PHONY: missing-signed-fw-key
+missing-signed-fw-key:
+	@echo "SIGNED_FW=1 requires SIGNED_FW_KEY=<private-key.pem> to generate or flash a DFU ZIP" >&2
+	@exit 2
+
+$(BUILD)/$(MERGED_FILE).zip: missing-signed-fw-key $(BUILD)/$(OUT_NAME).hex $(SD_HEX)
+  else
+$(BUILD)/$(MERGED_FILE).zip: $(BUILD)/$(OUT_NAME).hex $(SD_HEX) $(SIGNED_FW_KEY) tools/generate_signed_legacy_dfu.py
+	@$(PYTHON) tools/generate_signed_legacy_dfu.py --nrfutil "$(NRFUTIL)" \
+		--key-file "$(SIGNED_FW_KEY)" --expected-qx "$(SIGNED_FW_QX)" \
+		--expected-qy "$(SIGNED_FW_QY)" --dev-type 0x0052 \
+		--dev-revision $(DFU_DEV_REV) --bootloader $< --softdevice $(SD_HEX) $@
+  endif
+else
 $(BUILD)/$(MERGED_FILE).zip: $(BUILD)/$(OUT_NAME).hex $(SD_HEX)
 	@$(NRFUTIL) dfu genpkg --dev-type 0x0052 --dev-revision $(DFU_DEV_REV) --bootloader $< --softdevice $(SD_HEX) $@
+endif
 
 #-------------- Artifacts --------------
 $(BIN):

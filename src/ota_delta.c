@@ -19,6 +19,7 @@
   #include "usb/uf2/bootloader_image.h"
 #endif
 #include "detools/detools.h"
+#include <stddef.h>
 #include <string.h>
 #include <stdint.h>
 
@@ -147,6 +148,7 @@ static uint16_t crc16_region(uint32_t a, uint32_t len) {
   #include "boards.h"
   #include "bootloader_types.h"
   #include "bootloader_settings.h"
+  #include "bootloader_settings_guard.h"
   #include "dfu_types.h"
   #if defined(MOTA_BOOTLOADER_UPDATE_ENABLED)
     #include "usb/uf2/uf2cfg.h"
@@ -193,15 +195,20 @@ static uint16_t crc16_region(uint32_t a, uint32_t len) {
   return crc16_compute((const uint8_t *)(uintptr_t)a, len, NULL);
 }
 static void otah_settings_commit(uint16_t bank0, uint16_t crc, uint32_t size) {
-  bootloader_settings_t        s;
-  const bootloader_settings_t *cur;
-  bootloader_util_settings_get(&cur);
-  memcpy(&s, cur, sizeof(s));
+  bootloader_settings_t s;
+  memset(&s, 0, sizeof(s));
   s.bank_0      = bank0;
   s.bank_0_crc  = crc;
   s.bank_0_size = size;
+  s.bank_1      = BANK_INVALID_APP;
+  bootloader_settings_seal(&s);
+
+  const uint32_t *words = (const uint32_t *)&s;
   nrfx_nvmc_page_erase(BOOTLOADER_SETTINGS_ADDRESS);
-  nrfx_nvmc_words_write(BOOTLOADER_SETTINGS_ADDRESS, (const uint32_t *)&s, sizeof(s) / 4);
+  nrfx_nvmc_words_write(BOOTLOADER_SETTINGS_ADDRESS + 2u * sizeof(uint32_t),
+                        &words[2], sizeof(s) / sizeof(uint32_t) - 2u);
+  nrfx_nvmc_word_write(BOOTLOADER_SETTINGS_ADDRESS + sizeof(uint32_t), words[1]);
+  nrfx_nvmc_word_write(BOOTLOADER_SETTINGS_ADDRESS, words[0]);
 }
   #define BANK_VALID_APP_V   0x01u
   #define BANK_INVALID_APP_V 0xFFu
@@ -353,46 +360,6 @@ static int staged_read(uint32_t address_or_offset, void *dst, uint32_t len) {
   return 1;
 }
 #endif
-
-// Tiny bounds-checked cursor so the manifest is parsed by reading each field by name in order, instead of
-// hand-computed offsets (mirrors MeshCore's OtaByteIO.h ByteReader). Any over-read flips ok=0.
-typedef struct {
-  const uint8_t *p;
-  uint32_t       len, n;
-  int            ok;
-} br_t;
-static uint8_t br_u8(br_t *r) {
-  if (r->ok && (uint64_t)r->n + 1 <= r->len) {
-    return r->p[r->n++];
-  }
-  r->ok = 0;
-  return 0;
-}
-static uint32_t br_u32(br_t *r) {
-  if (r->ok && (uint64_t)r->n + 4 <= r->len) {
-    uint32_t v = rd_u32(r->p + r->n);
-    r->n += 4;
-    return v;
-  }
-  r->ok = 0;
-  return 0;
-}
-static const uint8_t *br_take(br_t *r, uint32_t k) {
-  if (r->ok && (uint64_t)r->n + k <= r->len) {
-    const uint8_t *x = r->p + r->n;
-    r->n += k;
-    return x;
-  }
-  r->ok = 0;
-  return NULL;
-}
-static void br_skip(br_t *r, uint32_t k) {
-  if (r->ok && (uint64_t)r->n + k <= r->len) {
-    r->n += k;
-  } else {
-    r->ok = 0;
-  }
-}
 
 static void sha256_region(uint32_t addr, uint32_t len, uint8_t out[32]) {
   sha256_ctx_t c;
@@ -553,6 +520,32 @@ struct mota_min {
   uint8_t  codec_id, is_full, approved, format_ver, flags, hash_algo, block_size_log2;
 };
 
+// The manifest prefix is invariant and byte-oriented. Byte arrays keep every
+// multibyte field alignment-safe; rd_u32() performs the little-endian decode.
+typedef struct {
+  uint8_t magic[4];
+  uint8_t total[4];
+  uint8_t format_ver;
+  uint8_t flags;
+  uint8_t hash_algo;
+  uint8_t target_id[4];
+  uint8_t fw_version[4];
+  uint8_t image_size[4];
+  uint8_t payload_size[4];
+  uint8_t block_size_log2;
+  uint8_t merkle_root[4];
+  uint8_t image_hash[32];
+  uint8_t codec_id;
+  uint8_t hw_id[32];
+  uint8_t base_hash[8];
+  uint8_t signer[32];
+  uint8_t signature[64];
+  uint8_t approval[4];
+} mota_fixed_header_t;
+
+typedef char mota_fixed_header_size_must_match_wire_format
+  [(sizeof(mota_fixed_header_t) == 8u + MOTA_MFL) ? 1 : -1];
+
 // Decode the five unsigned sizes in an in-place detools header without starting the decoder. This lets
 // us reject impossible flash geometry while the running application and its boot settings are intact.
 static int dt_header_u32(uint32_t addr, uint32_t len, uint32_t *pos, uint32_t *out) {
@@ -621,38 +614,32 @@ static int dt_geometry_ok(const struct mota_min *m, uint32_t body_len, uint32_t 
 
 // ---- `.mota` parse (fixed fields only) + EndF base location --------------------------------------
 static int parse_mota_at(uint32_t addr, uint32_t limit, struct mota_min *o) {
-  uint8_t b[8 + MOTA_MFL]; // MAGIC+total + the whole fixed manifest-minus-leaves
   if (addr > limit) {
     return 0;
   }
   uint32_t avail = limit - addr;
-  uint32_t hdr   = avail < sizeof(b) ? avail : sizeof(b);
-  if (hdr < 8 + MOTA_MFL) {
-    return 0; // need the whole fixed manifest in `b` (trailer read separately)
-  }
-  if (!staged_read(addr, b, hdr)) {
-    return 0;
-  }
-  if (memcmp(b, MAGIC, 4) != 0) {
-    return 0;
-  }
-  uint32_t total = rd_u32(b + 4);
-  if (total < 8 + MOTA_MFL + 5 || total > avail) {
-    return 0;
-  }
-  uint8_t tr[5];
-  if (!staged_read(addr + total - 5, tr, 5)) {
-    return 0;
-  }
-  if (memcmp(tr, TRAILER, 5) != 0) {
+  if (avail < sizeof(mota_fixed_header_t) + sizeof(TRAILER)) {
     return 0;
   }
 
-  // Fixed-layout manifest - every field at a constant offset; base_hash/signer/signature are always
-  // present (zero-filled when not applicable), so there are no conditionals (docs/ota_protocol.md Section 4).
-  br_t r = {b, hdr, 0, 1};
-  br_skip(&r, 4 + 4); // MAGIC + MOTA_TOTAL_SIZE (already validated above)
-  o->format_ver = br_u8(&r);
+  mota_fixed_header_t header;
+  if (!staged_read(addr, &header, sizeof(header)) ||
+      memcmp(header.magic, MAGIC, sizeof(header.magic)) != 0) {
+    return 0;
+  }
+  uint32_t const total = rd_u32(header.total);
+  if (total < sizeof(header) + sizeof(TRAILER) || total > avail) {
+    return 0;
+  }
+  uint8_t trailer[sizeof(TRAILER)];
+  if (!staged_read(addr + total - sizeof(trailer), trailer, sizeof(trailer)) ||
+      memcmp(trailer, TRAILER, sizeof(trailer)) != 0) {
+    return 0;
+  }
+
+  // base_hash, signer, and signature are always present (zero-filled when not
+  // applicable), so the fixed header has no optional fields.
+  o->format_ver = header.format_ver;
   if (o->format_ver != 2
 #if defined(MOTA_BOOTLOADER_UPDATE_ENABLED)
       && o->format_ver != 3
@@ -660,49 +647,43 @@ static int parse_mota_at(uint32_t addr, uint32_t limit, struct mota_min *o) {
   ) {
     return 0;
   }
-  o->flags     = br_u8(&r);
-  o->hash_algo = br_u8(&r);
-  o->target_id = br_u32(&r);
-  o->fw_version = br_u32(&r);
-  o->image_size   = br_u32(&r);
-  o->payload_size = br_u32(&r);
-  o->block_size_log2 = br_u8(&r);
-  br_skip(&r, 4); // merkle_root (already verified by the approving app)
-  const uint8_t *ih = br_take(&r, 32);
-  if (ih) {
-    memcpy(o->image_hash, ih, 32);
-  }
-  o->codec_id = br_u8(&r);
-  const uint8_t *hw = br_take(&r, 32);
-  if (hw) {
-    memcpy(o->hw_id, hw, 32);
-  }
-  o->is_full        = (o->flags & MFLAG_FULL) ? 1 : 0;
-  const uint8_t *bh = br_take(&r, 8);
-  if (bh) {
-    memcpy(o->base_hash, bh, 8); // base_hash (zero for full)
-  }
-  br_skip(&r, 32 + 64);          // signer pubkey + signature (zero when unsigned)
-  if (!r.ok) {
-    return 0;
-  }
-  o->approval_addr  = addr + r.n;
-  const uint8_t *ap = br_take(&r, 4);
-  o->approved       = (ap && memcmp(ap, APRV, 4) == 0) ? 1 : 0;
+  o->flags           = header.flags;
+  o->hash_algo       = header.hash_algo;
+  o->target_id       = rd_u32(header.target_id);
+  o->fw_version      = rd_u32(header.fw_version);
+  o->image_size      = rd_u32(header.image_size);
+  o->payload_size    = rd_u32(header.payload_size);
+  o->block_size_log2 = header.block_size_log2;
+  o->codec_id        = header.codec_id;
+  o->is_full         = (o->flags & MFLAG_FULL) ? 1 : 0;
+  o->approval_addr   = addr + offsetof(mota_fixed_header_t, approval);
+  o->approved = memcmp(header.approval, APRV, sizeof(header.approval)) == 0;
+  memcpy(o->image_hash, header.image_hash, sizeof(o->image_hash));
+  memcpy(o->hw_id, header.hw_id, sizeof(o->hw_id));
+  memcpy(o->base_hash, header.base_hash, sizeof(o->base_hash));
+
   if (o->block_size_log2 == 0 || o->block_size_log2 > 24 || o->payload_size == 0) {
     return 0;
   }
-  // Do all variable-length geometry in 64 bits. With corrupt 32-bit sizes, the old ceil-divide,
-  // leaf-count multiplication, and final sum could wrap together into a small self-consistent `total`,
-  // leaving payload_addr far outside the staged container.
-  uint64_t bs  = 1ull << o->block_size_log2;
-  uint64_t bc  = ((uint64_t)o->payload_size + bs - 1) / bs;
-  uint64_t off = (uint64_t)r.n + bc * 4u; // leaves[] then payload
-  if (bc == 0 || bc > 0xFFFFu || off + o->payload_size + 5u != total) {
-    return 0;                             // payload must end exactly at the trailer
+
+  // Avoid ceil-addition overflow: quotient plus a nonzero remainder is the
+  // exact leaf count. The 16-bit cap then bounds all remaining arithmetic.
+  uint32_t const block_size = 1u << o->block_size_log2;
+  uint32_t block_count = o->payload_size >> o->block_size_log2;
+  if ((o->payload_size & (block_size - 1u)) != 0u) {
+    block_count++;
   }
-  o->block_count = (uint32_t)bc;
-  o->payload_addr = addr + (uint32_t)off; // exact-total check proves off < total <= avail
+  if (block_count == 0u || block_count > UINT16_MAX) {
+    return 0;
+  }
+  uint32_t const payload_offset = sizeof(header) + block_count * sizeof(uint32_t);
+  uint32_t const payload_end = total - sizeof(TRAILER);
+  if (payload_offset > payload_end ||
+      o->payload_size != payload_end - payload_offset) {
+    return 0; // payload must end exactly at the trailer
+  }
+  o->block_count = block_count;
+  o->payload_addr = addr + payload_offset;
   o->total        = total;
   return 1;
 }
@@ -834,8 +815,9 @@ bool ota_delta_live_app_fits_below(uint32_t limit) {
 #else
   const bootloader_settings_t *settings;
   bootloader_util_settings_get(&settings);
-  const int crc_bound = settings && settings->bank_0 == BANK_VALID_APP_V &&
-                        settings->bank_0_crc != 0u;
+  const int crc_bound = settings && bootloader_settings_integrity_valid(settings) &&
+                        settings->bank_0 == BANK_VALID_APP_V &&
+                        settings->bank_0_size != 0u;
   recorded_size = crc_bound ? settings->bank_0_size : 0u;
 #endif
   const uint32_t endf_size = body_len + ENDF_LEN;
@@ -871,7 +853,8 @@ static int clear_approval(const struct mota_min *o) {
 static bool finish_apply(bool result);
 
 #if defined(MOTA_SD_CARD) || defined(MOTA_QSPI_FLASH) || defined(MOTA_BOOTLOADER_UPDATE_ENABLED)
-static int sha256_staged_region(uint32_t offset, uint32_t len, uint8_t out[32]) {
+__attribute__((noinline, noclone)) static int sha256_staged_region_impl(
+    uint32_t offset, uint32_t len, uint8_t out[32], int normalize_sd_approval) {
   sha256_ctx_t c;
   sha256_init(&c);
   uint8_t buf[256];
@@ -881,12 +864,27 @@ static int sha256_staged_region(uint32_t offset, uint32_t len, uint8_t out[32]) 
     if (!staged_read(offset, buf, n)) {
       return 0;
     }
+#if defined(MOTA_SD_CARD)
+    // APRV is fixed at bytes 201..204, wholly inside the first chunk. The SD
+    // caller proves that those bytes exist before requesting normalization.
+    if (normalize_sd_approval && offset == 0u) {
+      memset(buf + MOTA_SD_AUTH_APPROVAL_OFFSET, 0,
+             MOTA_SD_AUTH_APPROVAL_LEN);
+    }
+#else
+    (void)normalize_sd_approval;
+#endif
     sha256_update(&c, buf, n);
     offset += n;
     len -= n;
   }
   sha256_final(&c, out);
   return 1;
+}
+
+static int sha256_staged_region(uint32_t offset, uint32_t len,
+                                uint8_t out[32]) {
+  return sha256_staged_region_impl(offset, len, out, 0);
 }
 #endif
 
@@ -900,31 +898,9 @@ static int sd_authorized_container_valid(void) {
       g_sd_total_size < MOTA_SD_AUTH_APPROVAL_OFFSET + MOTA_SD_AUTH_APPROVAL_LEN) {
     return 0;
   }
-  sha256_ctx_t c;
-  sha256_init(&c);
-  uint8_t buf[256];
-  uint32_t offset = 0;
-  while (offset < g_sd_total_size) {
-    inherited_watchdog_feed();
-    uint32_t n = g_sd_total_size - offset;
-    if (n > sizeof(buf)) {
-      n = sizeof(buf);
-    }
-    if (!staged_read(offset, buf, n)) {
-      return 0;
-    }
-    // APRV is fixed at bytes 201..204, wholly inside the first 256-byte
-    // chunk. The entry bounds above guarantee those bytes exist.
-    if (offset == 0u) {
-      memset(buf + MOTA_SD_AUTH_APPROVAL_OFFSET, 0,
-             MOTA_SD_AUTH_APPROVAL_LEN);
-    }
-    sha256_update(&c, buf, n);
-    offset += n;
-  }
   uint8_t digest[32];
-  sha256_final(&c, digest);
-  return memcmp(digest, g_sd_auth.container_sha256, sizeof(digest)) == 0;
+  return sha256_staged_region_impl(0, g_sd_total_size, digest, 1) &&
+         memcmp(digest, g_sd_auth.container_sha256, sizeof(digest)) == 0;
 }
 #endif
 
@@ -1160,9 +1136,9 @@ static int boot_image_metadata_valid_at(uint32_t address,
     return 0;
   }
   // Remote bootloader replacement cannot migrate the SoftDevice/application
-  // layout.  Such recovery remains an explicit local USB/BLE/SWD operation.
-  // The outer signed package version must describe the bytes themselves, and
-  // every v2-to-v2 remote update is strictly monotonic.
+  // layout. The outer signed package version must describe the bytes
+  // themselves, but its order is deliberately unrestricted so an operator can
+  // install or restore any compatible signed release.
   return candidate.softdevice_family == installed.softdevice_family &&
          candidate.softdevice_fwid == installed.softdevice_fwid &&
          candidate.app_base == installed.app_base &&
@@ -1171,8 +1147,7 @@ static int boot_image_metadata_valid_at(uint32_t address,
          candidate.softdevice_fwid == runtime_softdevice_fwid() &&
          candidate.app_base == APP_BASE &&
          candidate.layout_abi == BOOTLOADER_UPDATE_LAYOUT_ABI &&
-         candidate.boot_version == m->fw_version &&
-         candidate.boot_version > installed.boot_version;
+         candidate.boot_version == m->fw_version;
 }
 
 static int copy_bootloader_to_raw_source(const struct mota_min *m) {

@@ -36,6 +36,8 @@ def make_package(
     corrupt_init_crc: bool = False,
     softdevice_req_count: int = 1,
     duplicate_manifest_key: bool = False,
+    signed: bool = False,
+    corrupt_init_hash: bool = False,
 ) -> tuple[Path, str]:
     if kind == "application":
         firmware = bytes((index * 17 + 3) & 0xFF for index in range(1024))
@@ -56,7 +58,7 @@ def make_package(
     softdevice_req = [0xFFFE] * softdevice_req_count
     crc = binascii.crc_hqx(firmware, 0xFFFF)
     packet_crc = crc ^ 1 if corrupt_init_crc else crc
-    init_packet = (
+    init_base = (
         struct.pack(
             "<HHIH",
             device_type,
@@ -65,23 +67,48 @@ def make_package(
             len(softdevice_req),
         )
         + struct.pack(f"<{len(softdevice_req)}H", *softdevice_req)
-        + struct.pack("<H", packet_crc)
     )
-    bin_name = unsafe_bin_name or "firmware.bin"
-    dat_name = "firmware.dat"
-    item = {
-        "bin_file": bin_name,
-        "dat_file": dat_name,
-        "init_packet_data": {
+    if signed:
+        firmware_hash = hashlib.sha256(firmware).digest()
+        packet_hash = (
+            bytes((firmware_hash[0] ^ 1,)) + firmware_hash[1:]
+            if corrupt_init_hash
+            else firmware_hash
+        )
+        signature = bytes((index * 11 + 5) & 0xFF for index in range(64))
+        init_packet = init_base + struct.pack(
+            "<II32s64s", 2, len(firmware), packet_hash, signature
+        )
+        init_metadata = {
+            "application_version": app_version,
+            "device_revision": device_revision,
+            "device_type": device_type,
+            "ext_packet_id": 2,
+            "firmware_hash": packet_hash.hex(),
+            "firmware_length": len(firmware),
+            "init_packet_ecds": signature.hex(),
+            "softdevice_req": softdevice_req,
+        }
+        dfu_version = 0.8
+    else:
+        init_packet = init_base + struct.pack("<H", packet_crc)
+        init_metadata = {
             "application_version": app_version,
             "device_revision": device_revision,
             "device_type": device_type,
             "firmware_crc16": packet_crc,
             "softdevice_req": softdevice_req,
-        },
+        }
+        dfu_version = 0.5
+    bin_name = unsafe_bin_name or "firmware.bin"
+    dat_name = "firmware.dat"
+    item = {
+        "bin_file": bin_name,
+        "dat_file": dat_name,
+        "init_packet_data": init_metadata,
         **item_extra,
     }
-    manifest = {"manifest": {"dfu_version": 0.5, kind: item}}
+    manifest = {"manifest": {"dfu_version": dfu_version, kind: item}}
     manifest_text = json.dumps(manifest)
     if duplicate_manifest_key:
         inner = json.dumps(manifest["manifest"])
@@ -381,6 +408,26 @@ class PackageTests(unittest.TestCase):
                 Path(temporary), "application", corrupt_init_crc=True
             )
             with self.assertRaisesRegex(dfu.DfuError, "firmware CRC mismatch"):
+                dfu.read_package(path, digest)
+
+    def test_standard_signed_package_is_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path, digest = make_package(
+                Path(temporary), "softdevice_bootloader", signed=True
+            )
+            package = dfu.read_package(path, digest)
+        self.assertEqual(package.mode, dfu.MODE_SD_BOOTLOADER)
+        self.assertEqual(len(package.init_packet), 116)
+
+    def test_signed_init_hash_is_verified_locally(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path, digest = make_package(
+                Path(temporary),
+                "application",
+                signed=True,
+                corrupt_init_hash=True,
+            )
+            with self.assertRaisesRegex(dfu.DfuError, "firmware hash"):
                 dfu.read_package(path, digest)
 
     def test_init_packet_cannot_exceed_sdk11_target_buffer(self) -> None:

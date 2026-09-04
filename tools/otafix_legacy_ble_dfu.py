@@ -165,19 +165,38 @@ def _strict_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _hex_field(value: Any, label: str, size: int) -> bytes:
+    if not isinstance(value, str) or len(value) != size * 2:
+        raise DfuError(f"{label} must be exactly {size * 2} hexadecimal digits")
+    try:
+        return bytes.fromhex(value)
+    except ValueError as exc:
+        raise DfuError(f"{label} is not hexadecimal") from exc
+
+
 def _parse_init_packet(
-    packet: bytes, metadata: Any, firmware: bytes
+    packet: bytes, metadata: Any, firmware: bytes, dfu_version: float
 ) -> None:
     if not isinstance(metadata, dict):
         raise DfuError("manifest init_packet_data must be an object")
-    required = {
+    common = {
         "application_version",
         "device_revision",
         "device_type",
-        "firmware_crc16",
         "softdevice_req",
     }
-    if set(metadata) != required:
+    unsigned_keys = common | {"firmware_crc16"}
+    signed_keys = common | {
+        "ext_packet_id",
+        "firmware_hash",
+        "firmware_length",
+        "init_packet_ecds",
+    }
+    if set(metadata) == unsigned_keys and dfu_version == 0.5:
+        signed = False
+    elif set(metadata) == signed_keys and dfu_version == 0.8:
+        signed = True
+    else:
         raise DfuError("manifest init_packet_data has missing or unknown fields")
     if len(packet) < 12 or len(packet) > MAX_INIT_BYTES:
         raise DfuError("Legacy DFU init packet has an invalid length")
@@ -185,23 +204,16 @@ def _parse_init_packet(
     device_type, device_revision, app_version, sd_count = struct.unpack_from(
         "<HHIH", packet, 0
     )
-    expected_length = 10 + 2 * sd_count + 2
+    base_length = 10 + 2 * sd_count
+    expected_length = base_length + (104 if signed else 2)
     if sd_count == 0 or len(packet) != expected_length:
         raise DfuError("Legacy DFU init packet has invalid SoftDevice requirements")
     softdevice_req = list(struct.unpack_from(f"<{sd_count}H", packet, 10))
-    firmware_crc = struct.unpack_from("<H", packet, len(packet) - 2)[0]
-    expected_crc = binascii.crc_hqx(firmware, 0xFFFF)
-    if firmware_crc != expected_crc:
-        raise DfuError(
-            f"init packet firmware CRC mismatch: 0x{firmware_crc:04x} != "
-            f"0x{expected_crc:04x}"
-        )
 
     manifest_values = {
         "device_type": device_type,
         "device_revision": device_revision,
         "application_version": app_version,
-        "firmware_crc16": firmware_crc,
     }
     for key, parsed in manifest_values.items():
         if _require_uint(metadata.get(key), f"init_packet_data.{key}", 0xFFFFFFFF) != parsed:
@@ -213,6 +225,44 @@ def _parse_init_packet(
         raise DfuError("init_packet_data.softdevice_req must be an integer list")
     if manifest_sd != softdevice_req:
         raise DfuError("manifest and init packet disagree about softdevice_req")
+
+    if not signed:
+        firmware_crc = struct.unpack_from("<H", packet, base_length)[0]
+        expected_crc = binascii.crc_hqx(firmware, 0xFFFF)
+        if firmware_crc != expected_crc:
+            raise DfuError(
+                f"init packet firmware CRC mismatch: 0x{firmware_crc:04x} != "
+                f"0x{expected_crc:04x}"
+            )
+        if _require_uint(
+            metadata.get("firmware_crc16"),
+            "init_packet_data.firmware_crc16",
+            0xFFFF,
+        ) != firmware_crc:
+            raise DfuError("manifest and init packet disagree about firmware_crc16")
+        return
+
+    ext_id, firmware_length = struct.unpack_from("<II", packet, base_length)
+    firmware_hash = packet[base_length + 8 : base_length + 40]
+    signature = packet[base_length + 40 : base_length + 104]
+    if ext_id != 2 or firmware_length != len(firmware):
+        raise DfuError("signed init packet has the wrong identifier or firmware length")
+    if firmware_hash != hashlib.sha256(firmware).digest():
+        raise DfuError("signed init packet firmware hash does not match the image")
+    if _require_uint(
+        metadata.get("ext_packet_id"), "init_packet_data.ext_packet_id", 0xFFFFFFFF
+    ) != ext_id or _require_uint(
+        metadata.get("firmware_length"),
+        "init_packet_data.firmware_length",
+        MAX_FIRMWARE_BYTES,
+    ) != firmware_length:
+        raise DfuError("manifest and signed init packet disagree")
+    if _hex_field(
+        metadata.get("firmware_hash"), "init_packet_data.firmware_hash", 32
+    ) != firmware_hash or _hex_field(
+        metadata.get("init_packet_ecds"), "init_packet_data.init_packet_ecds", 64
+    ) != signature:
+        raise DfuError("manifest and signed init packet hash/signature disagree")
 
 
 def read_package(path: Path, expected_sha256: str) -> Package:
@@ -274,7 +324,8 @@ def read_package(path: Path, expected_sha256: str) -> Package:
                     "softdevice_bootloader image"
                 )
             kind = supported[0]
-            if set(entries) != {"dfu_version", kind} or entries["dfu_version"] != 0.5:
+            dfu_version = entries.get("dfu_version")
+            if set(entries) != {"dfu_version", kind} or dfu_version not in (0.5, 0.8):
                 raise DfuError("DFU manifest has missing, unknown, or unsupported entries")
             item = entries[kind]
             if not isinstance(item, dict):
@@ -308,7 +359,7 @@ def read_package(path: Path, expected_sha256: str) -> Package:
 
     if len(firmware) % 4:
         raise DfuError("firmware image length must be word aligned")
-    _parse_init_packet(init_packet, item["init_packet_data"], firmware)
+    _parse_init_packet(init_packet, item["init_packet_data"], firmware, dfu_version)
 
     if kind == "application":
         sd_size = 0

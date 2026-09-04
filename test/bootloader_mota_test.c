@@ -810,8 +810,21 @@ int main(void) {
                   MFLAG_FULL | MFLAG_SIGNED | MFLAG_BOOTLOADER,
                   TEST_TARGET_ID, TEST_HW_ID, &total);
   wr32(bad + 8u + 7u, TEST_INSTALLED_BOOT_VERSION);
-  report("equal-version/downgrade candidate is rejected",
-         rejected_with(bad, total, GPREGRET2_BL_MANIFEST), &failures);
+  report("equal-version candidate can be deliberately reinstalled",
+         accepted_with(bad, total), &failures);
+  free(bad);
+  free(bad_image);
+
+  bad_image = make_boot_image(board_base, 3, required_caps);
+  bad_envelope = (void *)(bad_image + MANIFEST_OFFSET);
+  bad_envelope->extension.boot_version = TEST_INSTALLED_BOOT_VERSION - 1u;
+  fix_image_crc(bad_image);
+  bad = make_mota(bad_image, MOTA_NRF52_BL_SIZE, 3,
+                  MFLAG_FULL | MFLAG_SIGNED | MFLAG_BOOTLOADER,
+                  TEST_TARGET_ID, TEST_HW_ID, &total);
+  wr32(bad + 8u + 7u, TEST_INSTALLED_BOOT_VERSION - 1u);
+  report("older compatible signed candidate can be deliberately restored",
+         accepted_with(bad, total), &failures);
   free(bad);
   free(bad_image);
 

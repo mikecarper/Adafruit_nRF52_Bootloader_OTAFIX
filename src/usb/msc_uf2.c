@@ -27,6 +27,9 @@
 #include "uf2/uf2_transfer_state.h"
 #include "flash_nrf5x.h"
 #include "app_timer.h"
+#include "boards.h"
+#include "crc16.h"
+#include "nrf_wdt.h"
 
 #if CFG_TUD_MSC
 
@@ -56,9 +59,40 @@ int  write_block(uint32_t block_no, uint8_t *data, WriteState *state);
 
 static void complete_app_update(void)
 {
+  if (!_wr_state.appValidated || _wr_state.appSize == 0)
+  {
+    _wr_state.aborted = true;
+    return;
+  }
+
+  uint16_t app_crc = 0;
+  uint32_t offset = 0;
+  while (offset < _wr_state.appSize)
+  {
+    uint32_t const remaining = _wr_state.appSize - offset;
+    uint32_t const chunk = remaining > CODE_PAGE_SIZE ? CODE_PAGE_SIZE : remaining;
+    app_crc = crc16_compute((uint8_t const*)(uintptr_t)(_wr_state.appStart + offset),
+                            chunk, offset == 0 ? NULL : &app_crc);
+    if (nrf_wdt_started(NRF_WDT))
+    {
+      uint32_t const enabled_channels = NRF_WDT->RREN;
+      for (uint8_t channel = 0; channel < 8; channel++)
+      {
+        if (enabled_channels & (1UL << channel))
+        {
+          nrf_wdt_reload_request_set(NRF_WDT, channel);
+        }
+      }
+    }
+    board_watchdog_feed();
+    offset += chunk;
+  }
+
   dfu_update_status_t update_status;
   memset(&update_status, 0, sizeof(dfu_update_status_t));
   update_status.status_code = DFU_UPDATE_APP_COMPLETE;
+  update_status.app_crc = app_crc;
+  update_status.app_size = _wr_state.appSize;
 
   PRINTF("Application update complete\r\n");
   bootloader_dfu_update_process(update_status);

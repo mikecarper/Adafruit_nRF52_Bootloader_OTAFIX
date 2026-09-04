@@ -21,6 +21,7 @@ typedef struct {
   bool aborted;
   bool settings_invalidated;
   uint8_t written_mask[(TEST_MAX_BLOCKS + 7) / 8];
+  uint8_t target_mask[64];
   uint8_t erased_mask[4];
 } TestState;
 
@@ -84,6 +85,75 @@ static void test_duplicate_does_not_advance_completion(void) {
   assert(state.num_written < state.num_blocks);
 }
 
+static void test_distinct_blocks_cannot_alias_one_target(void) {
+  TestState state = {0};
+  uint32_t const target = 0x1000;
+
+  assert(prepare(&state, 2, 0, TEST_APP_KIND) == UF2_TRANSFER_ACCEPT);
+  assert(uf2_transfer_target_prepare(target, 0x8000, state.target_mask,
+                                     sizeof(state.target_mask), &state.aborted) ==
+         UF2_TRANSFER_ACCEPT);
+  uf2_transfer_target_commit(target, state.target_mask);
+  uf2_transfer_commit(0, &state.num_written, state.written_mask);
+
+  assert(prepare(&state, 2, 1, TEST_APP_KIND) == UF2_TRANSFER_ACCEPT);
+  assert(uf2_transfer_target_prepare(target, 0x8000, state.target_mask,
+                                     sizeof(state.target_mask), &state.aborted) ==
+         UF2_TRANSFER_ABORTED);
+  assert(state.aborted);
+  assert(state.num_written == 1);
+}
+
+static void test_application_target_roles_protect_softdevice(void) {
+  uint32_t const user_start = 0x1000;
+  uint32_t const app_start = 0x26000;
+  uint32_t const app_limit = 0xF4000;
+
+  assert(uf2_application_target_classify(0, user_start, app_start, app_limit) ==
+         UF2_APPLICATION_TARGET_SKIP);
+  assert(uf2_application_target_classify(user_start, user_start, app_start,
+                                         app_limit) ==
+         UF2_APPLICATION_TARGET_REQUIRE_MATCH);
+  assert(uf2_application_target_classify(app_start - 0x100, user_start,
+                                         app_start, app_limit) ==
+         UF2_APPLICATION_TARGET_REQUIRE_MATCH);
+  assert(uf2_application_target_classify(app_start, user_start, app_start,
+                                         app_limit) ==
+         UF2_APPLICATION_TARGET_PROGRAM);
+  assert(uf2_application_target_classify(app_limit - 0x100, user_start,
+                                         app_start, app_limit) ==
+         UF2_APPLICATION_TARGET_PROGRAM);
+  assert(uf2_application_target_classify(app_limit, user_start, app_start,
+                                         app_limit) ==
+         UF2_APPLICATION_TARGET_ABORT);
+}
+
+static void test_application_requires_complete_coverage_and_vectors(void) {
+  TestState state = {0};
+  uint32_t app_size = 0;
+
+  uf2_transfer_target_commit(0x1000, state.target_mask);
+  uf2_transfer_target_commit(0x1100, state.target_mask);
+  assert(uf2_application_finalize(state.target_mask, sizeof(state.target_mask),
+                                  0x1000, 0x8000, 0x1200, 0x20001000,
+                                  0x1001, 0x20040000, &app_size));
+  assert(app_size == 0x200);
+
+  state.target_mask[0x1100 / 256 / 8] &=
+      (uint8_t)~(1U << ((0x1100 / 256) % 8));
+  assert(!uf2_application_finalize(state.target_mask, sizeof(state.target_mask),
+                                   0x1000, 0x8000, 0x1200, 0x20001000,
+                                   0x1001, 0x20040000, &app_size));
+
+  uf2_transfer_target_commit(0x1100, state.target_mask);
+  assert(!uf2_application_finalize(state.target_mask, sizeof(state.target_mask),
+                                   0x1000, 0x8000, 0x1200, 0x1000,
+                                   0x1001, 0x20040000, &app_size));
+  assert(!uf2_application_finalize(state.target_mask, sizeof(state.target_mask),
+                                   0x1000, 0x8000, 0x1200, 0x20001000,
+                                   0x8001, 0x20040000, &app_size));
+}
+
 static void test_abort_is_terminal(void) {
   TestState state = {0};
 
@@ -122,6 +192,7 @@ static void test_explicit_session_reset(void) {
   assert(state.num_written == 0);
   assert(state.update_kind == 0);
   assert(state.written_mask[0] == 0);
+  assert(state.target_mask[0] == 0);
   assert(state.erased_mask[0] == 0);
   assert(prepare(&state, 4, 0, TEST_APP_KIND) == UF2_TRANSFER_ACCEPT);
 }
@@ -217,6 +288,9 @@ int main(void) {
   test_busy_retry_and_completion();
   test_committed_duplicate_is_reported();
   test_duplicate_does_not_advance_completion();
+  test_distinct_blocks_cannot_alias_one_target();
+  test_application_target_roles_protect_softdevice();
+  test_application_requires_complete_coverage_and_vectors();
   test_abort_is_terminal();
   test_explicit_session_reset();
   test_app_flash_phases();

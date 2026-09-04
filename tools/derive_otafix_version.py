@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Derive the monotonic packed boot version from a canonical OTAFIX tag."""
+"""Derive the packed boot version from a canonical OTAFIX tag."""
 
 import argparse
 import re

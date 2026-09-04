@@ -59,7 +59,7 @@ jobs:
 
     - name: Install Tools
       run: |
-        pip3 install adafruit-nrfutil uritemplate requests intelhex setuptools
+        pip3 install adafruit-nrfutil cryptography uritemplate requests intelhex setuptools
 
     - name: Build
       shell: bash
@@ -102,7 +102,7 @@ jobs:
 
       - name: Install Tools
         run: |
-          pip3 install adafruit-nrfutil uritemplate requests intelhex setuptools
+          pip3 install adafruit-nrfutil cryptography uritemplate requests intelhex setuptools
 
       - name: Run host tests
         run: |
@@ -131,6 +131,9 @@ jobs:
               SIGNED_FW_QX="$QX" SIGNED_FW_QY="$QY" "${mota_make_args[@]}" all
             make BOARD="$board" BUILD="_build/dualbank-$board" DUALBANK_FW=1 \
               "${mota_make_args[@]}" all
+            make BOARD="$board" BUILD="_build/signed-dualbank-$board" \
+              SIGNED_FW=1 SIGNED_FW_QX="$QX" SIGNED_FW_QY="$QY" \
+              DUALBANK_FW=1 "${mota_make_args[@]}" all
 
             cmake -S . -B "cmake-build-signed-$board" -DBOARD="$board" \
               -DSIGNED_FW=ON -DSIGNED_FW_QX="$QX" -DSIGNED_FW_QY="$QY" \
@@ -139,6 +142,10 @@ jobs:
             cmake -S . -B "cmake-build-dualbank-$board" -DBOARD="$board" \
               -DDUALBANK_FW=ON "${mota_cmake_args[@]}"
             cmake --build "cmake-build-dualbank-$board"
+            cmake -S . -B "cmake-build-signed-dualbank-$board" -DBOARD="$board" \
+              -DSIGNED_FW=ON -DSIGNED_FW_QX="$QX" -DSIGNED_FW_QY="$QY" \
+              -DDUALBANK_FW=ON "${mota_cmake_args[@]}"
+            cmake --build "cmake-build-signed-dualbank-$board"
           done
 
   bootloader-mota:

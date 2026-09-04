@@ -99,6 +99,25 @@ class HandoffModel:
 
 
 def source_guards() -> None:
+    compact_condition = (
+        "defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || \\\n"
+        "    defined(MOTA_QSPI_BOOTLOADER_UPDATE) || \\\n"
+        "    defined(MOTA_SD_BOOTLOADER_UPDATE)"
+    )
+    if compact_condition not in GHOSTFAT_SOURCE:
+        raise AssertionError("every self-update backend must use the compact recovery volume")
+    for required in (
+        "#define UF2_COMPACT_RECOVERY_VOLUME 1",
+        "#define NUM_FILES 0U",
+        "SoftDevice expected: S",
+        "#if defined(UF2_HAS_CURRENT_FILE)",
+    ):
+        if required not in GHOSTFAT_SOURCE:
+            raise AssertionError(f"missing compact-volume guard: {required}")
+    for obsolete in ("utoa(", "strcat("):
+        if obsolete in GHOSTFAT_SOURCE:
+            raise AssertionError(f"runtime INFO_UF2 formatter survived: {obsolete}")
+
     callback_start = MSC_SOURCE.index("void tud_msc_write10_complete_cb")
     callback_end = MSC_SOURCE.index("void tud_msc_scsi_complete_cb", callback_start)
     write_complete = MSC_SOURCE[callback_start:callback_end]
