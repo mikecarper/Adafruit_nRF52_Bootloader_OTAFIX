@@ -75,10 +75,25 @@ static void pstorage_callback_handler(pstorage_handle_t * p_handle,
                 }
 
                 m_functions.cleared();
-                m_dfu_state = DFU_STATE_RDY;
-                if (m_data_pkt_cb != NULL)
+#ifdef SIGNED_FW
+                // Signed BLE reaches PREPARING only after INIT authentication;
+                // signed serial and all unsigned transports prepare at START.
+                if ( is_ota() )
                 {
-                    m_data_pkt_cb(START_PACKET, result, p_data);
+                    m_dfu_state = DFU_STATE_RX_DATA_PKT;
+                    if (m_data_pkt_cb != NULL)
+                    {
+                        m_data_pkt_cb(INIT_PACKET, result, p_data);
+                    }
+                }
+                else
+#endif
+                {
+                    m_dfu_state = DFU_STATE_RDY;
+                    if (m_data_pkt_cb != NULL)
+                    {
+                        m_data_pkt_cb(START_PACKET, result, p_data);
+                    }
                 }
             }
             break;
@@ -390,7 +405,24 @@ uint32_t dfu_start_pkt_handle(dfu_update_packet_t * p_packet)
     err_code = dfu_timer_restart();
     VERIFY_SUCCESS(err_code);
 
-    m_functions.prepare(m_image_size);
+#ifdef SIGNED_FW
+    if ( is_ota() )
+    {
+        // The START tuple is not authenticated by the Legacy DFU protocol.
+        // BLE can defer preparation until the signed INIT packet is verified.
+        m_dfu_state = DFU_STATE_RDY;
+        if (m_data_pkt_cb != NULL)
+        {
+            m_data_pkt_cb(START_PACKET, NRF_SUCCESS, NULL);
+        }
+    }
+    else
+#endif
+    {
+        // Unsigned DFU has no later authentication gate. Serial hosts also
+        // require this ordering because they wait for erase after START.
+        m_functions.prepare(m_image_size);
+    }
 
     return NRF_SUCCESS;
 }
@@ -497,10 +529,22 @@ uint32_t dfu_init_pkt_complete(void)
 
     if (m_dfu_state == DFU_STATE_RX_INIT_PKT)
     {
-        err_code = dfu_init_prevalidate(m_init_packet, m_init_packet_length, m_start_packet.dfu_update_mode);
+        err_code = dfu_init_prevalidate(m_init_packet,
+                                        m_init_packet_length,
+                                        m_start_packet.dfu_update_mode,
+                                        m_image_size);
         if (err_code == NRF_SUCCESS)
         {
-            m_dfu_state = DFU_STATE_RX_DATA_PKT;
+#ifdef SIGNED_FW
+            if ( is_ota() )
+            {
+                m_functions.prepare(m_image_size);
+            }
+            else
+#endif
+            {
+                m_dfu_state = DFU_STATE_RX_DATA_PKT;
+            }
         }
         else
         {

@@ -161,6 +161,12 @@ shared CDC+MSC descriptor prefix and preserves the existing uppercase chip-ID
 serial encoding; sharing that prefix keeps the hardened dual-bank image inside
 the fixed bootloader envelope.
 
+Signed Legacy BLE DFU builds acknowledge a validated START without erasing
+flash, authenticate the complete INIT packet, and only then enter flash
+preparation. BLE defers its INIT-success response until that preparation
+callback completes; authentication failures therefore leave the installed
+application untouched. Serial retains its host-required START/erase ordering.
+
 The pstorage regression compiles the production raw driver against a deterministic SoftDevice flash
 mock. It verifies that an immediate `NRF_ERROR_BUSY` waits for and ignores the preceding operation's
 event, retries without completing the wrong queue entry, and propagates lazy-erase enqueue failures

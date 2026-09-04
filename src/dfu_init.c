@@ -159,9 +159,15 @@ _Static_assert(sizeof(pk) == 64, "Public key must be 64 bytes in size");
 static uint8_t m_extended_packet[DFU_INIT_PACKET_EXT_LENGTH_MAX];   //< Data array for storage of the extended data received. The extended data follows the normal init data of type \ref dfu_init_packet_t. Extended data can be used for a CRC, hash, signature, or other data. */
 static uint8_t m_extended_packet_length;                            //< Length of the extended data received with init packet. */
 
-uint32_t dfu_init_prevalidate(uint8_t * p_init_data, uint32_t init_data_len, uint8_t image_type)
+uint32_t dfu_init_prevalidate(uint8_t * p_init_data,
+                              uint32_t  init_data_len,
+                              uint8_t   image_type,
+                              uint32_t  image_size)
 {
 	uint32_t i = 0;
+#ifndef SIGNED_FW
+	(void)image_size;
+#endif
 
 	// In order to support signing or encryption then any init packet decryption function / library
 	// should be called from here or implemented at this location.
@@ -290,7 +296,15 @@ uint32_t dfu_init_prevalidate(uint8_t * p_init_data, uint32_t init_data_len, uin
 #  error Incorrect layout: r and s must be contiguous!
 # endif
 
-	return uECC_verify(pk, digest, sizeof(digest), sig, curve) == 1 ? NRF_SUCCESS : NRF_ERROR_INVALID_DATA;
+	// Bind the authenticated package length to the untrusted START tuple before
+	// that tuple is allowed to select how much destination flash is prepared.
+	if (uECC_verify(pk, digest, sizeof(digest), sig, curve) != 1 ||
+		uint32_decode(&m_extended_packet[DFU_INIT_PACKET_POS_EXT_IMAGE_LENGTH]) != image_size)
+	{
+		return NRF_ERROR_INVALID_DATA;
+	}
+
+	return NRF_SUCCESS;
 #endif
 }
 

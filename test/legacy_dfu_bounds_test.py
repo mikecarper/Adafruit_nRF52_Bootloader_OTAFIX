@@ -83,6 +83,46 @@ def require_start_bounds(path: Path) -> None:
     if not init_word_bound < init_multiply < init_remaining < init_copy:
         raise AssertionError(f"{path.name} does not bound INIT arithmetic before copying")
 
+    callback = function_source(source, "static void pstorage_callback_handler(")
+    callback_ota_gate = callback.index("if ( is_ota() )")
+    data_ready = callback.index("m_dfu_state = DFU_STATE_RX_DATA_PKT", callback_ota_gate)
+    init_notify = callback.index("m_data_pkt_cb(INIT_PACKET", data_ready)
+    if not callback_ota_gate < data_ready < init_notify:
+        raise AssertionError(f"{path.name} does not finish signed preparation as INIT")
+
+    signed_start = start.index("#ifdef SIGNED_FW", total)
+    ota_gate = start.index("if ( is_ota() )", signed_start)
+    ready_without_erase = start.index("m_dfu_state = DFU_STATE_RDY", ota_gate)
+    start_notify = start.index("m_data_pkt_cb(START_PACKET", ready_without_erase)
+    serial_fallback = start.index("else", start_notify)
+    signed_end = start.index("#endif", serial_fallback)
+    start_prepare = start.index("m_functions.prepare(m_image_size)", signed_end)
+    if not (
+        signed_start
+        < ota_gate
+        < ready_without_erase
+        < start_notify
+        < serial_fallback
+        < signed_end
+        < start_prepare
+    ):
+        raise AssertionError(f"{path.name} erases for signed unauthenticated BLE START")
+
+    complete = function_source(source, "uint32_t dfu_init_pkt_complete(")
+    prevalidate = complete.index("dfu_init_prevalidate")
+    ota_gate = complete.index("if ( is_ota() )", prevalidate)
+    authenticated_prepare = complete.index("m_functions.prepare(m_image_size)", ota_gate)
+    serial_fallback = complete.index("else", authenticated_prepare)
+    data_ready = complete.index("m_dfu_state = DFU_STATE_RX_DATA_PKT", serial_fallback)
+    if not (
+        prevalidate
+        < ota_gate
+        < authenticated_prepare
+        < serial_fallback
+        < data_ready
+    ):
+        raise AssertionError(f"{path.name} prepares signed BLE flash before INIT authentication")
+
 
 def require_serial_framing_bounds() -> None:
     hci = (HCI_ROOT / "hci_transport.c").read_text()
@@ -145,6 +185,17 @@ def require_serial_framing_bounds() -> None:
         < stop_cleanup
     ):
         raise AssertionError("serial DFU accepts invalid state transitions or strands STOP")
+
+    ble = (DFU_ROOT / "dfu_transport_ble.c").read_text()
+    callback = function_source(ble, "static void dfu_cb_handler(")
+    init_case = callback.index("case INIT_PACKET:")
+    init_response = callback.index("BLE_DFU_INIT_PROCEDURE", init_case)
+    event_handler = function_source(ble, "static void on_dfu_evt(")
+    complete = event_handler.index("err_code = dfu_init_pkt_complete()")
+    deferred_success = event_handler.index("if (err_code == NRF_SUCCESS)", complete)
+    immediate_response = event_handler.index("BLE_DFU_INIT_PROCEDURE", deferred_success)
+    if not init_case < init_response or not complete < deferred_success < immediate_response:
+        raise AssertionError("BLE does not defer signed INIT success until erase completion")
 
 
 def main() -> None:

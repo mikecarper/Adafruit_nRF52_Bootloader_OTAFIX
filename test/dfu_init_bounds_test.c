@@ -8,6 +8,8 @@
 #include "dfu_types.h"
 #include "nrf_error.h"
 
+#define TEST_IMAGE_SIZE 64u
+
 uint16_t crc16_compute(uint8_t const *data, uint32_t size, uint16_t const *previous) {
   (void)data;
   (void)size;
@@ -83,6 +85,7 @@ static uint32_t make_valid_packet(uint8_t packet[128], uint32_t padding) {
 #ifdef SIGNED_FW
   enum { EXTENDED_LENGTH = 104 };
   put_u32(packet + 12, 2u);
+  put_u32(packet + 16, TEST_IMAGE_SIZE);
 #else
   enum { EXTENDED_LENGTH = 2 };
 #endif
@@ -93,21 +96,23 @@ int main(void) {
   uint8_t packet[128] __attribute__((aligned(4)));
   uint8_t unaligned_storage[129] __attribute__((aligned(4)));
 
-  assert(dfu_init_prevalidate(NULL, 0, DFU_UPDATE_APP) == NRF_ERROR_NULL);
+  assert(dfu_init_prevalidate(NULL, 0, DFU_UPDATE_APP, TEST_IMAGE_SIZE) == NRF_ERROR_NULL);
 
   uint32_t length = make_valid_packet(packet, 0);
-  assert(dfu_init_prevalidate(packet, length, DFU_UPDATE_APP) == NRF_SUCCESS);
+  assert(dfu_init_prevalidate(packet, length, DFU_UPDATE_APP, TEST_IMAGE_SIZE) == NRF_SUCCESS);
 
   length = make_valid_packet(unaligned_storage + 1, 0);
-  assert(dfu_init_prevalidate(unaligned_storage + 1, length, DFU_UPDATE_APP) == NRF_SUCCESS);
+  assert(dfu_init_prevalidate(unaligned_storage + 1, length, DFU_UPDATE_APP,
+                              TEST_IMAGE_SIZE) == NRF_SUCCESS);
 
   length = make_valid_packet(packet, 3);
-  assert(dfu_init_prevalidate(packet, length, DFU_UPDATE_APP) == NRF_SUCCESS);
+  assert(dfu_init_prevalidate(packet, length, DFU_UPDATE_APP, TEST_IMAGE_SIZE) == NRF_SUCCESS);
   packet[length - 1] = 1;
-  assert(dfu_init_prevalidate(packet, length, DFU_UPDATE_APP) == NRF_SUCCESS);
+  assert(dfu_init_prevalidate(packet, length, DFU_UPDATE_APP, TEST_IMAGE_SIZE) == NRF_SUCCESS);
 
   length = make_valid_packet(packet, 4);
-  assert(dfu_init_prevalidate(packet, length, DFU_UPDATE_APP) == NRF_ERROR_INVALID_LENGTH);
+  assert(dfu_init_prevalidate(packet, length, DFU_UPDATE_APP,
+                              TEST_IMAGE_SIZE) == NRF_ERROR_INVALID_LENGTH);
 
   // This maximum-size packet overflowed the 104-byte destination before the
   // parser checked the declared SoftDevice list or extension geometry.
@@ -115,15 +120,20 @@ int main(void) {
   put_u16(packet, 0x0052u);
   put_u16(packet + 2, 52840u);
   put_u16(packet + 8, 0u);
-  assert(dfu_init_prevalidate(packet, sizeof(packet), DFU_UPDATE_APP) == NRF_ERROR_INVALID_LENGTH);
+  assert(dfu_init_prevalidate(packet, sizeof(packet), DFU_UPDATE_APP,
+                              TEST_IMAGE_SIZE) == NRF_ERROR_INVALID_LENGTH);
 
   memset(packet, 0, sizeof(packet));
   put_u16(packet, 0x0052u);
   put_u16(packet + 2, 52840u);
   put_u16(packet + 8, UINT16_MAX);
-  assert(dfu_init_prevalidate(packet, 12, DFU_UPDATE_APP) == NRF_ERROR_INVALID_LENGTH);
+  assert(dfu_init_prevalidate(packet, 12, DFU_UPDATE_APP,
+                              TEST_IMAGE_SIZE) == NRF_ERROR_INVALID_LENGTH);
 
 #ifdef SIGNED_FW
+  length = make_valid_packet(packet, 0);
+  assert(dfu_init_prevalidate(packet, length, DFU_UPDATE_APP,
+                              TEST_IMAGE_SIZE + 4u) == NRF_ERROR_INVALID_DATA);
   puts("signed Legacy DFU init bounds: PASS");
 #else
   puts("unsigned Legacy DFU init bounds: PASS");

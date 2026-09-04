@@ -345,18 +345,25 @@ static void dfu_cb_handler(uint32_t packet, uint32_t result, uint8_t * p_data)
             break;
 
         case START_PACKET:
+#ifdef SIGNED_FW
+        case INIT_PACKET:
+#endif
+        {
+#ifdef SIGNED_FW
+            const uint8_t procedure = (packet == INIT_PACKET) ?
+                                      BLE_DFU_INIT_PROCEDURE : BLE_DFU_START_PROCEDURE;
+#else
+            const uint8_t procedure = BLE_DFU_START_PROCEDURE;
+#endif
 
-            // Restore latency to the negotiated one
+            // Signed INIT success is emitted here only after authenticated
+            // flash preparation reaches its completion callback.
             restore_ble_connection_policy();
-
-            // Translate the err_code returned by the above function to DFU Response Value.
-            resp_val = nrf_err_code_translate(result, BLE_DFU_START_PROCEDURE);
-
-            err_code = ble_dfu_response_send(&m_dfu,
-                                             BLE_DFU_START_PROCEDURE,
-                                             resp_val);
+            resp_val = nrf_err_code_translate(result, procedure);
+            err_code = ble_dfu_response_send(&m_dfu, procedure, resp_val);
             APP_ERROR_CHECK(err_code);
             break;
+        }
 
         default:
             // ignore.
@@ -839,6 +846,16 @@ static void on_dfu_evt(ble_dfu_t * p_dfu, ble_dfu_evt_t * p_evt)
             if ((uint8_t)p_evt->evt.ble_dfu_pkt_write.p_data[0] == DFU_INIT_COMPLETE)
             {
                 err_code = dfu_init_pkt_complete();
+
+#ifdef SIGNED_FW
+                // Success is reported by dfu_cb_handler after authenticated
+                // flash preparation completes. Authentication errors are
+                // reported immediately and leave flash untouched.
+                if (err_code == NRF_SUCCESS)
+                {
+                    break;
+                }
+#endif
 
                 // Translate the err_code returned by the above function to DFU Response Value.
                 resp_val = nrf_err_code_translate(err_code, BLE_DFU_INIT_PROCEDURE);
