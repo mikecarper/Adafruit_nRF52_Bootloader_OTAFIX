@@ -22,6 +22,14 @@ S140_V6_INC = -I ../lib/softdevice/s140_nrf52_6.1.1/s140_nrf52_6.1.1_API/include
 	-I ../lib/softdevice/s140_nrf52_6.1.1/s140_nrf52_6.1.1_API/include/nrf52
 S140_V7_INC = -I ../lib/softdevice/s140_nrf52_7.3.0/s140_nrf52_7.3.0_API/include \
 	-I ../lib/softdevice/s140_nrf52_7.3.0/s140_nrf52_7.3.0_API/include/nrf52
+DFU_INIT_INC = -I $(SRC) -I ../lib/sdk11/components/libraries/bootloader_dfu \
+	-I ../lib/sdk/components/libraries/util \
+	-I ../lib/sdk/components/libraries/crc16 \
+	-I ../lib/nrfx/mdk -I $(SRC)/cmsis/include $(S140_V6_INC) \
+	-I ../lib/tinycrypt/lib/include
+DFU_INIT_FLAGS = -DNRF52840_XXAA -DS140 -DDFU_APP_DATA_RESERVED=0xA000
+DFU_INIT_HOST_WARNINGS = -Wno-implicit-function-declaration -Wno-pointer-to-int-cast \
+	-Wno-unused-variable
 
 apply_sim: apply_sim.c $(SRC)/ota_delta.c $(SRC)/detools/detools.c $(SRC)/sha256.c \
            $(SRC)/ota_delta.h $(SRC)/ota_layout.h
@@ -87,6 +95,15 @@ bootloader_mota_sd_test: bootloader_mota_test.c $(SRC)/ota_delta.c $(SRC)/detool
 softdevice_fwid_test: softdevice_fwid_test.c $(SRC)/ota_softdevice_fwid.h
 	$(CC) $(CFLAGS) -I $(SRC) softdevice_fwid_test.c -o $@
 
+dfu_init_bounds_test: dfu_init_bounds_test.c $(SRC)/dfu_init.c
+	$(CC) $(CFLAGS) $(DFU_INIT_HOST_WARNINGS) $(DFU_INIT_FLAGS) $(DFU_INIT_INC) \
+		dfu_init_bounds_test.c $(SRC)/dfu_init.c -o $@
+
+dfu_init_signed_bounds_test: dfu_init_bounds_test.c dfu_init_signed_under_test.c \
+                             $(SRC)/dfu_init.c
+	$(CC) $(CFLAGS) $(DFU_INIT_HOST_WARNINGS) -DSIGNED_FW $(DFU_INIT_FLAGS) $(DFU_INIT_INC) \
+		dfu_init_bounds_test.c dfu_init_signed_under_test.c -o $@
+
 qspi_alignment_test: qspi_alignment_test.c $(SRC)/ota_qspi_alignment.h
 	$(CC) $(CFLAGS) -I $(SRC) qspi_alignment_test.c -o $@
 
@@ -120,7 +137,7 @@ pstorage_busy_test: pstorage_busy_test.c $(PSTORAGE_SRC) $(wildcard pstorage_stu
 	$(CC) $(CFLAGS) -Wno-int-to-pointer-cast -DNRF52_SERIES $(PSTORAGE_INC) \
 		pstorage_busy_test.c $(PSTORAGE_SRC) -o $@
 
-check: apply_sim readback_test readback_test_v7 readback_internal_test bootloader_image_test sd_apply_test qspi_apply_test bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test softdevice_fwid_test qspi_alignment_test qspi_wake_test usb_wait_test uf2_write_state_test dfu_entry_test peer_data_layout_test peer_data_layout_nrf52_test peer_data_layout_nrf52833_test pstorage_busy_test
+check: apply_sim readback_test readback_test_v7 readback_internal_test bootloader_image_test sd_apply_test qspi_apply_test bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test softdevice_fwid_test dfu_init_bounds_test dfu_init_signed_bounds_test qspi_alignment_test qspi_wake_test usb_wait_test uf2_write_state_test dfu_entry_test peer_data_layout_test peer_data_layout_nrf52_test peer_data_layout_nrf52833_test pstorage_busy_test
 	python3 version_derivation_test.py
 	python3 build_profile_test.py
 	python3 manifest_patcher_test.py
@@ -130,6 +147,7 @@ check: apply_sim readback_test readback_test_v7 readback_internal_test bootloade
 	python3 ble_advertising_test.py
 	python3 ble_connection_policy_test.py
 	python3 serial_dfu_erase_test.py
+	python3 legacy_dfu_bounds_test.py
 	python3 legacy_ble_dfu_host_test.py
 	python3 usb_task_budget_test.py
 	python3 uf2_handoff_test.py
@@ -159,6 +177,9 @@ check: apply_sim readback_test readback_test_v7 readback_internal_test bootloade
 	@echo
 	./softdevice_fwid_test
 	@echo
+	./dfu_init_bounds_test
+	./dfu_init_signed_bounds_test
+	@echo
 	./qspi_alignment_test
 	@echo
 	./qspi_wake_test
@@ -180,6 +201,6 @@ sanitize:
 	$(MAKE) CFLAGS="$(SANITIZER_CFLAGS)" check
 
 clean:
-	rm -f apply_sim readback_test readback_test_v7 readback_internal_test bootloader_image_test sd_apply_test qspi_apply_test bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test softdevice_fwid_test qspi_alignment_test qspi_wake_test usb_wait_test uf2_write_state_test dfu_entry_test peer_data_layout_test peer_data_layout_nrf52_test peer_data_layout_nrf52833_test pstorage_busy_test
+	rm -f apply_sim readback_test readback_test_v7 readback_internal_test bootloader_image_test sd_apply_test qspi_apply_test bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test softdevice_fwid_test dfu_init_bounds_test dfu_init_signed_bounds_test qspi_alignment_test qspi_wake_test usb_wait_test uf2_write_state_test dfu_entry_test peer_data_layout_test peer_data_layout_nrf52_test peer_data_layout_nrf52833_test pstorage_busy_test
 
 .PHONY: check sanitize clean

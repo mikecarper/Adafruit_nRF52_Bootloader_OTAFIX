@@ -408,16 +408,10 @@ uint32_t dfu_start_pkt_handle(dfu_update_packet_t * p_packet)
 
     m_start_packet = *(p_packet->params.start_packet);
 
-    // Check that the requested update procedure is supported.
-    // Currently the following combinations are allowed:
-    // - Application
-    // - SoftDevice
-    // - Bootloader
-    // - SoftDevice with Bootloader
-    if (IS_UPDATING_APP(m_start_packet) &&
-        (IS_UPDATING_SD(m_start_packet) || IS_UPDATING_BL(m_start_packet)))
+    // Valid modes are SD (1), BL (2), SD+BL (3), and APP (4).
+    if ((m_start_packet.dfu_update_mode == 0) ||
+        (m_start_packet.dfu_update_mode > DFU_UPDATE_APP))
     {
-        // App update is only supported independently.
         return NRF_ERROR_NOT_SUPPORTED;
     }
 
@@ -429,20 +423,22 @@ uint32_t dfu_start_pkt_handle(dfu_update_packet_t * p_packet)
         return NRF_ERROR_NOT_SUPPORTED;
     }
 
-    m_image_size = m_start_packet.sd_image_size + m_start_packet.bl_image_size +
-                   m_start_packet.app_image_size;
-
-    if (m_start_packet.bl_image_size > DFU_BL_IMAGE_MAX_SIZE)
+    // Bound every untrusted component before adding them. Checking only the
+    // wrapped uint32_t total lets oversized SD+BL start packets bypass the
+    // flash-region limit and persist impossible swap geometry in settings.
+    if (m_start_packet.bl_image_size > DFU_BL_IMAGE_MAX_SIZE ||
+        m_start_packet.sd_image_size > DFU_IMAGE_MAX_SIZE_FULL - m_start_packet.bl_image_size ||
+        m_start_packet.app_image_size > DFU_IMAGE_MAX_SIZE_FULL -
+            m_start_packet.bl_image_size - m_start_packet.sd_image_size)
     {
         return NRF_ERROR_DATA_SIZE;
     }
 
+    m_image_size = m_start_packet.sd_image_size + m_start_packet.bl_image_size +
+                   m_start_packet.app_image_size;
+
     if (IS_UPDATING_SD(m_start_packet))
     {
-        if (m_image_size > (DFU_IMAGE_MAX_SIZE_FULL))
-        {
-            return NRF_ERROR_DATA_SIZE;
-        }
         m_functions.prepare  = dfu_prepare_func_app_erase;
         m_functions.cleared  = dfu_cleared_func_app;
         m_functions.activate = dfu_activate_sd;

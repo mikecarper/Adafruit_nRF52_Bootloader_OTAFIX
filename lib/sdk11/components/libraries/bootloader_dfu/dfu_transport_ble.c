@@ -423,11 +423,6 @@ static void start_data_process(ble_dfu_t * p_dfu, ble_dfu_evt_t * p_evt)
         start_packet.bl_image_size  = uint32_decode(p_length_data + BL_IMAGE_SIZE_OFFSET);
         start_packet.app_image_size = uint32_decode(p_length_data + APP_IMAGE_SIZE_OFFSET);
 
-        // Store the reported image size for use by the accumulator logic
-        m_reported_image_size = start_packet.sd_image_size +
-                                start_packet.bl_image_size +
-                                start_packet.app_image_size;
-
         // Prioritize FLASH writes over BLE comms
         prioritize_flash_writes_over_ble();
 
@@ -442,6 +437,14 @@ static void start_data_process(ble_dfu_t * p_dfu, ble_dfu_evt_t * p_evt)
 
             resp_val = nrf_err_code_translate(err_code, BLE_DFU_START_PROCEDURE);
             err_code = ble_dfu_response_send(p_dfu, BLE_DFU_START_PROCEDURE, resp_val);
+        }
+        else
+        {
+            // dfu_start_pkt_handle() has validated this sum before it is used
+            // to decide when the accumulator contains the final packet.
+            m_reported_image_size = start_packet.sd_image_size +
+                                    start_packet.bl_image_size +
+                                    start_packet.app_image_size;
         }
 
         APP_ERROR_CHECK(err_code);
@@ -606,10 +609,18 @@ static void app_data_process(ble_dfu_t * p_dfu, ble_dfu_evt_t * p_evt)
         PRINTF("OTA: Packet accumulator %s (first packet size %d)\r\n", m_accum_active ? "enabled" : "disabled", pkt_len);
     }
 
-    if (m_accum_active)
+    // Packet sizes can change during one transfer. A small first write enables
+    // accumulation, but a later full-MTU write can be larger than the entire
+    // accumulator. Flush prior bytes and route that packet through the direct
+    // path instead of copying beyond m_accum_buf.
+    if (m_accum_active && pkt_len > sizeof(m_accum_buf))
+    {
+        accum_flush(p_dfu);
+    }
+    else if (m_accum_active)
     {
         // Flush the accumulator if adding this packet would overflow the buffer
-        if (m_accum_len + pkt_len > ACCUMULATE_TARGET_SIZE)
+        if (m_accum_len + pkt_len > sizeof(m_accum_buf))
         {
             PRINTF("OTA: Pre-overflow flush of accumulator\r\n");
             accum_flush(p_dfu);

@@ -68,6 +68,7 @@
  */
 
 #include "dfu_init.h"
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 #include <dfu_types.h>
@@ -153,6 +154,7 @@ _Static_assert(sizeof(pk) == 64, "Public key must be 64 bytes in size");
 
 #define DFU_INIT_PACKET_EXT_LENGTH_MIN          2                   //< Minimum length of the extended init packet. Init packet and CRC16
 #define DFU_INIT_PACKET_EXT_LENGTH_MAX          104                 //< Identifier (4 bytes) + Image length (4 bytes) + SHA-256 digest (32 bytes) + NIST P-256 using SHA-256 (64 bytes)
+#define DFU_INIT_PACKET_PADDING_MAX             3                   //< Legacy transports word-align the final init fragment
 
 static uint8_t m_extended_packet[DFU_INIT_PACKET_EXT_LENGTH_MAX];   //< Data array for storage of the extended data received. The extended data follows the normal init data of type \ref dfu_init_packet_t. Extended data can be used for a CRC, hash, signature, or other data. */
 static uint8_t m_extended_packet_length;                            //< Length of the extended data received with init packet. */
@@ -165,30 +167,43 @@ uint32_t dfu_init_prevalidate(uint8_t * p_init_data, uint32_t init_data_len, uin
 	// should be called from here or implemented at this location.
 
 	// Length check to ensure valid data are parsed.
+	if (p_init_data == NULL)
+	{
+		return NRF_ERROR_NULL;
+	}
+
 	if (init_data_len < sizeof(dfu_init_packet_t))
 	{
 		return NRF_ERROR_INVALID_LENGTH;
 	}
 
-	// Current template uses clear text data so they can be casted for pre-check.
-	dfu_init_packet_t * p_init_packet = (dfu_init_packet_t *)p_init_data;
-
-	m_extended_packet_length = ((uint32_t)p_init_data + init_data_len) -
-							   (uint32_t)&p_init_packet->softdevice[p_init_packet->softdevice_len];
-	if (m_extended_packet_length < DFU_INIT_PACKET_EXT_LENGTH_MIN)
+	uint32_t const softdevice_offset = offsetof(dfu_init_packet_t, softdevice);
+	uint16_t const softdevice_count =
+		uint16_decode(p_init_data + offsetof(dfu_init_packet_t, softdevice_len));
+	uint32_t const softdevice_length =
+		(uint32_t)softdevice_count * sizeof(uint16_t);
+	if (softdevice_count == 0 ||
+		softdevice_length > init_data_len - softdevice_offset)
 	{
 		return NRF_ERROR_INVALID_LENGTH;
 	}
 
-	if (((uint32_t)p_init_data + init_data_len) <
-		(uint32_t)&p_init_packet->softdevice[p_init_packet->softdevice_len])
+	uint32_t const extended_packet_offset = softdevice_offset + softdevice_length;
+	uint32_t const extended_packet_length = init_data_len - extended_packet_offset;
+#ifdef SIGNED_FW
+	uint32_t const required_extended_length = DFU_INIT_PACKET_EXT_LENGTH_MAX;
+#else
+	uint32_t const required_extended_length = DFU_INIT_PACKET_EXT_LENGTH_MIN;
+#endif
+	if (extended_packet_length < required_extended_length ||
+		extended_packet_length > required_extended_length + DFU_INIT_PACKET_PADDING_MAX)
 	{
 		return NRF_ERROR_INVALID_LENGTH;
 	}
 
-	memcpy(m_extended_packet,
-		   &p_init_packet->softdevice[p_init_packet->softdevice_len],
-		   m_extended_packet_length);
+	m_extended_packet_length = (uint8_t)extended_packet_length;
+	memcpy(m_extended_packet, p_init_data + extended_packet_offset,
+		required_extended_length);
 
 	/** [DFU init application version] */
 	// To support application versioning, this check should be updated.
@@ -212,7 +227,7 @@ uint32_t dfu_init_prevalidate(uint8_t * p_init_data, uint32_t init_data_len, uin
 	// if ((DFU_DEVICE_INFO->device_rev != DFU_DEVICE_REVISION_EMPTY) &&
 	//    (p_init_packet->device_rev != DFU_DEVICE_INFO->device_rev))
 
-	if ( p_init_packet->device_type != ADAFRUIT_DEVICE_TYPE )
+	if (uint16_decode(p_init_data + offsetof(dfu_init_packet_t, device_type)) != ADAFRUIT_DEVICE_TYPE)
 	{
 		return NRF_ERROR_FORBIDDEN;
 	}
@@ -220,7 +235,7 @@ uint32_t dfu_init_prevalidate(uint8_t * p_init_data, uint32_t init_data_len, uin
 	// Adafruit unlock code must match to upgrade SoftDevice and/or Bootloader
 	if ( image_type & (DFU_UPDATE_SD | DFU_UPDATE_BL) )
 	{
-	  if (p_init_packet->device_rev != ADAFRUIT_DEV_REV)
+	  if (uint16_decode(p_init_data + offsetof(dfu_init_packet_t, device_rev)) != ADAFRUIT_DEV_REV)
 	  {
 		return NRF_ERROR_FORBIDDEN;
 	  }
@@ -229,10 +244,12 @@ uint32_t dfu_init_prevalidate(uint8_t * p_init_data, uint32_t init_data_len, uin
 	// Third check: Check the array of supported SoftDevices by this application.
 	//              If the installed SoftDevice does not match any SoftDevice in the list then an
 	//              error is returned.
-	while (i < p_init_packet->softdevice_len)
+	while (i < softdevice_count)
 	{
-		if (p_init_packet->softdevice[i] == DFU_SOFTDEVICE_ANY ||
-			p_init_packet->softdevice[i] == SD_FWID_GET(MBR_SIZE))
+		uint16_t const required_softdevice =
+			uint16_decode(p_init_data + softdevice_offset + (i * sizeof(uint16_t)));
+		if (required_softdevice == DFU_SOFTDEVICE_ANY ||
+			required_softdevice == SD_FWID_GET(MBR_SIZE))
 		{
 			// Found a match. Break the loop.
 			break;
@@ -241,14 +258,14 @@ uint32_t dfu_init_prevalidate(uint8_t * p_init_data, uint32_t init_data_len, uin
 	}
 
 	// No matching SoftDevice found - Return NRF_ERROR_INVALID_DATA.
-	if (i >= p_init_packet->softdevice_len)
+	if (i >= softdevice_count)
 		return NRF_ERROR_INVALID_DATA;
 
 #ifndef SIGNED_FW
 	return NRF_SUCCESS;
 #else
 	// Check that we have the correct identifier indicating that ECDS is used
-	if(*(uint32_t*)&m_extended_packet[DFU_INIT_PACKET_POS_EXT_IDENTIFIER] != DFU_INIT_PACKET_USES_ECDS)
+	if(uint32_decode(&m_extended_packet[DFU_INIT_PACKET_POS_EXT_IDENTIFIER]) != DFU_INIT_PACKET_USES_ECDS)
 	{
 		return NRF_ERROR_INVALID_DATA;
 	}
@@ -306,7 +323,7 @@ uint32_t dfu_init_postvalidate(uint8_t * p_image, uint32_t image_len, uint16_t *
 #else
 
 	// Compare image size received with signed init_packet data
-	if(image_len != *(uint32_t*)&m_extended_packet[DFU_INIT_PACKET_POS_EXT_IMAGE_LENGTH])
+	if(image_len != uint32_decode(&m_extended_packet[DFU_INIT_PACKET_POS_EXT_IMAGE_LENGTH]))
 	{
 		return NRF_ERROR_INVALID_DATA;
 	}
