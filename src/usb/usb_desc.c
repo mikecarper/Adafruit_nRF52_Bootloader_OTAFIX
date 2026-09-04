@@ -33,11 +33,6 @@ enum {
     STRID_MSC
 };
 
-#if !defined(SIGNED_FW) || defined(FORCE_UF2)
-// CDC + MSC or CDC only mode
-static bool _cdc_only = false;
-#endif
-
 // Serial is 64-bit DeviceID -> 16 chars len
 static char desc_str_serial[1+16];
 
@@ -87,26 +82,25 @@ enum {
 };
 
 #if CFG_TUD_MSC
-uint8_t desc_configuration_cdc_msc[] =
-{
-  // Interface count, string index, total length, attribute, power in mA
-  TUD_CONFIG_DESCRIPTOR(1, ITF_NUM_TOTAL, 0, TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN + TUD_MSC_DESC_LEN, 0, 100),
-
-  // Interface number, string index, EP notification address and size, EP data address (out, in) and size.
-  TUD_CDC_DESCRIPTOR(ITF_NUM_CDC, STRID_CDC, 0x81, 8, 0x02, 0x82, 64),
-
-  // Interface number, string index, EP Out & EP In address, EP size
-  TUD_MSC_DESCRIPTOR(ITF_NUM_MSC, STRID_MSC, 0x03, 0x83, 64),
-};
+#define USB_DESC_INTERFACE_COUNT ITF_NUM_TOTAL
+#define USB_DESC_TOTAL_LEN       (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN + TUD_MSC_DESC_LEN)
+#else
+#define USB_DESC_INTERFACE_COUNT (ITF_NUM_TOTAL - 1)
+#define USB_DESC_TOTAL_LEN       (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN)
 #endif
 
-uint8_t desc_configuration_cdc_only[] =
+uint8_t desc_configuration[] =
 {
   // Interface count, string index, total length, attribute, power in mA
-  TUD_CONFIG_DESCRIPTOR(1, ITF_NUM_TOTAL-1, 0, TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN, 0, 100),
+  TUD_CONFIG_DESCRIPTOR(1, USB_DESC_INTERFACE_COUNT, 0, USB_DESC_TOTAL_LEN, 0, 100),
 
   // Interface number, string index, EP notification address and size, EP data address (out, in) and size.
   TUD_CDC_DESCRIPTOR(ITF_NUM_CDC, STRID_CDC, 0x81, 8, 0x02, 0x82, 64),
+
+#if CFG_TUD_MSC
+  // Interface number, string index, EP Out & EP In address, EP size
+  TUD_MSC_DESCRIPTOR(ITF_NUM_MSC, STRID_MSC, 0x03, 0x83, 64),
+#endif
 };
 
 
@@ -116,26 +110,27 @@ uint8_t desc_configuration_cdc_only[] =
 uint8_t const * tud_descriptor_configuration_cb(uint8_t index)
 {
   (void) index; // for multiple configurations
-#if CFG_TUD_MSC
-  return _cdc_only ? desc_configuration_cdc_only : desc_configuration_cdc_msc;
-#else
-  return desc_configuration_cdc_only;
-#endif
+  return desc_configuration;
 }
 
 // Enumerate as CDC + MSC or CDC only
 void usb_desc_init(bool cdc_only)
 {
-  (void)cdc_only; // for non MSC build
-
 #if CFG_TUD_MSC
-  _cdc_only = cdc_only;
   if ( cdc_only )
-#endif
   {
+    // The CDC prefix is itself a complete configuration descriptor. Shorten
+    // the advertised descriptor instead of keeping a duplicate CDC-only copy.
+    desc_configuration[2] = TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN;
+    desc_configuration[4] = ITF_NUM_TOTAL - 1;
+
     // Change PID to CDC only
     desc_device.idProduct = USB_DESC_CDC_ONLY_PID;
   }
+#else
+  (void)cdc_only;
+  desc_device.idProduct = USB_DESC_CDC_ONLY_PID;
+#endif
 
   // Create Serial string descriptor
   uint8_t const* device_id = (uint8_t const*) &NRF_FICR->DEVICEID;
@@ -144,10 +139,9 @@ void usb_desc_init(bool cdc_only)
   {
     for ( uint8_t j = 0; j < 2; j++ )
     {
-      const char nibble_to_hex[16] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
-
       uint8_t nibble = (device_id[i] >> (j * 4)) & 0xf;
-      desc_str_serial[15 - (i * 2 + j)] = nibble_to_hex[nibble]; // memory is little endian
+      desc_str_serial[15 - (i * 2 + j)] =
+          '0' + nibble + (((nibble + 6) >> 4) * 7); // memory is little endian
     }
   }
   desc_str_serial[16] = 0;

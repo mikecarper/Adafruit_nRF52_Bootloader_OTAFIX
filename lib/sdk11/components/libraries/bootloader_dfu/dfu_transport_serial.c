@@ -133,18 +133,14 @@ static uint32_t data_queue_element_free(uint8_t element_index)
  * @param[in]   packet_type      packet type.
  * @param[out]  p_element_index  index of the element.
  */
-static uint32_t data_queue_element_alloc(uint8_t * p_element_index, uint8_t packet_type)
+static uint32_t data_queue_element_alloc(uint8_t * p_element_index, uint32_t packet_type)
 {
     uint32_t retval;
     uint32_t index;
 
     retval = NRF_ERROR_NO_MEM;
 
-    if (INVALID_PACKET == packet_type)
-    {
-        retval = NRF_ERROR_INVALID_PARAM;
-    }
-    else if (true == DATA_QUEUE_FULL())
+    if (true == DATA_QUEUE_FULL())
     {
         retval = NRF_ERROR_NO_MEM;
     }
@@ -199,9 +195,6 @@ static void process_dfu_packet(void * p_event_data, uint16_t event_size)
     uint32_t              index;
     dfu_update_packet_t * packet;
 
-    // Mark that startup DFU has transitioned into a real update flow.
-    bootloader_dfu_activity_mark();
-
     while (false == DATA_QUEUE_EMPTY())
     {
         // Fetch the element to be processed.
@@ -220,25 +213,40 @@ static void process_dfu_packet(void * p_event_data, uint16_t event_size)
                         packet->params.start_packet =
                             (dfu_start_packet_t*)packet->params.data_packet.p_data_packet;
                         retval = dfu_start_pkt_handle(packet);
-                        APP_ERROR_CHECK(retval);
+                        if (NRF_SUCCESS == retval)
+                        {
+                            // A validated START, rather than arbitrary serial traffic,
+                            // suppresses the startup fallback.
+                            bootloader_dfu_activity_mark();
+                        }
                         break;
 
                     case INIT_PACKET:
-                        (void)dfu_init_pkt_handle(packet);
-                        retval = dfu_init_pkt_complete();
-                        APP_ERROR_CHECK(retval);
-
-                        led_state(STATE_WRITING_STARTED);
+                        retval = dfu_init_pkt_handle(packet);
+                        if (NRF_SUCCESS == retval)
+                        {
+                            retval = dfu_init_pkt_complete();
+                            if (NRF_SUCCESS == retval)
+                            {
+                                led_state(STATE_WRITING_STARTED);
+                            }
+                        }
                         break;
 
                     case STOP_DATA_PACKET:
-                        (void)dfu_image_validate();
-                        (void)dfu_image_activate();
-
-                        led_state(STATE_WRITING_FINISHED);
-
-                        // Break the loop by returning.
-                        return;
+                        retval = dfu_image_validate();
+                        if (NRF_SUCCESS == retval)
+                        {
+                            retval = dfu_image_activate();
+                            if (NRF_SUCCESS == retval)
+                            {
+                                led_state(STATE_WRITING_FINISHED);
+                                return;
+                            }
+                        }
+                        // A rejected STOP falls through to normal cleanup so it
+                        // cannot remain at the queue head and block later data.
+                        break;
 
                     default:
                         // No implementation needed.
@@ -264,14 +272,39 @@ void rpc_transport_event_handler(hci_transport_evt_t event)
     retval = hci_transport_rx_pkt_extract(&p_rpc_cmd_buffer, &rpc_cmd_length_read);
     if (NRF_SUCCESS == retval)
     {
-        // Verify if the data queue can buffer the packet.
-        retval = data_queue_element_alloc(&element_index, p_rpc_cmd_buffer[0]);
-        if (NRF_SUCCESS == retval)
+        const uint32_t packet_type = uint32_decode(p_rpc_cmd_buffer);
+
+        if ((packet_type < INIT_PACKET) || (packet_type > STOP_DATA_PACKET) ||
+            (packet_type == STOP_INIT_PACKET))
         {
-            //subtract 1 since we are interested in payload length and not the type field.
-            DATA_QUEUE_ELEMENT_SET_PLEN(element_index,(rpc_cmd_length_read / sizeof(uint32_t)) - 1);
-            DATA_QUEUE_ELEMENT_COPY_PDATA(element_index, &p_rpc_cmd_buffer[4]);
+            retval = NRF_ERROR_INVALID_PARAM;
+        }
+        else if (((packet_type == START_PACKET) &&
+                  (rpc_cmd_length_read != sizeof(uint32_t) + sizeof(dfu_start_packet_t))) ||
+                 ((packet_type == STOP_DATA_PACKET) &&
+                  (rpc_cmd_length_read != sizeof(uint32_t))) ||
+                 ((packet_type == DATA_PACKET) &&
+                  ((rpc_cmd_length_read % sizeof(uint32_t)) != 0)))
+        {
+            retval = NRF_ERROR_INVALID_LENGTH;
+        }
+        else
+        {
+            // Schedule before publishing the buffer. The scheduler only executes
+            // after this handler returns, so a failure cannot strand a queue entry.
             retval = app_sched_event_put(NULL, 0, process_dfu_packet);
+            if (NRF_SUCCESS == retval)
+            {
+                // Verify if the data queue can buffer the packet.
+                retval = data_queue_element_alloc(&element_index, packet_type);
+                if (NRF_SUCCESS == retval)
+                {
+                    // Subtract one word containing the packet type.
+                    DATA_QUEUE_ELEMENT_SET_PLEN(
+                        element_index, (rpc_cmd_length_read / sizeof(uint32_t)) - 1u);
+                    DATA_QUEUE_ELEMENT_COPY_PDATA(element_index, &p_rpc_cmd_buffer[4]);
+                }
+            }
         }
     }
 

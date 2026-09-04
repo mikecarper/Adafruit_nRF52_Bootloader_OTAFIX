@@ -153,6 +153,14 @@ boundary stall. The test also pins the page-alignment/round-up behavior and
 checks that this serial correction did not replace MSC's separately retryable
 one-complete-page erase phase.
 
+The Legacy DFU bounds regression also pins HCI's physical and declared payload
+length checks, serial START framing, queue publication order, coherent update
+mode/size tuples, and overflow-safe INIT/DATA word-count arithmetic. The USB
+descriptor regression verifies that CDC-only enumeration safely shortens the
+shared CDC+MSC descriptor prefix and preserves the existing uppercase chip-ID
+serial encoding; sharing that prefix keeps the hardened dual-bank image inside
+the fixed bootloader envelope.
+
 The pstorage regression compiles the production raw driver against a deterministic SoftDevice flash
 mock. It verifies that an immediate `NRF_ERROR_BUSY` waits for and ignores the preceding operation's
 event, retries without completing the wrong queue entry, and propagates lazy-erase enqueue failures

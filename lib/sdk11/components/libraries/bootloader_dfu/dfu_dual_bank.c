@@ -406,11 +406,22 @@ uint32_t dfu_start_pkt_handle(dfu_update_packet_t * p_packet)
 {
     uint32_t err_code;
 
+    if (DFU_STATE_IDLE != m_dfu_state)
+    {
+        return NRF_ERROR_INVALID_STATE;
+    }
+
     m_start_packet = *(p_packet->params.start_packet);
 
-    // Valid modes are SD (1), BL (2), SD+BL (3), and APP (4).
-    if ((m_start_packet.dfu_update_mode == 0) ||
-        (m_start_packet.dfu_update_mode > DFU_UPDATE_APP))
+    const uint8_t populated_mode =
+        (m_start_packet.sd_image_size ? DFU_UPDATE_SD : 0) |
+        (m_start_packet.bl_image_size ? DFU_UPDATE_BL : 0) |
+        (m_start_packet.app_image_size ? DFU_UPDATE_APP : 0);
+
+    // Valid modes are SD (1), BL (2), SD+BL (3), and APP (4). Selected
+    // components must be non-empty and unselected components must be empty.
+    if ((m_start_packet.dfu_update_mode != populated_mode) ||
+        (populated_mode == 0) || (populated_mode > DFU_UPDATE_APP))
     {
         return NRF_ERROR_NOT_SUPPORTED;
     }
@@ -462,9 +473,6 @@ uint32_t dfu_start_pkt_handle(dfu_update_packet_t * p_packet)
         }
     }
 
-    if ( DFU_STATE_IDLE != m_dfu_state )
-        return NRF_ERROR_INVALID_STATE;
-
     // Valid peer activity detected. Hence restart the DFU timer.
     err_code = dfu_timer_restart();
     VERIFY_SUCCESS(err_code);
@@ -497,9 +505,9 @@ uint32_t dfu_data_pkt_handle(dfu_update_packet_t * p_packet)
             return NRF_ERROR_INVALID_STATE;
 
         case DFU_STATE_RX_DATA_PKT:
-            data_length = p_packet->params.data_packet.packet_length * sizeof(uint32_t);
-
-            if ((m_data_received + data_length) > m_image_size)
+            if ((m_data_received > m_image_size) ||
+                (p_packet->params.data_packet.packet_length >
+                 ((m_image_size - m_data_received) / sizeof(uint32_t))))
             {
                 // The caller is trying to write more bytes into the flash than the size provided to
                 // the dfu_image_size_set function. This is treated as a serious error condition and
@@ -510,6 +518,8 @@ uint32_t dfu_data_pkt_handle(dfu_update_packet_t * p_packet)
 
                 return NRF_ERROR_DATA_SIZE;
             }
+
+            data_length = p_packet->params.data_packet.packet_length * sizeof(uint32_t);
 
             // Valid peer activity detected. Hence restart the DFU timer.
             err_code = dfu_timer_restart();
@@ -616,8 +626,14 @@ uint32_t dfu_init_pkt_handle(dfu_update_packet_t * p_packet)
             err_code = dfu_timer_restart();
             VERIFY_SUCCESS(err_code);
 
+            if (p_packet->params.data_packet.packet_length >
+                (sizeof(m_init_packet) / sizeof(uint32_t)))
+            {
+                return NRF_ERROR_INVALID_LENGTH;
+            }
+
             length = p_packet->params.data_packet.packet_length * sizeof(uint32_t);
-            if ((m_init_packet_length + length) > sizeof(m_init_packet))
+            if (m_init_packet_length > (sizeof(m_init_packet) - length))
             {
                 return NRF_ERROR_INVALID_LENGTH;
             }

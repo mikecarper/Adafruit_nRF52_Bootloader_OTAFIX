@@ -116,7 +116,7 @@ static bool is_rx_pkt_valid(const uint8_t * p_buffer, uint32_t length)
     // - verify header checksum
     // - verify payload length field
     // - verify CRC
-    if (length <= PKT_HDR_SIZE)
+    if (length < (PKT_HDR_SIZE + PKT_CRC_SIZE))
     {
         return false;
     }
@@ -139,6 +139,13 @@ static bool is_rx_pkt_valid(const uint8_t * p_buffer, uint32_t length)
     const uint32_t expected_checksum =
         ((p_buffer[0] + p_buffer[1] + p_buffer[2] + p_buffer[3])) & 0xFFu;
     if (expected_checksum != 0)
+    {
+        return false;
+    }
+
+    const uint32_t payload_length = uint16_decode(&p_buffer[1]) >> 4u;
+    if ((payload_length < sizeof(uint32_t)) ||
+        (payload_length != (length - PKT_HDR_SIZE - PKT_CRC_SIZE)))
     {
         return false;
     }

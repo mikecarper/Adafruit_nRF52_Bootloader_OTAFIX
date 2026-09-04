@@ -149,6 +149,7 @@ check: apply_sim readback_test readback_test_v7 readback_internal_test bootloade
 	python3 serial_dfu_erase_test.py
 	python3 legacy_dfu_bounds_test.py
 	python3 legacy_ble_dfu_host_test.py
+	python3 usb_descriptor_test.py
 	python3 usb_task_budget_test.py
 	python3 uf2_handoff_test.py
 	python3 test_otafix_mota_update.py
