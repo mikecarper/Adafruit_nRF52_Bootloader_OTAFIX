@@ -43,17 +43,13 @@
 
 #if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
 enum {
-  COLOR_BLACK  = 0,
-  COLOR_GREEN  = 1,
-  COLOR_BLUE   = 2,
-  COLOR_ORANGE = COLOR_GREEN,
-  COLOR_PURPLE = COLOR_BLUE,
+  COLOR_BLACK = 0,
+  COLOR_WHITE = 1,
 };
 
 const uint16_t palette[] = {
   COL(0x000000),
-  COL(0x78dc52),
-  COL(0x003fad),
+  COL(0xffffff),
 };
 #else
 enum {
@@ -276,7 +272,39 @@ static void draw_screen(const uint8_t *fb) {
   }
 }
 
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+// Draw a compact block "DFU" mark without pulling the font/icon renderer into
+// the space-constrained internal-update bootloader. Each byte describes one
+// five-cell-tall column; zero columns separate the letters.
+static __attribute__((noinline)) void draw_dfu(void) {
+  static const uint8_t columns[] = {
+    0x1f, 0x11, 0x0e, 0x00, // D
+    0x1f, 0x05, 0x01, 0x00, // F
+    0x1f, 0x10, 0x1f,       // U
+  };
+  enum {
+    CELL = DISPLAY_HEIGHT / 7,
+    LEFT = (DISPLAY_WIDTH - (int)sizeof(columns) * CELL) / 2,
+    TOP  = (DISPLAY_HEIGHT - 5 * CELL) / 2,
+  };
+
+  for (unsigned column = 0; column < sizeof(columns); ++column) {
+    for (int x = 0; x < CELL; ++x) {
+      uint8_t *p = frame_buf + (LEFT + (int)column * CELL + x) * DISPLAY_HEIGHT + TOP;
+      for (unsigned row = 0; row < 5; ++row) {
+        if (columns[column] & (1u << row)) {
+          memset(p + row * CELL, COLOR_WHITE, CELL);
+        }
+      }
+    }
+  }
+
+  draw_screen(frame_buf);
+}
+#endif
+
 // Draw a color bar, clipping a malformed board-specific layout to the buffer.
+#if !defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
 static void draw_bar(int y, int h, int color) {
   if (y < 0) {
     h += y;
@@ -293,14 +321,17 @@ static void draw_bar(int y, int h, int color) {
     memset(frame_buf + x * DISPLAY_HEIGHT + y, color, h);
   }
 }
+#endif
 
 // draw drag & drop screen
 void screen_draw_drag(void) {
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+  draw_dfu();
+#else
   draw_bar(SCREEN_BAR1_Y, SCREEN_BAR1_H, COLOR_GREEN);
   draw_bar(SCREEN_BAR2_Y, SCREEN_BAR2_H, COLOR_BLUE);
   draw_bar(SCREEN_BAR3_Y, SCREEN_BAR3_H, COLOR_ORANGE);
 
-#if !defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
   print_centered(SCREEN_TITLE_Y, COLOR_WHITE, DISPLAY_TITLE, SCREEN_LARGE_FONT_SIZE);
   print_centered(SCREEN_VERSION_Y, COLOR_PURPLE, UF2_VERSION_BASE, 1);
   print_centered(SCREEN_BANNER_Y, COLOR_WHITE, BANNER_TEXT, 1);
@@ -312,19 +343,14 @@ void screen_draw_drag(void) {
   print(22, SCREEN_DRAG_Y - 12, COLOR_WHITE, "firmware.uf2", 1);
   print(160, SCREEN_DRAG_Y - 12, COLOR_WHITE, UF2_VOLUME_LABEL, 1);
   #endif
-#endif
 
   draw_screen(frame_buf);
+#endif
 }
 
 void screen_draw_ble(void) {
 #if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
-  // App-preserving bootloader support consumes the last safe flash margin on
-  // display boards. Keep an unambiguous low-cost BLE pattern while omitting
-  // the font/icon renderer; the board LED continues to report DFU progress.
-  draw_bar(SCREEN_BAR1_Y, SCREEN_BAR1_H, COLOR_BLUE);
-  draw_bar(SCREEN_BAR2_Y, SCREEN_BAR2_H, COLOR_GREEN);
-  draw_bar(SCREEN_BAR3_Y, SCREEN_BAR3_H, COLOR_PURPLE);
+  draw_dfu();
 #else
   draw_bar(SCREEN_BAR1_Y, SCREEN_BAR1_H, COLOR_GREEN);
   draw_bar(SCREEN_BAR2_Y, SCREEN_BAR2_H, COLOR_BLUE);
@@ -334,9 +360,9 @@ void screen_draw_ble(void) {
   print_centered(SCREEN_VERSION_Y, COLOR_PURPLE, UF2_VERSION_BASE, 1);
   print_centered(SCREEN_BLE_OTA_Y, COLOR_WHITE, "BLE OTA", SCREEN_LARGE_FONT_SIZE);
   print_centered(SCREEN_BANNER_Y, COLOR_WHITE, BANNER_TEXT, 1);
-#endif
 
   draw_screen(frame_buf);
+#endif
 }
 
 #endif
