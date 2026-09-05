@@ -111,6 +111,13 @@ class ReplyTests(unittest.TestCase):
             path = Path(directory) / "update.mota"
             path.write_bytes(blob)
             updater.validate_package_contract(path, package, identity, release)
+            wrong_name = updater.NodeIdentity(
+                "239A0071", "1150F50E", "4631_DFU", "00000000", 3, 0x0A
+            )
+            with self.assertRaises(updater.UpdateError):
+                updater.validate_package_contract(
+                    path, package, wrong_name, release
+                )
             struct.pack_into("<I", manifest, 3, 0xE6F5F03F)
             path.write_bytes(blob)
             with self.assertRaises(updater.UpdateError):

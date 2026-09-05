@@ -70,6 +70,35 @@ python3 -m pip install --user pyserial
 python3 tools/otafix_mota_update.py
 ```
 
+OTAFIX 2.4.5 also publishes
+`GAT562-OTAFIX-2.4.5-LoRa-field-kit.zip`. That archive is an offline-capable
+Linux field kit for the exact `gat562` profile. It contains the signed package,
+official key, manifest, checksums, updater, PySerial 3.5, and pinned `motatool`
+binaries for x86-64 and aarch64 hosts. After extracting it, connect the GAT562
+target by USB with its MeshCore text console available, connect a separate
+MeshCore LoRa source, then run:
+
+```bash
+chmod +x run-gat562-lora-update.sh
+./run-gat562-lora-update.sh
+```
+
+The target must report board `239A0029`, target `D50D2D44`, name
+`GAT562_DFU`, ABI 3, and capability `0A`. Stop for legacy `4631_DFU`, any other
+target, or a GAT562 Mesh Watch 13. The archive's `README.txt` contains the full
+automated and manual field recipe with the exact release MID and image hash.
+
+For other boards, or when assembling a separate offline kit, the updater can
+use a previously downloaded official bundle without querying GitHub. Direct
+serial mode removes the `meshcli` dependency but still requires PySerial:
+
+```bash
+python3 tools/otafix_mota_update.py \
+  --direct-serial \
+  --release-bundle OTAFIX-2.4.5-bootloader-mota.zip \
+  --motatool /path/to/motatool
+```
+
 The default interactive flow asks for the target serial port, update action,
 LoRa source, RF hop count, and bandwidth. It keeps frequency `909.950 MHz` and
 SF5 unless they are overridden. A non-interactive version check is also

@@ -15,7 +15,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 MAKEFILE = ROOT / "Makefile"
 WORKFLOW = ROOT / ".github" / "workflows" / "githubci.yml"
-QUALIFICATION_VERSION = "0x02040403"
+QUALIFICATION_VERSION = "0x02040501"
 
 
 FAKE_TOOL = r"""#!/usr/bin/env python3

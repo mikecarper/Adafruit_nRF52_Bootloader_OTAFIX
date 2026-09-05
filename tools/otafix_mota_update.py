@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 import hashlib
+import io
 import json
 import math
 import os
@@ -30,6 +31,10 @@ OFFICIAL_PUBLIC_KEY = (
     "272564CC588D3D122285A15E6E2566D2ABE7177BB7EA1D1E41B23B29F0F85D2D"
 )
 BUNDLE_RE = re.compile(r"^OTAFIX-(.+)-bootloader-mota\.zip$")
+RELEASE_TAG_RE = re.compile(
+    r"^(?:v?[0-9]+\.[0-9]+\.[0-9]+-)?"
+    r"OTAFIX[0-9]+\.[0-9]+\.[0-9]+(?:-preview\.[0-9]+)?$"
+)
 SEEDER_READY_RE = re.compile(r"(?mi)^\s*\[dev\]\s+COUNT\s*->\s*\d+\b")
 SEEDER_ATTACH_ERROR_RE = re.compile(
     r"(?mi)^\s*\[dev\].*\b(?:ERR|ERROR)\b|"
@@ -95,6 +100,7 @@ class Release:
     bundle_digest: str
     public_key_url: str
     public_key_digest: str
+    local_bundle: Path | None = None
 
 
 def clean_output(text: str) -> str:
@@ -120,6 +126,12 @@ def parse_version(text: str) -> Version:
     return Version(major, minor, patch, channel, label)
 
 
+def parse_release_version(tag: str) -> Version:
+    if RELEASE_TAG_RE.fullmatch(tag) is None:
+        raise UpdateError(f"not a canonical OTAFIX release tag: {tag!r}")
+    return parse_version(tag)
+
+
 def parse_identity(text: str) -> NodeIdentity:
     match = IDENTITY_RE.search(clean_output(text))
     if match is None:
@@ -132,6 +144,20 @@ def parse_identity(text: str) -> NodeIdentity:
         int(match.group("abi")),
         int(match.group("caps"), 16),
     )
+
+
+def require_identity(spec: str | None, identity: NodeIdentity) -> None:
+    if spec is None:
+        return
+    expected = (
+        f"{identity.board_id},{identity.target_id},{identity.name},"
+        f"{identity.abi},{identity.caps:02X}"
+    )
+    if spec.upper() != expected.upper():
+        raise UpdateError(
+            "selected node does not match required identity "
+            f"{spec!r}; reported {expected!r}"
+        )
 
 
 def parse_staged(text: str) -> tuple[str, str]:
@@ -178,7 +204,7 @@ def fetch_latest_release() -> Release:
     tag = str(payload["tag_name"])
     return Release(
         tag=tag,
-        version=parse_version(tag),
+        version=parse_release_version(tag),
         page_url=str(payload.get("html_url") or LATEST_PAGE),
         bundle_url=str(bundle["browser_download_url"]),
         bundle_name=str(bundle["name"]),
@@ -186,6 +212,45 @@ def fetch_latest_release() -> Release:
         public_key_url=str(public_key["browser_download_url"]),
         public_key_digest=asset_digest(public_key),
     )
+
+
+def load_local_release(path: Path) -> Release:
+    bundle = path.expanduser().resolve()
+    if not bundle.is_file():
+        raise UpdateError(f"local release bundle does not exist: {bundle}")
+    blob = bundle.read_bytes()
+    try:
+        with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+            manifest = json.loads(archive.read("manifest.json"))
+            key_blob = archive.read("OTAFIX_MOTA_SIGNING_PUBLIC_KEY.txt")
+        key_text = key_blob.decode("ascii").strip().upper()
+    except (KeyError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise UpdateError("local release bundle lacks valid metadata") from exc
+    if not isinstance(manifest, dict):
+        raise UpdateError("local release bundle manifest must be an object")
+    tag = str(manifest.get("tag", ""))
+    version = parse_release_version(tag)
+    if key_text != OFFICIAL_PUBLIC_KEY:
+        raise UpdateError("local release bundle does not use the pinned official key")
+    if str(manifest.get("signing_public_key", "")).upper() != OFFICIAL_PUBLIC_KEY:
+        raise UpdateError("local release bundle manifest has the wrong signer")
+    return Release(
+        tag=tag,
+        version=version,
+        page_url=str(bundle),
+        bundle_url="",
+        bundle_name=bundle.name,
+        bundle_digest=hashlib.sha256(blob).hexdigest(),
+        public_key_url="",
+        public_key_digest=hashlib.sha256(key_blob).hexdigest(),
+        local_bundle=bundle,
+    )
+
+
+def resolve_release(local_bundle: Path | None) -> Release:
+    if local_bundle is not None:
+        return load_local_release(local_bundle)
+    return fetch_latest_release()
 
 
 def download(url: str, destination: Path, expected_digest: str) -> None:
@@ -226,15 +291,25 @@ def run(command: list[str], timeout: float = 30, check: bool = True) -> str:
     return output
 
 
-def mesh_command(meshcli: str, port: str, command: str,
+def mesh_command(meshcli: str | None, port: str, command: str,
                  attempts: int = 3) -> str:
     last = ""
     for attempt in range(attempts):
-        last = run(
-            [meshcli, "-q", "-c", "off", "-r", "-s", port, command],
-            timeout=30,
-            check=False,
-        )
+        if meshcli is None:
+            try:
+                last = serial_text_command(port, command, companion=False)
+            except (UpdateError, OSError) as exc:
+                last = str(exc)
+                if attempt + 1 < attempts:
+                    time.sleep(1)
+                    continue
+                break
+        else:
+            last = run(
+                [meshcli, "-q", "-c", "off", "-r", "-s", port, command],
+                timeout=30,
+                check=False,
+            )
         if last and "Unknown command" not in last:
             return last
         if attempt + 1 < attempts:
@@ -242,7 +317,7 @@ def mesh_command(meshcli: str, port: str, command: str,
     raise UpdateError(f"no usable reply to {command!r}: {last or 'no reply'}")
 
 
-def query_node(meshcli: str, port: str) -> tuple[Version, str, NodeIdentity]:
+def query_node(meshcli: str | None, port: str) -> tuple[Version, str, NodeIdentity]:
     version_reply = mesh_command(meshcli, port, "get bootloader.ver")
     identity_reply = mesh_command(meshcli, port, "ota bootloader")
     version = parse_version(version_reply)
@@ -254,7 +329,7 @@ def query_node(meshcli: str, port: str) -> tuple[Version, str, NodeIdentity]:
     return version, version_reply, identity
 
 
-def choose_target(meshcli: str) -> tuple[str, Version, str, NodeIdentity]:
+def choose_target(meshcli: str | None) -> tuple[str, Version, str, NodeIdentity]:
     candidates: list[tuple[str, Version, str, NodeIdentity]] = []
     print("\nScanning serial ports for self-update-capable OTAFIX targets...")
     for port in serial_ports():
@@ -399,6 +474,7 @@ def validate_package_contract(path: Path, package: dict[str, Any],
         | (release.version.patch << 8)
         | release.version.channel
     )
+    live_hardware_id = f"NRF_BL_{identity.board_id}_{identity.name}"
     expected = (
         manifest[0] == 3
         and manifest[1] == 0x07
@@ -411,6 +487,7 @@ def validate_package_contract(path: Path, package: dict[str, Any],
         and manifest[56] == 0
         and bytes(manifest[89:97]) == bytes(8)
         and signer == OFFICIAL_PUBLIC_KEY
+        and hardware_id == live_hardware_id
         and str(package.get("target_id", "")).upper() == f"0X{target_id:08X}"
         and str(package.get("firmware_version", "")).upper()
         == f"0X{fw_version:08X}"
@@ -427,19 +504,33 @@ def validate_package_contract(path: Path, package: dict[str, Any],
 def prepare_package(release: Release, identity: NodeIdentity, cache: Path,
                     motatool: str) -> tuple[Path, dict[str, Any]]:
     release_dir = cache / release.tag
-    bundle = release_dir / release.bundle_name
+    release_dir.mkdir(parents=True, exist_ok=True)
+    bundle = release.local_bundle or (release_dir / release.bundle_name)
     public_key = release_dir / "OTAFIX_MOTA_SIGNING_PUBLIC_KEY.txt"
-    download(release.bundle_url, bundle, release.bundle_digest)
-    download(release.public_key_url, public_key, release.public_key_digest)
-    key_text = public_key.read_text(encoding="ascii").strip().upper()
-    if key_text != OFFICIAL_PUBLIC_KEY:
-        raise UpdateError("latest release public key is not the pinned official key")
+    if release.local_bundle is None:
+        download(release.bundle_url, bundle, release.bundle_digest)
+        download(release.public_key_url, public_key, release.public_key_digest)
+    blob = bundle.read_bytes()
+    if hashlib.sha256(blob).hexdigest() != release.bundle_digest:
+        raise UpdateError("release bundle changed after selection")
 
-    with zipfile.ZipFile(bundle) as archive:
+    with zipfile.ZipFile(io.BytesIO(blob)) as archive:
         try:
             manifest = json.loads(archive.read("manifest.json"))
+            bundled_key = archive.read("OTAFIX_MOTA_SIGNING_PUBLIC_KEY.txt")
         except (KeyError, json.JSONDecodeError) as exc:
             raise UpdateError("release bundle has no valid manifest.json") from exc
+        try:
+            bundled_key_text = bundled_key.decode("ascii").strip().upper()
+        except UnicodeDecodeError as exc:
+            raise UpdateError("release bundle public key is not ASCII") from exc
+        if bundled_key_text != OFFICIAL_PUBLIC_KEY:
+            raise UpdateError("release bundle public key is not the pinned official key")
+        if release.local_bundle is not None:
+            public_key.write_bytes(bundled_key)
+        key_text = public_key.read_text(encoding="ascii").strip().upper()
+        if key_text != OFFICIAL_PUBLIC_KEY:
+            raise UpdateError("release public key is not the pinned official key")
         if manifest.get("tag") != release.tag:
             raise UpdateError("bundle tag does not match the latest release")
         if str(manifest.get("signing_public_key", "")).upper() != OFFICIAL_PUBLIC_KEY:
@@ -471,25 +562,38 @@ def serial_text_command(port: str, command: str, companion: bool) -> str:
         raise UpdateError("pyserial is required to control the LoRa source") from exc
     start = COMPANION_TERMINAL_RESET if companion else b""
     stop = b"+++MESHCORE-TERM-STOP\r\n" if companion else b""
-    with serial.Serial(port, 115200, timeout=0.2, write_timeout=2) as stream:
-        stream.reset_input_buffer()
-        if start:
-            stream.write(start)
-            stream.flush()
-            time.sleep(0.7)
+    try:
+        with serial.Serial(port, 115200, timeout=0.2, write_timeout=2) as stream:
             stream.reset_input_buffer()
-        stream.write((command + "\r\n").encode("ascii"))
-        stream.flush()
-        deadline = time.monotonic() + 3
-        output = bytearray()
-        while time.monotonic() < deadline:
-            chunk = stream.read(4096)
-            if chunk:
-                output.extend(chunk)
-                deadline = min(deadline + 0.1, time.monotonic() + 0.6)
-        if stop:
-            stream.write(stop)
+            if start:
+                stream.write(start)
+                stream.flush()
+                time.sleep(0.7)
+                stream.reset_input_buffer()
+            else:
+                # Match meshcore-cli's proven raw-repeater setup. USB CDC may
+                # need time after open, and the blank CR wakes the text CLI
+                # before stale startup output is discarded.
+                time.sleep(0.5)
+                stream.write(b"\r")
+                stream.flush()
+                time.sleep(0.2)
+                stream.reset_input_buffer()
+            terminator = "\r\n" if companion else "\r"
+            stream.write((command + terminator).encode("ascii"))
             stream.flush()
+            deadline = time.monotonic() + 3
+            output = bytearray()
+            while time.monotonic() < deadline:
+                chunk = stream.read(4096)
+                if chunk:
+                    output.extend(chunk)
+                    deadline = min(deadline + 0.1, time.monotonic() + 0.6)
+            if stop:
+                stream.write(stop)
+                stream.flush()
+    except (OSError, serial.SerialException) as exc:
+        raise UpdateError(f"serial command failed on {port}: {exc}") from exc
     return clean_output(output.decode("utf-8", "replace"))
 
 
@@ -529,7 +633,7 @@ def wait_for_seeder_attachment(
         time.sleep(0.1)
 
 
-def detect_source_mode(meshcli: str, port: str) -> str:
+def detect_source_mode(meshcli: str | None, port: str) -> str:
     reply = serial_text_command(port, "ota status", companion=True)
     if "OTA seeder" in reply:
         return "companion"
@@ -539,7 +643,7 @@ def detect_source_mode(meshcli: str, port: str) -> str:
     return "raw"
 
 
-def source_command(meshcli: str, port: str, mode: str, command: str) -> str:
+def source_command(meshcli: str | None, port: str, mode: str, command: str) -> str:
     if mode == "companion":
         return serial_text_command(port, command, companion=True)
     return mesh_command(meshcli, port, command)
@@ -556,7 +660,7 @@ def stop_process(process: subprocess.Popen[str] | None) -> None:
         process.wait(timeout=5)
 
 
-def install_update(args: argparse.Namespace, meshcli: str, motatool: str,
+def install_update(args: argparse.Namespace, meshcli: str | None, motatool: str,
                    target_port: str, current: Version,
                    identity: NodeIdentity, release: Release) -> None:
     package_path, package = prepare_package(release, identity, args.cache, motatool)
@@ -580,6 +684,12 @@ def install_update(args: argparse.Namespace, meshcli: str, motatool: str,
         if port != target_port and resolved != target_resolved:
             ports.append(port)
     source_port = args.source_serial or choose("Choose the LoRa source", ports)
+    try:
+        source_resolved = Path(source_port).resolve()
+    except OSError:
+        source_resolved = Path(source_port)
+    if source_port == target_port or source_resolved == target_resolved:
+        raise UpdateError("LoRa source and target must be separate radios")
     source_mode = args.source_mode
     if source_mode == "auto":
         print("Detecting source mode...")
@@ -792,6 +902,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--meshcli", default="meshcli")
     parser.add_argument("--motatool", default="motatool")
     parser.add_argument(
+        "--direct-serial", action="store_true",
+        help="use bundled PySerial for raw target/source commands instead of meshcli",
+    )
+    parser.add_argument(
+        "--release-bundle", type=Path,
+        help="verified local mOTA release bundle; do not access GitHub",
+    )
+    parser.add_argument(
+        "--require-identity",
+        help="required board,target,name,ABI,caps tuple for a field kit",
+    )
+    parser.add_argument(
         "--cache", type=Path,
         default=Path.home() / ".cache" / "otafix-updater",
     )
@@ -819,7 +941,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    meshcli = command_path(args.meshcli, "meshcli")
+    meshcli = None if args.direct_serial else command_path(args.meshcli, "meshcli")
     if args.target_serial:
         target_port = args.target_serial
         print(f"\nQuerying bootloader on {target_port}...")
@@ -827,14 +949,18 @@ def main() -> int:
     else:
         target_port, current, version_reply, identity = choose_target(meshcli)
         print(f"\nSelected {target_port}.")
+    require_identity(args.require_identity, identity)
     print(clean_output(version_reply))
     print(
         f"Identity: board={identity.board_id} target={identity.target_id} "
         f"name={identity.name} ABI={identity.abi} caps=0x{identity.caps:02X}"
     )
-    print(f"Checking {LATEST_PAGE}...")
-    release = fetch_latest_release()
-    print(f"Latest release: OTAFIX {release.version.label} ({release.page_url})")
+    if args.release_bundle is None:
+        print(f"Checking {LATEST_PAGE}...")
+    else:
+        print(f"Checking local release bundle {args.release_bundle}...")
+    release = resolve_release(args.release_bundle)
+    print(f"Selected release: OTAFIX {release.version.label} ({release.page_url})")
 
     if current.order < release.version.order:
         state = "UPDATE AVAILABLE"
@@ -859,7 +985,8 @@ def main() -> int:
         )
         if action.startswith("Refresh"):
             current, _, identity = query_node(meshcli, target_port)
-            release = fetch_latest_release()
+            require_identity(args.require_identity, identity)
+            release = resolve_release(args.release_bundle)
             if current.order < release.version.order:
                 relation = "upgrade available"
             elif current.order == release.version.order:
@@ -873,7 +1000,8 @@ def main() -> int:
                 args, meshcli, motatool, target_port, current, identity, release
             )
             current, _, identity = query_node(meshcli, target_port)
-            release = fetch_latest_release()
+            require_identity(args.require_identity, identity)
+            release = resolve_release(args.release_bundle)
         elif action.startswith("Show"):
             print(
                 f"Installed OTAFIX {current.label}: board={identity.board_id}, "

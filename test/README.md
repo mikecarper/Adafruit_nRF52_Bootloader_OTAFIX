@@ -215,6 +215,15 @@ Packed test version `0x02040402` identifies the first corrected MSC-local retry
 candidate lineage. Command-lifecycle and generation-bound reset hardening uses
 the distinct packed version `0x02040403` for current qualification.
 
+The OTAFIX 2.4.5 BLE cache regression models the old rejected Service Changed
+range and requires a populated runtime range whose pending state clears only
+after successful queueing. It also guards retry events, disconnect cleanup,
+and nonfatal optional MTU/data-length replies. The release-tool tests build a
+synthetic one-board GAT562 field kit, require one top-level extraction
+directory, both Linux ELF architectures, the pinned PySerial wheel, exact
+identity gating, offline bundle selection, and content checksums. Nonrelease
+2.4.5 qualification uses packed version `0x02040501`.
+
 The UF2 clean-handoff regression keeps a completed application invalid until
 TinyUSB has acknowledged the final write and either the volume stays idle for
 one second, an explicit eject status reaches the host, or the host physically
@@ -301,10 +310,11 @@ changes to the SoftDevice, signing policy or public key, dual-bank/UF2/DFU/debug
 features, USB timeout, source selection, or compiler/linker flags rewrite a
 content-hashed stamp and force both recompilation and relinking. The persisted
 stamp contains only a SHA-256 digest. The same regression pins nonrelease CI to
-the documented corrected `0x02040403` qualification lineage and rejects reuse
-of failed candidate ID `0x02040401` as an active override. It also pins both CI
-toolchain installs to Arm GNU Toolchain 14.2.Rel1, requires Make and CMake to
-build the signed-plus-dual-bank `heltec_t096` and `heltec_t114` profiles, keeps
+the documented `0x02040501` BLE GATT-cache qualification lineage and rejects
+reuse of failed candidate ID `0x02040401` as an active override. It also pins
+both CI toolchain installs to Arm GNU Toolchain 14.2.Rel1, requires Make and
+CMake to build the signed-plus-dual-bank `heltec_t096` and `heltec_t114`
+profiles, keeps
 `-Oz`, and rejects the unsafe `-fmerge-all-constants` and optional
 `-fipa-pta` size flags. It also prevents restoration of the obsolete global
 `-fno-ipa-modref` workaround now that every bundled Nordic SVC wrapper carries

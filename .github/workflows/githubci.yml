@@ -14,8 +14,8 @@ permissions:
 
 env:
   # 0x02040401 identifies the failed global TinyUSB-budget candidate.
-  # Corrected qualification builds use a distinct, documented lineage.
-  OTAFIX_QUALIFICATION_VERSION: '0x02040403'
+  # 0x02040501 identifies the BLE GATT-cache release qualification lineage.
+  OTAFIX_QUALIFICATION_VERSION: '0x02040501'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -151,7 +151,8 @@ jobs:
   bootloader-mota:
     if: ${{ github.event_name == 'release' }}
     needs: build
-    runs-on: ubuntu-latest
+    # Keep field binaries compatible with Raspberry Pi OS Bookworm's glibc.
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -170,7 +171,18 @@ jobs:
           merge-multiple: true
 
       - name: Build motatool
-        run: cargo build --release --locked --manifest-path _motatool/Cargo.toml
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          rustup target add aarch64-unknown-linux-gnu
+          cargo build --release --locked --manifest-path _motatool/Cargo.toml
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
+            cargo build --release --locked \
+              --target aarch64-unknown-linux-gnu \
+              --manifest-path _motatool/Cargo.toml
+          python3 -m pip download --disable-pip-version-check --no-deps \
+            --only-binary=:all: --dest _field-deps pyserial==3.5
 
       - name: Build signed bootloader mOTA bundle
         shell: bash
@@ -196,6 +208,15 @@ jobs:
             _mota-release/otafix_mota_update.py
           sha256sum _mota-release/otafix_mota_update.py > \
             _mota-release/otafix_mota_update.py.sha256
+          python3 tools/build_gat562_field_kit.py \
+            --release-dir _mota-release \
+            --motatool-x86-64 _motatool/target/release/motatool \
+            --motatool-aarch64 \
+              _motatool/target/aarch64-unknown-linux-gnu/release/motatool \
+            --pyserial-wheel \
+              _field-deps/pyserial-3.5-py2.py3-none-any.whl \
+            --updater _mota-release/otafix_mota_update.py \
+            --tag "$GITHUB_REF_NAME"
 
       - name: Upload bootloader mOTA release bundle
         uses: actions/upload-artifact@v7
