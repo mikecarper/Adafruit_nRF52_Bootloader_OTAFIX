@@ -27,26 +27,27 @@ ANDROID_APK_NAME = "MeshCore-Open-9.5.1-OTAFIX-field-arm64.apk"
 
 MESHCORE_REPOSITORY = "mikecarper/MeshCore"
 MESHCORE_COMMIT = "51ce1f8f0d3cc454b02f77c1535008682e2d5831"
+MESHCORE_BUILD_VERSION = f"v1.17.1-dev-{MESHCORE_COMMIT[:8]}"
 GAT562_RECEIVER_RELEASE_TAG = (
     "lora-ota-v1.17.1.4-halo-keymind-cascade-dev-4d5ccbdd"
 )
 XIAO_COMPANION_UF2 = (
-    "Xiao_nrf52_companion_radio_full-v1.17.1-dev-51ce1f8f.uf2"
+    f"Xiao_nrf52_companion_radio_full-{MESHCORE_BUILD_VERSION}.uf2"
 )
 XIAO_COMPANION_ZIP = (
-    "Xiao_nrf52_companion_radio_full-v1.17.1-dev-51ce1f8f.zip"
+    f"Xiao_nrf52_companion_radio_full-{MESHCORE_BUILD_VERSION}.zip"
 )
 XIAO_COMPANION_CAPABILITIES = (
-    "Xiao_nrf52_companion_radio_full-v1.17.1-dev-51ce1f8f.capabilities.json"
+    f"Xiao_nrf52_companion_radio_full-{MESHCORE_BUILD_VERSION}.capabilities.json"
 )
 GAT562_SOURCE_UF2 = (
-    "GAT562_30S_Mesh_Kit_companion_radio_full-v1.17.1-dev-51ce1f8f.uf2"
+    f"GAT562_30S_Mesh_Kit_companion_radio_full-{MESHCORE_BUILD_VERSION}.uf2"
 )
 GAT562_SOURCE_ZIP = (
-    "GAT562_30S_Mesh_Kit_companion_radio_full-v1.17.1-dev-51ce1f8f.zip"
+    f"GAT562_30S_Mesh_Kit_companion_radio_full-{MESHCORE_BUILD_VERSION}.zip"
 )
 GAT562_SOURCE_CAPABILITIES = (
-    "GAT562_30S_Mesh_Kit_companion_radio_full-v1.17.1-dev-51ce1f8f."
+    f"GAT562_30S_Mesh_Kit_companion_radio_full-{MESHCORE_BUILD_VERSION}."
     "capabilities.json"
 )
 GAT562_RECEIVER_UF2 = (
@@ -184,7 +185,7 @@ def checked_full_companion(
         raise ValueError(f"{artifact_target} Serial DFU manifest is unexpected")
 
     required_binary_markers = (
-        b"v1.17.1-dev-51ce1f8f",
+        MESHCORE_BUILD_VERSION.encode("ascii"),
         b"14518fc2-7e7a-4d84-8cae-6664b0234cf2",
         b"2bfaa1ee-7030-459a-b65a-e7cfd5b09735",
         b"acf38a51-dd58-4dce-917f-0b1135e41b1a",

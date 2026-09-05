@@ -156,6 +156,16 @@ class QualifiedReleaseInventoryTest(unittest.TestCase):
         self.assertIn("repository: mikecarper/meshcore-open", workflow)
         self.assertIn(field.MESHCORE_OPEN_COMMIT, workflow)
         self.assertIn(field.MESHCORE_COMMIT, workflow)
+        self.assertEqual(
+            field.MESHCORE_BUILD_VERSION,
+            f"v1.17.1-dev-{field.MESHCORE_COMMIT[:8]}",
+        )
+        self.assertIn("git config core.abbrev 8", workflow)
+        self.assertIn(
+            f'test "$(git rev-parse --short HEAD)" = '
+            f"{field.MESHCORE_COMMIT[:8]}",
+            workflow,
+        )
         self.assertIn("flutter build apk", workflow)
         self.assertIn(
             "python3 -m pip install platformio==6.1.19 intelhex==2.3.0",
@@ -225,7 +235,7 @@ class QualifiedReleaseInventoryTest(unittest.TestCase):
                 uf2_name, zip_name, capabilities_name = names
                 firmware = b"\0".join(
                     (
-                        b"v1.17.1-dev-51ce1f8f",
+                        field.MESHCORE_BUILD_VERSION.encode("ascii"),
                         b"14518fc2-7e7a-4d84-8cae-6664b0234cf2",
                         b"2bfaa1ee-7030-459a-b65a-e7cfd5b09735",
                         b"acf38a51-dd58-4dce-917f-0b1135e41b1a",

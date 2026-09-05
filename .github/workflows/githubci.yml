@@ -209,6 +209,13 @@ jobs:
         run: |
           cargo build --release --locked --manifest-path _motatool/Cargo.toml
 
+      - name: Pin MeshCore artifact revision width
+        shell: bash
+        working-directory: _meshcore
+        run: |
+          git config core.abbrev 8
+          test "$(git rev-parse --short HEAD)" = 51ce1f8f
+
       - name: Build isolated Android field app
         shell: bash
         working-directory: _meshcore-open
