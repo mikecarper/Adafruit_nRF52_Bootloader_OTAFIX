@@ -37,9 +37,6 @@
 #define DFU_REV_MAJOR                        0x00                                                    /** DFU Major revision number to be exposed. */
 #define DFU_REV_MINOR                        0x08                                                    /** DFU Minor revision number to be exposed. */
 #define DFU_REVISION                         ((DFU_REV_MAJOR << 8) | DFU_REV_MINOR)                  /** DFU Revision number to be exposed. Combined of major and minor versions. */
-#define DFU_SERVICE_HANDLE                   0x000C                                                  /**< Handle of DFU service when DFU service is first service initialized. */
-#define BLE_HANDLE_MAX                       0xFFFF                                                  /**< Max handle value is BLE. */
-
 // Names that exceed the remaining advertising payload use the shortened-name
 // type. The Legacy DFU UUID must remain present so generic scanners can find
 // the bootloader.
@@ -116,70 +113,60 @@ static bool                 m_ble_peer_data_valid    = false;                   
 static uint32_t             m_direct_adv_cnt         = APP_DIRECTED_ADV_TIMEOUT;                     /**< Counter of direct advertisements. */
 static uint8_t            * mp_final_packet;                                                         /**< Pointer to final data packet received. When callback for succesful packet handling is received from dfu bank handling a transfer complete response can be sent to peer. */
 static bool                 m_ble_data_policy_active = false;                                        /**< True only while firmware DATA packets are expected. */
+static bool                 m_service_change_pending = false;                                        /**< Retry a bonded GATT cache invalidation until the SoftDevice accepts it. */
 
 
 static ble_gap_addr_t      const * m_whitelist[1];                                                  /**< List of peers in whitelist (only one) */
 static ble_gap_id_key_t    const * m_gap_ids[1];
 
-static ble_gap_data_length_params_t m_dl_params = {
-    .max_tx_octets   = 251,
-    .max_rx_octets   = 251,
-    .max_tx_time_us  = BLE_GAP_DATA_LENGTH_AUTO,
-    .max_rx_time_us  = BLE_GAP_DATA_LENGTH_AUTO
-};
-
 // Adafruit
 static uint8_t _adv_handle = BLE_GAP_ADV_SET_HANDLE_NOT_SET;
 
-/**@brief     Function updating Service Changed CCCD and indicate a service change to peer.
+/**@brief     Restore the bonded Service Changed CCCD and invalidate the peer's GATT cache.
  *
- * @details   This function will verify the CCCD setting provided with \ref m_ble_peer_data and
- *            update the system attributes accordingly. If Service Change CCCD is set to indicate
- *            then a service change indication will be send to the peer.
- *
- * @retval    NRF_INVALID_STATE if no connection has been established to a central.
- * @return    Any error code returned by SoftDevice function calls.
+ * @details   A buttonless application and this bootloader expose different attribute layouts at
+ *            the same bonded address. Transient SoftDevice errors must leave the indication
+ *            pending; otherwise Android can reuse the application's DFU Version handle and get
+ *            GATT INVALID HANDLE from the bootloader.
  */
-static uint32_t service_change_indicate()
+static void service_change_try(void)
 {
     uint32_t err_code;
 
-    if (m_conn_handle == BLE_CONN_HANDLE_INVALID)
+    if (!m_service_change_pending)
     {
-        return NRF_ERROR_INVALID_STATE;
+        return;
     }
 
-    if (m_ble_peer_data_valid)
+    err_code = sd_ble_gatts_sys_attr_set(m_conn_handle,
+                                         m_ble_peer_data.sys_serv_attr,
+                                         sizeof(m_ble_peer_data.sys_serv_attr),
+                                         BLE_GATTS_SYS_ATTR_FLAG_SYS_SRVCS);
+    if (err_code != NRF_SUCCESS)
     {
-        err_code = sd_ble_gatts_sys_attr_set(m_conn_handle,
-                                             m_ble_peer_data.sys_serv_attr,
-                                             sizeof(m_ble_peer_data.sys_serv_attr),
-                                             BLE_GATTS_SYS_ATTR_FLAG_SYS_SRVCS);
-        VERIFY_SUCCESS(err_code);
-
-        err_code = sd_ble_gatts_sys_attr_set(m_conn_handle,
-                                             NULL,
-                                             0,
-                                             BLE_GATTS_SYS_ATTR_FLAG_USR_SRVCS);
-        VERIFY_SUCCESS(err_code);
-
-        err_code = sd_ble_gatts_service_changed(m_conn_handle, DFU_SERVICE_HANDLE, BLE_HANDLE_MAX);
-        if ((err_code == BLE_ERROR_INVALID_CONN_HANDLE) ||
-            (err_code == BLE_ERROR_INVALID_ATTR_HANDLE) ||
-            (err_code == NRF_ERROR_INVALID_STATE) ||
-            (err_code == NRF_ERROR_BUSY))
-        {
-            // Those errors can be expected when sending trying to send Service Changed Indication
-            // if the CCCD is not set to indicate. Thus set the returning error code to success.
-            err_code = NRF_SUCCESS;
-        }
-    }
-    else
-    {
-        err_code = sd_ble_gatts_sys_attr_set(m_conn_handle, NULL, 0, 0);
+        return;
     }
 
-    return err_code;
+    err_code = sd_ble_gatts_sys_attr_set(m_conn_handle,
+                                         NULL,
+                                         0,
+                                         BLE_GATTS_SYS_ATTR_FLAG_USR_SRVCS);
+    if (err_code != NRF_SUCCESS)
+    {
+        return;
+    }
+
+    // Both ends must be application-populated handles. The old hard-coded
+    // start and 0xFFFF end made newer SoftDevices reject the indication, and
+    // that error used to be discarded. DIS follows DFU with one service plus
+    // three declaration/value pairs, so its final value is seven handles on.
+    err_code = sd_ble_gatts_service_changed(m_conn_handle,
+                                             m_dfu.service_handle,
+                                             m_dfu.dfu_rev_handles.value_handle + 7U);
+    if (err_code == NRF_SUCCESS)
+    {
+        m_service_change_pending = false;
+    }
 }
 
 
@@ -995,31 +982,18 @@ static void on_ble_evt(ble_evt_t * p_ble_evt)
                 // A reconnect must receive an explicit DATA control-point
                 // event before the low-latency policy is enabled again.
                 m_ble_data_policy_active = false;
-
-                // Data length negotiation is optional; peers may reject it while the
-                // connection remains usable for DFU.
-                (void) sd_ble_gap_data_length_update(m_conn_handle, &m_dl_params, NULL);
+                m_service_change_pending = m_ble_peer_data_valid;
+                service_change_try();
             }
             break;
 
         case BLE_GAP_EVT_DISCONNECTED:
-            {
-                uint8_t  sys_attr[128];
-                uint16_t sys_attr_len = 128;
-
-                m_direct_adv_cnt = APP_DIRECTED_ADV_TIMEOUT;
-
-                err_code = sd_ble_gatts_sys_attr_get(m_conn_handle,
-                                                     sys_attr,
-                                                     &sys_attr_len,
-                                                     BLE_GATTS_SYS_ATTR_FLAG_SYS_SRVCS);
-                APP_ERROR_CHECK(err_code);
-
-            }
+            m_direct_adv_cnt = APP_DIRECTED_ADV_TIMEOUT;
             // The connection-scoped SoftDevice options are gone with the link.
             // Clear local phase state without issuing an option call on the
             // stale handle.
             m_ble_data_policy_active = false;
+            m_service_change_pending = false;
             // Only word-aligned bytes submitted to the DFU core are resumable.
             // Never carry an uncommitted suffix into a new connection.
             m_accum_len = 0;
@@ -1149,9 +1123,18 @@ static void on_ble_evt(ble_evt_t * p_ble_evt)
             break;
 
         case BLE_GATTS_EVT_SYS_ATTR_MISSING:
+            if (!m_ble_peer_data_valid)
+            {
+                err_code = sd_ble_gatts_sys_attr_set(m_conn_handle, NULL, 0, 0);
+                APP_ERROR_CHECK(err_code);
+            }
+            service_change_try();
+            break;
+
         case BLE_GAP_EVT_CONN_SEC_UPDATE:
-            err_code = service_change_indicate();
-            APP_ERROR_CHECK(err_code);
+            // Encryption or an ATT MTU exchange may temporarily block the
+            // indication. A disabled CCCD must not add work to every packet.
+            service_change_try();
             break;
 
         case BLE_GAP_EVT_AUTH_STATUS:
@@ -1159,9 +1142,9 @@ static void on_ble_evt(ble_evt_t * p_ble_evt)
             break;
 
         case BLE_GAP_EVT_DATA_LENGTH_UPDATE_REQUEST:
-          // Let Softdevice decide the data length
-          // ble_gap_data_length_params_t* param = &evt->evt.gap_evt.params.data_length_update_request.peer_params
-          APP_ERROR_CHECK( sd_ble_gap_data_length_update(m_conn_handle, &m_dl_params, NULL) );
+          // This negotiation is optional. Let the SoftDevice choose supported
+          // values, but never reset DFU for a transient BUSY/RESOURCES result.
+          (void) sd_ble_gap_data_length_update(m_conn_handle, NULL, NULL);
         break;
 
         case BLE_GAP_EVT_PHY_UPDATE_REQUEST:
@@ -1180,7 +1163,9 @@ static void on_ble_evt(ble_evt_t * p_ble_evt)
           att_mtu = ((att_mtu - 3U) & 0xFFFCU) + 3U;
 
           PRINTF("GAP ATT MTU is changed to %d\r\n", att_mtu);
-          APP_ERROR_CHECK( sd_ble_gatts_exchange_mtu_reply(m_conn_handle, att_mtu) );
+          // A rejected MTU extension leaves the mandatory default MTU usable.
+          (void) sd_ble_gatts_exchange_mtu_reply(m_conn_handle, att_mtu);
+          service_change_try();
         }
         break;
 
@@ -1346,6 +1331,7 @@ uint32_t dfu_transport_ble_update_start(void)
     m_tear_down_in_progress = false;
     m_pkt_type              = PKT_TYPE_INVALID;
     m_ble_data_policy_active = false;
+    m_service_change_pending = false;
 
     dfu_register_callback(dfu_cb_handler);
 

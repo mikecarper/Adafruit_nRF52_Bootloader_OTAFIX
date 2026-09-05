@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Guard BLE DFU phase latency without reviving fatal GAP update races."""
+"""Guard BLE DFU latency without reviving fatal optional-procedure races."""
 
 from pathlib import Path
 
@@ -59,7 +59,11 @@ disconnected = source.index("case BLE_GAP_EVT_DISCONNECTED:", connected)
 connected_body = source[connected:disconnected]
 require(
     "sd_ble_gap_conn_param_update" not in connected_body,
-    "CONNECTED must not revive the PHY/DLE connection-update race",
+    "CONNECTED must not initiate a connection-parameter update race",
+)
+require(
+    "sd_ble_gap_data_length_update" not in connected_body,
+    "CONNECTED must leave optional data-length negotiation to the central",
 )
 
 update = source.index("case BLE_GAP_EVT_CONN_PARAM_UPDATE:")
@@ -142,8 +146,36 @@ require(
     "transport close must restore policy before disconnect",
 )
 
+dle_start = source.index("case BLE_GAP_EVT_DATA_LENGTH_UPDATE_REQUEST:")
+phy_start = source.index("case BLE_GAP_EVT_PHY_UPDATE_REQUEST:", dle_start)
+dle = source[dle_start:phy_start]
+require(
+    "(void) sd_ble_gap_data_length_update(m_conn_handle, NULL, NULL);" in dle,
+    "a peer data-length request must use SoftDevice-selected values",
+)
+require(
+    "APP_ERROR_CHECK" not in dle,
+    "optional data-length negotiation errors must not reset DFU",
+)
+require(
+    "m_dl_params" not in source,
+    "a second locally selected data-length procedure must not be retained",
+)
+
+mtu_start = source.index("case BLE_GATTS_EVT_EXCHANGE_MTU_REQUEST:")
+default_start = source.index("default:", mtu_start)
+mtu = source[mtu_start:default_start]
+require(
+    "(void) sd_ble_gatts_exchange_mtu_reply(" in mtu,
+    "a peer MTU request must receive a best-effort reply",
+)
+require(
+    "APP_ERROR_CHECK" not in mtu,
+    "optional MTU negotiation errors must not reset DFU",
+)
+
 print(
-    "BLE connection policy OK: central owns GAP updates; "
+    "BLE connection policy OK: the central initiates optional procedures; "
     "DATA latency is local, fail-open, restored on every exit, and "
     "reapplied only during a live DATA phase"
 )
