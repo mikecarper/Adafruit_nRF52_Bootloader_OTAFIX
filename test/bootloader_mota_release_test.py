@@ -157,6 +157,10 @@ class QualifiedReleaseInventoryTest(unittest.TestCase):
         self.assertIn(field.MESHCORE_OPEN_COMMIT, workflow)
         self.assertIn(field.MESHCORE_COMMIT, workflow)
         self.assertIn("flutter build apk", workflow)
+        self.assertIn(
+            "python3 -m pip install platformio==6.1.19 intelhex==2.3.0",
+            workflow,
+        )
         self.assertIn(field.XIAO_COMPANION_ZIP, workflow)
         self.assertIn(field.GAT562_SOURCE_ZIP, workflow)
         self.assertIn(field.GAT562_RECEIVER_ZIP, workflow)
