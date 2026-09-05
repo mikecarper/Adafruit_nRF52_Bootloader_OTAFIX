@@ -43,6 +43,40 @@ The arena is enabled for these internal-only profiles:
 QSPI and microSD profiles retain their previous full bootloader-RAM layout and
 storage-backed apply paths.
 
+### Bootloader `.mota` build inventory and capacity gain
+
+The release bundle contains the following 17 exact-board bootloader `.mota`
+builds. For an internal-only target, the retained-RAM handoff adds exactly
+64 KiB (65,536 bytes) to the maximum application `.mota` container that can be
+staged above the installed application: the existing page-aligned flash prefix
+is unchanged and up to one 64 KiB suffix is carried in retained SRAM. This is
+staging headroom, not additional general-purpose application RAM. The total
+container limit still depends on where that board's installed application ends.
+
+| Exact board profile | Application-update staging backend | Added capacity from retained RAM |
+| --- | --- | ---: |
+| `gat562` | Internal flash + retained RAM | +64 KiB |
+| `heltec_mesh_pocket` | Internal flash + retained RAM | +64 KiB |
+| `heltec_mesh_tower_v2` | Internal flash + retained RAM | +64 KiB |
+| `heltec_mesh_tower_v2_sdcard` | microSD (unchanged) | 0 KiB |
+| `heltec_t096` | Internal flash + retained RAM | +64 KiB |
+| `heltec_t1` | Internal flash + retained RAM | +64 KiB |
+| `heltec_t114` | Internal flash + retained RAM | +64 KiB |
+| `keepteen_lt1` | Internal flash + retained RAM | +64 KiB |
+| `minewsemi_mx25le01` | Internal flash + retained RAM | +64 KiB |
+| `promicro_nrf52840` | Internal flash + retained RAM | +64 KiB |
+| `t1000_e` | Internal flash + retained RAM | +64 KiB |
+| `thinknode_m3` | Internal flash + retained RAM | +64 KiB |
+| `wiscore_rak3401` | Internal flash + retained RAM | +64 KiB |
+| `wiscore_rak4631_board` | Internal flash + retained RAM | +64 KiB |
+| `wismesh_tag` | Internal flash + retained RAM | +64 KiB |
+| `xiao_nrf52840_ble` | QSPI (unchanged) | 0 KiB |
+| `xiao_nrf52840_ble_sense` | QSPI (unchanged) | 0 KiB |
+
+The three 0 KiB entries are still included in the signed bootloader `.mota`
+bundle; they simply use their existing removable/external-storage path instead
+of the retained-RAM path.
+
 ## Upgrade and rollback compatibility
 
 Use only the artifact matching the exact board and storage profile. The signed
