@@ -173,6 +173,13 @@ class QualifiedReleaseInventoryTest(unittest.TestCase):
         )
         self.assertIn("pyserial==3.5", workflow)
         self.assertIn("tools/build_gat562_field_kit.py", workflow)
+        self.assertIn(
+            "sha256sum otafix_mota_update.py > otafix_mota_update.py.sha256",
+            workflow,
+        )
+        self.assertNotIn(
+            "sha256sum _mota-release/otafix_mota_update.py", workflow
+        )
 
     def test_field_builder_emits_one_checked_gat562_directory(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

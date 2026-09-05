@@ -206,8 +206,10 @@ jobs:
             --tag "$GITHUB_REF_NAME"
           install -m 755 tools/otafix_mota_update.py \
             _mota-release/otafix_mota_update.py
-          sha256sum _mota-release/otafix_mota_update.py > \
-            _mota-release/otafix_mota_update.py.sha256
+          (
+            cd _mota-release
+            sha256sum otafix_mota_update.py > otafix_mota_update.py.sha256
+          )
           python3 tools/build_gat562_field_kit.py \
             --release-dir _mota-release \
             --motatool-x86-64 _motatool/target/release/motatool \
