@@ -250,10 +250,11 @@ fi
 
 PYTHONPATH="$field_pythonpath" exec python3 \
   "$field_root/otafix_mota_update.py" \
+  "$@" \
   --direct-serial \
   --require-identity 239A0029,D50D2D44,GAT562_DFU,3,0A \
   --release-bundle "$field_root/{local_bundle_name}" \
-  --motatool "$motatool_bin" "$@"
+  --motatool "$motatool_bin"
 """.encode("ascii")
 
 

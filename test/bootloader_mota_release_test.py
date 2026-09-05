@@ -157,6 +157,7 @@ class QualifiedReleaseInventoryTest(unittest.TestCase):
             wrapper,
         )
         self.assertIn("linux-aarch64/motatool", wrapper)
+        self.assertLess(wrapper.index('"$@"'), wrapper.index("--direct-serial"))
 
     def test_release_workflow_builds_both_linux_field_binaries(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "githubci.yml").read_text(
