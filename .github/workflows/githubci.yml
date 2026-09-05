@@ -151,7 +151,6 @@ jobs:
   bootloader-mota:
     if: ${{ github.event_name == 'release' }}
     needs: build
-    # Keep field binaries compatible with Raspberry Pi OS Bookworm's glibc.
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout Code
@@ -164,6 +163,41 @@ jobs:
           ref: 9eef6e53173317f63d8cd6e61fb4f70b20129ab0
           path: _motatool
 
+      - name: Checkout pinned MeshCore Open field app
+        uses: actions/checkout@v7
+        with:
+          repository: mikecarper/meshcore-open
+          ref: 40e440e7d5c3cbc925b7701225ea1f023b0d9ae7
+          path: _meshcore-open
+
+      - name: Checkout pinned MeshCore source-radio firmware
+        uses: actions/checkout@v7
+        with:
+          repository: mikecarper/MeshCore
+          ref: 51ce1f8f0d3cc454b02f77c1535008682e2d5831
+          path: _meshcore
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.41.2
+          channel: stable
+          cache: true
+
+      - name: Set up PlatformIO
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install PlatformIO
+        run: python3 -m pip install platformio==6.1.19
+
       - name: Download bootloader artifacts
         uses: actions/download-artifact@v7
         with:
@@ -173,16 +207,79 @@ jobs:
       - name: Build motatool
         shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-          rustup target add aarch64-unknown-linux-gnu
           cargo build --release --locked --manifest-path _motatool/Cargo.toml
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
-            cargo build --release --locked \
-              --target aarch64-unknown-linux-gnu \
-              --manifest-path _motatool/Cargo.toml
-          python3 -m pip download --disable-pip-version-check --no-deps \
-            --only-binary=:all: --dest _field-deps pyserial==3.5
+
+      - name: Build isolated Android field app
+        shell: bash
+        working-directory: _meshcore-open
+        run: |
+          flutter pub get
+          flutter test \
+            test/services/ble_mota_catalog_test.dart \
+            test/services/lora_ota_bootloader_install_test.dart \
+            test/screens/lora_ota_screen_test.dart
+          sed -i \
+            's/applicationId = "com.meshcore.meshcore_open"/applicationId = "com.meshcore.meshcore_open.otafixfield"/' \
+            android/app/build.gradle.kts
+          sed -i \
+            's/android:label="MeshCore Open"/android:label="MeshCore Open OTAFIX Field"/' \
+            android/app/src/main/AndroidManifest.xml
+          sed -i '/^        ndk {$/,/^        }$/d' \
+            android/app/build.gradle.kts
+          grep -F 'applicationId = "com.meshcore.meshcore_open.otafixfield"' \
+            android/app/build.gradle.kts
+          grep -F 'android:label="MeshCore Open OTAFIX Field"' \
+            android/app/src/main/AndroidManifest.xml
+          ! grep -F 'abiFilters' android/app/build.gradle.kts
+          flutter build apk --release --no-pub --split-per-abi \
+            --build-name 9.5.1 --build-number 17
+          mkdir -p ../_field-deps
+          install -m 644 \
+            build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
+            ../_field-deps/MeshCore-Open-9.5.1-OTAFIX-field-arm64.apk
+          mapfile -t apk_abis < <(
+            unzip -Z1 \
+              ../_field-deps/MeshCore-Open-9.5.1-OTAFIX-field-arm64.apk \
+              | sed -n 's#^lib/\([^/]*\)/.*#\1#p' \
+              | sort -u
+          )
+          test "${apk_abis[*]}" = "arm64-v8a"
+          apksigner=$(
+            find "$ANDROID_SDK_ROOT/build-tools" -type f -name apksigner \
+              | sort -V \
+              | tail -n 1
+          )
+          test -n "$apksigner"
+          "$apksigner" verify --verbose --print-certs \
+            ../_field-deps/MeshCore-Open-9.5.1-OTAFIX-field-arm64.apk
+
+      - name: Build phone-capable Full Companion sources
+        shell: bash
+        working-directory: _meshcore
+        env:
+          FIRMWARE_VERSION: v1.17.1-dev
+        run: |
+          bash build.sh build-firmware Xiao_nrf52_companion_radio_full
+          install -m 644 out/Xiao_nrf52_companion_radio_full-* \
+            ../_field-deps/
+          bash build.sh build-firmware \
+            GAT562_30S_Mesh_Kit_companion_radio_full
+          install -m 644 out/GAT562_30S_Mesh_Kit_companion_radio_full-* \
+            ../_field-deps/
+
+      - name: Download pinned GAT562 receiver prerequisite
+        shell: bash
+        working-directory: _field-deps
+        run: |
+          gat_base=https://github.com/mikecarper/MeshCore/releases/download/lora-ota-v1.17.1.4-halo-keymind-cascade-dev-4d5ccbdd
+          gat_uf2=GAT562_30S_Mesh_Kit_repeater_lora_ota_no_external_sensors-ota-v1.17.1.4-halo-keymind-cascade-dev-4d5ccbdd.uf2
+          gat_zip=GAT562_30S_Mesh_Kit_repeater_lora_ota_no_external_sensors-ota-v1.17.1.4-halo-keymind-cascade-dev-4d5ccbdd.zip
+          curl --fail --location --retry 3 --remote-name "$gat_base/$gat_uf2"
+          curl --fail --location --retry 3 --remote-name "$gat_base/$gat_zip"
+          printf '%s  %s\n' \
+            eee459634e32973763d29962300e88d424d15d028e212995447367ca1ce48f82 "$gat_uf2" \
+            26c897f7837119c269bf8da8f729f246ca66c65cf507cb108720e5544e16c0e2 "$gat_zip" \
+            | sha256sum --check --strict
 
       - name: Build signed bootloader mOTA bundle
         shell: bash
@@ -212,12 +309,24 @@ jobs:
           )
           python3 tools/build_gat562_field_kit.py \
             --release-dir _mota-release \
-            --motatool-x86-64 _motatool/target/release/motatool \
-            --motatool-aarch64 \
-              _motatool/target/aarch64-unknown-linux-gnu/release/motatool \
-            --pyserial-wheel \
-              _field-deps/pyserial-3.5-py2.py3-none-any.whl \
-            --updater _mota-release/otafix_mota_update.py \
+            --android-apk \
+              _field-deps/MeshCore-Open-9.5.1-OTAFIX-field-arm64.apk \
+            --xiao-companion-uf2 \
+              _field-deps/Xiao_nrf52_companion_radio_full-v1.17.1-dev-51ce1f8f.uf2 \
+            --xiao-companion-zip \
+              _field-deps/Xiao_nrf52_companion_radio_full-v1.17.1-dev-51ce1f8f.zip \
+            --xiao-companion-capabilities \
+              _field-deps/Xiao_nrf52_companion_radio_full-v1.17.1-dev-51ce1f8f.capabilities.json \
+            --gat562-source-uf2 \
+              _field-deps/GAT562_30S_Mesh_Kit_companion_radio_full-v1.17.1-dev-51ce1f8f.uf2 \
+            --gat562-source-zip \
+              _field-deps/GAT562_30S_Mesh_Kit_companion_radio_full-v1.17.1-dev-51ce1f8f.zip \
+            --gat562-source-capabilities \
+              _field-deps/GAT562_30S_Mesh_Kit_companion_radio_full-v1.17.1-dev-51ce1f8f.capabilities.json \
+            --gat562-receiver-uf2 \
+              _field-deps/GAT562_30S_Mesh_Kit_repeater_lora_ota_no_external_sensors-ota-v1.17.1.4-halo-keymind-cascade-dev-4d5ccbdd.uf2 \
+            --gat562-receiver-zip \
+              _field-deps/GAT562_30S_Mesh_Kit_repeater_lora_ota_no_external_sensors-ota-v1.17.1.4-halo-keymind-cascade-dev-4d5ccbdd.zip \
             --tag "$GITHUB_REF_NAME"
 
       - name: Upload bootloader mOTA release bundle

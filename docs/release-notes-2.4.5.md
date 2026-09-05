@@ -46,32 +46,37 @@ method.
 
 ## GAT562 LoRa field kit
 
-The release includes `GAT562-OTAFIX-2.4.5-LoRa-field-kit.zip`, with all
-release-specific files needed for an offline field update:
+The release includes a self-contained, phone-driven
+`GAT562-OTAFIX-2.4.5-LoRa-field-kit.zip`:
 
-- the exact signed GAT562 `.mota` and a one-board local release bundle;
-- the official public key, manifest, SHA-256 files, and exact MID/hash recipe;
-- the offline/direct-serial updater and bundled PySerial 3.5; and
-- pinned `motatool` binaries for 64-bit Raspberry Pi/Linux and x86-64 Linux.
-
-Connect the GAT562 target by USB with its MeshCore text console available, plus
-a separate USB MeshCore source radio. Download the field-kit ZIP and sidecar
-to a supported Linux host, then run:
-
-```bash
-sha256sum -c GAT562-OTAFIX-2.4.5-LoRa-field-kit.zip.sha256
-unzip GAT562-OTAFIX-2.4.5-LoRa-field-kit.zip
-cd GAT562-OTAFIX-2.4.5-LoRa-field-kit
-chmod +x run-gat562-lora-update.sh
-./run-gat562-lora-update.sh
+```text
+Android phone -- encrypted Bluetooth --> local Full Companion source
+local XIAO or second GAT562 ---- LoRa --> remote GAT562 repeater
 ```
 
-Proceed only when the target reports
-`board=239A0029 target=D50D2D44 name=GAT562_DFU abi=3 caps=0A`. The automated
-flow verifies the bundle, signer, target, staged MID, and image hash before its
-final install prompt. The included `README.txt` gives a manual fallback and
-recovery steps. This profile is not for legacy `4631_DFU` installations or the
-GAT562 Mesh Watch 13.
+The remote GAT562 target is **not** connected by USB. The kit contains the
+isolated arm64 Android field APK, protocol-v14 Full Companion firmware for
+either a XIAO nRF52840 plus Wio-SX1262 or a second GAT562 30S Mesh Kit, the
+exact signed GAT562 `.mota`, official key and hashes, and the GAT562 30S LoRa-OTA
+receiver application for pre-deployment/recovery. The `.mota` remains on the
+phone and is streamed in small blocks through a 256-byte RAM ring, so the
+source does not use its external file storage. The XIAO's 2 MB external flash
+is not used.
+
+The remote GAT562 must already expose MeshCore's `ota` commands. In the field
+app, connect to either local Full Companion by Bluetooth, log into the GAT562
+under **Repeater Management**, require
+`board=239A0029 target=D50D2D44 name=GAT562_DFU abi=3 caps=0A`, trust the
+included official key, then open **LoRa OTA** and choose the bundled `.mota`.
+For a direct link use Direct for both paths, tap **Test radios and start
+source**, then **Pull** MID `0E2DE4B7`.
+
+Once the target reports ready, **Install and reboot** first requires the exact
+remote confirmation
+`staged:ready mid=0E2DE4B7 hash=B23AD0E2E86C38E2`. Only then does the app send
+the explicit bootloader install command. This profile is not for legacy
+`4631_DFU` installations or the GAT562 Mesh Watch 13. The archive's README has
+the complete direct/routed recipe and recovery guidance.
 
 ## Compatibility and validation
 

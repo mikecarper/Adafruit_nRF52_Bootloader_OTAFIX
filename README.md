@@ -492,18 +492,27 @@ instructions for signing a custom OTAFIX variant.
 ### Field recipe: update a GAT562 bootloader over LoRa
 
 Download `GAT562-OTAFIX-2.4.5-LoRa-field-kit.zip` and its `.sha256` sidecar from
-the OTAFIX 2.4.5 release. Verify the sidecar before extracting the kit. The kit
-contains the exact signed GAT562 `.mota`, the official public key, manifest and
-checksums, an offline-capable updater, PySerial, and pinned `motatool` binaries
-for 64-bit Raspberry Pi/Linux (`aarch64`) and 64-bit Linux (`x86_64`). It does
-not download release files in the field.
+the OTAFIX 2.4.5 release. This is a phone-driven update:
 
-This recipe requires two radios:
+```text
+Android phone -- encrypted Bluetooth --> local Full Companion source
+local XIAO or second GAT562 ---- LoRa --> remote GAT562 repeater
+```
 
-1. the USB-connected GAT562 target, running MeshCore with a text console and
-   the `ota` commands; and
-2. a separate USB-connected MeshCore Full Companion or raw CLI repeater to
-   seed the file over LoRa.
+**Do not connect the remote GAT562 target by USB.** It stays remote and receives
+the bootloader package over LoRa. The local source can be a XIAO nRF52840 plus
+Wio-SX1262 or a second GAT562 30S Mesh Kit running the included Full Companion
+firmware. The `.mota` stays on the phone and is streamed in small blocks over
+Bluetooth, so neither source relies on external file storage. In particular,
+the XIAO's 2 MB external flash is not used by this transfer path.
+
+The field kit contains every file for the example: an isolated arm64 Android
+MeshCore Open field APK, protocol-v14 Full Companion ZIP/UF2 files for both the
+XIAO and alternative GAT562 source, the signed GAT562 bootloader `.mota`, the
+official signing key and checksums, and a GAT562 30S Mesh Kit LoRa-OTA receiver
+application ZIP/UF2 for pre-deployment provisioning. The receiver application
+is a prerequisite, not part of the field transfer: a GAT562 without the
+MeshCore `ota` commands cannot bootstrap LoRa receiving over LoRa.
 
 The package is only for the GAT562 30S Kit, Mesh Tracker Pro, EVB Pro / 30S
 Pod, and Solar Relay carriers reporting this exact bootloader identity:
@@ -514,41 +523,41 @@ board=239A0029 target=D50D2D44 name=GAT562_DFU abi=3 caps=0A
 
 Stop if the node reports `4631_DFU`, any different target, or is a GAT562 Mesh
 Watch 13. A legacy `4631_DFU` installation needs a one-time local exact-board
-migration because the signed LoRa path deliberately cannot change identity.
-The Mesh Watch 13 has populated QSPI storage and requires a separate profile.
+migration; the signed LoRa path deliberately cannot change identity.
 
-On a supported Linux host, connect both radios and run:
+1. Extract the kit on the Android phone and install the included **MeshCore
+   Open OTAFIX Field** APK. It has a separate application ID and can coexist
+   with a normal MeshCore Open install.
+2. Power either included Full Companion source with its antenna: a XIAO
+   nRF52840 plus Wio-SX1262, or a second GAT562 30S Mesh Kit. Pair the field app
+   to it over Bluetooth and require **Encrypted mOTA channel: Ready**. Installing
+   Full Companion replaces that source radio's current application role. If it
+   runs OTAFIX 2.4.3, install the application with the Serial DFU ZIP or update
+   its bootloader first; do not use application-UF2 drive copy. The included
+   source builds use Bluetooth pairing PIN `123456`.
+3. In the app, open the remote GAT562 under **Repeater Management**, log in as
+   admin, and use its remote CLI to run `ota bootloader`. Require the identity
+   above. Use `ota key` and, only if needed, add the full official key from the
+   kit with `ota key add <64-hex-public-key>`.
+4. Open **LoRa OTA**, choose
+   `update-gat562_bootloader-0.11.0-OTAFIX2.4.5.mota`, and set the normal and
+   temporary paths. For a direct link, both paths are Direct and no controlled
+   intermediate is added.
+5. Select a legal temporary radio tuple. The tested fast example is 909.950
+   MHz, BW500, SF5, CR5, with a 120-minute recovery window. Tap **Test radios
+   and start source**.
+6. Tap **Pull** beside MID `0E2DE4B7`, keep the app foregrounded and Bluetooth
+   connected, and wait for target-confirmed completion.
+7. Tap **Install and reboot**. The app independently requires
+   `staged:ready mid=0E2DE4B7 hash=B23AD0E2E86C38E2` before it sends the
+   explicit bootloader approval command. A mismatch stops the install.
+8. After the GAT562 returns to the mesh, verify `get bootloader.ver` reports
+   OTAFIX 2.4.5 and `ota status` contains `blup:C8` and `no download`.
 
-```bash
-sha256sum -c GAT562-OTAFIX-2.4.5-LoRa-field-kit.zip.sha256
-unzip GAT562-OTAFIX-2.4.5-LoRa-field-kit.zip
-cd GAT562-OTAFIX-2.4.5-LoRa-field-kit
-chmod +x run-gat562-lora-update.sh
-./run-gat562-lora-update.sh
-```
-
-The ZIP extracts into a directory named after the archive. The script scans
-for the target, verifies the exact identity and official signature, selects
-the separate source, transfers the package, and
-requires one final confirmation after the target independently reports the
-staged MID and image hash. Choose one hop and BW500 for a direct field link.
-The default example is 909.950 MHz/SF5; pass `--frequency` when required and
-use only radio settings legal at the location.
-
-Known serial paths can be pinned:
-
-```bash
-./run-gat562-lora-update.sh \
-  --target-serial /dev/serial/by-id/GAT562_TARGET \
-  --source-serial /dev/serial/by-id/LORA_SOURCE \
-  --source-mode auto --hops 1 --bandwidth 500
-```
-
-Leave both radios powered through verification and reboot. Success requires
-OTAFIX 2.4.5, unchanged target `D50D2D44`, `blup:C8`, and `no download`. The
-bootloader `.mota` path preserves MeshCore and node data. The included
-`README.txt` also gives the complete manual `motatool serve`, `ota pull`, and
-`ota bootloader install` fallback with the release's exact MID and hash.
+The bootloader path preserves MeshCore and node data. A direct BW500/SF5 run
+normally takes about 1m45s to 3m10s including verification and reboot. The
+included `README.txt` covers routed links, three-minute safety handoffs,
+pre-deployment provisioning, exact hashes, and recovery.
 
 ### Example: ordinary RAK4631 from OTAFIX 2.4.3 or 2.4.4 to 2.4.5
 

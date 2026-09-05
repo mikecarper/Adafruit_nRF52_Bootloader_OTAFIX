@@ -71,22 +71,22 @@ python3 tools/otafix_mota_update.py
 ```
 
 OTAFIX 2.4.5 also publishes
-`GAT562-OTAFIX-2.4.5-LoRa-field-kit.zip`. That archive is an offline-capable
-Linux field kit for the exact `gat562` profile. It contains the signed package,
-official key, manifest, checksums, updater, PySerial 3.5, and pinned `motatool`
-binaries for x86-64 and aarch64 hosts. After extracting it, connect the GAT562
-target by USB with its MeshCore text console available, connect a separate
-MeshCore LoRa source, then run:
-
-```bash
-chmod +x run-gat562-lora-update.sh
-./run-gat562-lora-update.sh
-```
+`GAT562-OTAFIX-2.4.5-LoRa-field-kit.zip`. That archive is a phone-driven field
+kit for the exact `gat562` profile: Android talks over encrypted Bluetooth to
+a local Full Companion, which serves the signed package to the remote GAT562
+over LoRa. The kit includes builds for either a XIAO nRF52840 plus Wio-SX1262
+or a second GAT562 30S Mesh Kit. The file remains on the phone, so neither
+source uses external storage; the XIAO's 2 MB external flash is not part of the
+transfer. The remote GAT562 is not connected by USB. The archive also contains
+the official key, manifest, checksums, and a GAT562 30S LoRa-OTA receiver
+application for pre-deployment or recovery.
 
 The target must report board `239A0029`, target `D50D2D44`, name
 `GAT562_DFU`, ABI 3, and capability `0A`. Stop for legacy `4631_DFU`, any other
 target, or a GAT562 Mesh Watch 13. The archive's `README.txt` contains the full
-automated and manual field recipe with the exact release MID and image hash.
+direct and routed phone recipe with the exact release MID and image hash. The
+app refuses a bootloader install unless the remote staged values exactly match
+the locally validated package.
 
 For other boards, or when assembling a separate offline kit, the updater can
 use a previously downloaded official bundle without querying GitHub. Direct
