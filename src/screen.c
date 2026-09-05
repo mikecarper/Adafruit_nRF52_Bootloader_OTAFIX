@@ -41,17 +41,7 @@
   #define COL0(r, g, b)           ((((r) >> 3) << 11) | (((g) >> 2) << 5) | ((b) >> 3))
   #define COL(c)                  COL0((c >> 16) & 0xff, (c >> 8) & 0xff, c & 0xff)
 
-#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
-enum {
-  COLOR_BLACK = 0,
-  COLOR_WHITE = 1,
-};
-
-const uint16_t palette[] = {
-  COL(0x000000),
-  COL(0xffffff),
-};
-#else
+#if !defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
 enum {
   COLOR_BLACK  = 0,
   COLOR_WHITE  = 1,
@@ -142,7 +132,9 @@ const uint16_t palette[] = {
 // TODO only buffer partial screen to save SRAM
 // ESP32s2 can only statically allocated DRAM up to 160KB.
 // the remaining 160KB can only be allocated at runtime as heap.
+  #if !defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
 static uint8_t frame_buf[DISPLAY_WIDTH * DISPLAY_HEIGHT];
+  #endif
 // static uint8_t* frame_buf;
 
 extern const uint8_t font8[];
@@ -257,6 +249,7 @@ static void print_centered(int y, int color, const char *text, int size) {
 //
 //--------------------------------------------------------------------+
 
+#if !defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
 static void draw_screen(const uint8_t *fb) {
   const uint8_t *p = fb;
   for (int y = 0; y < DISPLAY_WIDTH; ++y) {
@@ -271,12 +264,21 @@ static void draw_screen(const uint8_t *fb) {
     board_display_draw_line(y, cc, sizeof(cc));
   }
 }
+#endif
 
 #if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
 // Draw a compact block "DFU" mark without pulling the font/icon renderer into
-// the space-constrained internal-update bootloader. Each byte describes one
-// five-cell-tall column; zero columns separate the letters.
-static __attribute__((noinline)) void draw_dfu(void) {
+// the space-constrained internal-update bootloader. Render it directly into
+// each RGB565 display line so this profile does not need the indexed-framebuffer
+// conversion path as well. Each byte describes one five-cell-tall column; zero
+// columns separate the letters.
+static void draw_dfu(void) {
+#if defined(SIGNED_FW) && defined(DUALBANK_FW)
+  // This opt-in combination carries both ECC and dual-bank code. Keep a
+  // safe linker margin by using the board LED as its recovery/progress signal.
+  // Standard, signed-only, and dual-only builds retain the white DFU mark.
+  return;
+#else
   static const uint8_t columns[] = {
     0x1f, 0x11, 0x0e, 0x00, // D
     0x1f, 0x05, 0x01, 0x00, // F
@@ -288,18 +290,22 @@ static __attribute__((noinline)) void draw_dfu(void) {
     TOP  = (DISPLAY_HEIGHT - 5 * CELL) / 2,
   };
 
-  for (unsigned column = 0; column < sizeof(columns); ++column) {
-    for (int x = 0; x < CELL; ++x) {
-      uint8_t *p = frame_buf + (LEFT + (int)column * CELL + x) * DISPLAY_HEIGHT + TOP;
-      for (unsigned row = 0; row < 5; ++row) {
-        if (columns[column] & (1u << row)) {
-          memset(p + row * CELL, COLOR_WHITE, CELL);
+  for (int x = 0; x < DISPLAY_WIDTH; ++x) {
+    uint8_t line[DISPLAY_HEIGHT * 2];
+    memset(line, 0, sizeof(line));
+
+    if ((unsigned)(x - LEFT) < sizeof(columns) * CELL) {
+      uint8_t bits = columns[(x - LEFT) / CELL];
+      for (unsigned row = 0; row < 5; ++row, bits >>= 1) {
+        if (bits & 1u) {
+          memset(line + 2 * (TOP + (int)row * CELL), 0xff, 2 * CELL);
         }
       }
     }
-  }
 
-  draw_screen(frame_buf);
+    board_display_draw_line(x, line, sizeof(line));
+  }
+#endif
 }
 #endif
 

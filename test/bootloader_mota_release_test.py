@@ -131,11 +131,11 @@ class QualifiedReleaseInventoryTest(unittest.TestCase):
             field.GAT562_HARDWARE_ID, "NRF_BL_239A0029_GAT562_DFU"
         )
         package = {
-            "file": "update-gat562_bootloader-0.11.0-OTAFIX2.4.5.mota",
+            "file": "update-gat562_bootloader-0.11.0-OTAFIX2.4.6.mota",
             "merkle_root": "A1B2C3D4",
             "image_sha256": "0123456789abcdef" * 4,
         }
-        text = field.recipe("2.4.5", "0.11.0-OTAFIX2.4.5", package)
+        text = field.recipe("2.4.6", "0.11.0-OTAFIX2.4.6", package)
         self.assertIn("target=D50D2D44", text)
         self.assertIn("name=GAT562_DFU", text)
         self.assertIn("STOP for `4631_DFU`", text)
@@ -169,7 +169,7 @@ class QualifiedReleaseInventoryTest(unittest.TestCase):
             package_dir = release_dir / "mota"
             package_dir.mkdir(parents=True)
             package_name = (
-                "update-gat562_bootloader-0.11.0-OTAFIX2.4.5.mota"
+                "update-gat562_bootloader-0.11.0-OTAFIX2.4.6.mota"
             )
             package_blob = b"mOTA" + bytes(41326)
             package = {
@@ -178,16 +178,16 @@ class QualifiedReleaseInventoryTest(unittest.TestCase):
                 "size": len(package_blob),
                 "sha256": hashlib.sha256(package_blob).hexdigest(),
                 "target_id": "0xD50D2D44",
-                "firmware_version": "0x020405FF",
+                "firmware_version": "0x020406FF",
                 "hardware_id": "NRF_BL_239A0029_GAT562_DFU",
                 "merkle_root": "A1B2C3D4",
                 "image_sha256": "01" * 32,
                 "codec": "full",
             }
             manifest = {
-                "release": "OTAFIX 2.4.5",
-                "tag": "0.11.0-OTAFIX2.4.5",
-                "packed_bootloader_version": "0x020405FF",
+                "release": "OTAFIX 2.4.6",
+                "tag": "0.11.0-OTAFIX2.4.6",
+                "packed_bootloader_version": "0x020406FF",
                 "signing_public_key": field.OFFICIAL_PUBLIC_KEY,
                 "package_format": 3,
                 "package_count": 1,
@@ -345,7 +345,7 @@ class QualifiedReleaseInventoryTest(unittest.TestCase):
                 gat562_receiver_zip=release_component_paths[
                     field.GAT562_RECEIVER_ZIP
                 ],
-                tag="0.11.0-OTAFIX2.4.5",
+                tag="0.11.0-OTAFIX2.4.6",
             )
             with (
                 mock.patch.object(field, "parse_args", return_value=args),
@@ -357,8 +357,8 @@ class QualifiedReleaseInventoryTest(unittest.TestCase):
             ):
                 self.assertEqual(field.main(), 0)
 
-            kit = release_dir / "GAT562-OTAFIX-2.4.5-LoRa-field-kit.zip"
-            prefix = "GAT562-OTAFIX-2.4.5-LoRa-field-kit/"
+            kit = release_dir / "GAT562-OTAFIX-2.4.6-LoRa-field-kit.zip"
+            prefix = "GAT562-OTAFIX-2.4.6-LoRa-field-kit/"
             with zipfile.ZipFile(kit) as archive:
                 names = set(archive.namelist())
                 self.assertIn(prefix + "README.txt", names)
@@ -396,7 +396,7 @@ class QualifiedReleaseInventoryTest(unittest.TestCase):
                     components["transfer_model"]["source_bridge_buffer_bytes"],
                     256,
                 )
-            inner_path = release_dir / "GAT562-OTAFIX-2.4.5-LoRa-bundle.zip"
+            inner_path = release_dir / "GAT562-OTAFIX-2.4.6-LoRa-bundle.zip"
             inner_blob = inner_path.read_bytes()
             with zipfile.ZipFile(io.BytesIO(inner_blob)) as inner:
                 inner_manifest = json.loads(inner.read("manifest.json"))

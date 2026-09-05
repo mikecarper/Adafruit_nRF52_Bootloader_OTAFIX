@@ -167,6 +167,7 @@ if (MOTA_RAM_ARENA_SIZE_BYTES GREATER 0)
 endif ()
 
 if (DUALBANK_FW)
+  target_compile_definitions(bootloader PUBLIC DUALBANK_FW=1)
   target_sources(bootloader PUBLIC
     ${SDK11_DIR}/libraries/bootloader_dfu/dfu_dual_bank.c
   )

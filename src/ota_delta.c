@@ -1241,14 +1241,14 @@ static int boot_image_ram_caps_valid(const uint8_t *image) {
   for (uint32_t off = 0; off + sizeof(mota_ram_info_t) <= MOTA_NRF52_BL_SIZE;
        off += sizeof(uint32_t)) {
     const uint8_t *candidate = image + off;
-    if (candidate[0] == MOTA_RAM_INFO_MAGIC0 &&
-        candidate[1] == MOTA_RAM_INFO_MAGIC1 &&
-        candidate[2] == MOTA_RAM_INFO_MAGIC2 &&
-        candidate[3] == MOTA_RAM_INFO_MAGIC3 &&
-        candidate[4] == MOTA_RAM_INFO_MAGIC4 &&
-        candidate[5] == MOTA_RAM_INFO_MAGIC5 &&
-        candidate[6] == MOTA_RAM_INFO_MAGIC6 &&
-        candidate[7] == MOTA_RAM_INFO_MAGIC7 &&
+    int magic_equal = 1;
+    for (uint32_t i = 0; i < sizeof(g_mota_ram_info.magic); ++i) {
+      if (candidate[i] != g_mota_ram_info.magic[i]) {
+        magic_equal = 0;
+        break;
+      }
+    }
+    if (magic_equal &&
         rd_u16(candidate + offsetof(mota_ram_info_t, abi)) == MOTA_RAM_INFO_ABI &&
         rd_u16(candidate + offsetof(mota_ram_info_t, handoff_len)) ==
           MOTA_HYBRID_HANDOFF_LEN &&

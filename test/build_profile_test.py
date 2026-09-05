@@ -15,7 +15,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 MAKEFILE = ROOT / "Makefile"
 WORKFLOW = ROOT / ".github" / "workflows" / "githubci.yml"
-QUALIFICATION_VERSION = "0x02040501"
+QUALIFICATION_VERSION = "0x02040601"
 
 
 FAKE_TOOL = r"""#!/usr/bin/env python3
@@ -85,6 +85,7 @@ class BuildProfileTest(unittest.TestCase):
             "DEFAULT_TO_OTA_DFU",
             "DEBUG",
             "DFU_USB_ENUMERATION_TIMEOUT_MS",
+            "MOTA_RAM_ARENA_SIZE",
             "USE_NFCT",
             "ANT_LICENSE_KEY",
             "CFLAGS",
@@ -169,6 +170,7 @@ class BuildProfileTest(unittest.TestCase):
             "default BLE DFU": ("DEFAULT_TO_OTA_DFU=1",),
             "debug": ("DEBUG=1",),
             "USB timeout": ("DFU_USB_ENUMERATION_TIMEOUT_MS=12345",),
+            "mOTA RAM arena": ("MOTA_RAM_ARENA_SIZE=0",),
             "NFCT policy": ("USE_NFCT=yes",),
             "ANT key": ("ANT_LICENSE_KEY=profile-test-key",),
             "compiler flags": ("CFLAGS=-DPROFILE_TEST_ONE",),
@@ -233,6 +235,40 @@ class BuildProfileTest(unittest.TestCase):
         for rule in expected_rules:
             with self.subTest(rule=rule):
                 self.assertRegex(makefile, rule)
+
+    def test_make_defines_the_ram_arena_before_loading_the_linker_script(self) -> None:
+        self.assertEqual("65536", self.make_variable("MOTA_RAM_ARENA_SIZE"))
+        ldflags = self.make_variable("LDFLAGS")
+        arena = "-Wl,--defsym=__mota_ram_arena_size__=65536"
+        script = "-Wl,-T,linker/nrf52840.ld"
+        self.assertIn(arena, ldflags)
+        self.assertIn(script, ldflags)
+        self.assertLess(
+            ldflags.index(arena),
+            ldflags.index(script),
+            "GNU ld must see the arena symbol before evaluating DEFINED() in the script",
+        )
+
+        disabled = self.make_variable("LDFLAGS", "MOTA_RAM_ARENA_SIZE=0")
+        self.assertNotIn("__mota_ram_arena_size__", disabled)
+
+    def test_dual_bank_selection_is_visible_to_size_constrained_sources(self) -> None:
+        self.assertNotIn("-DDUALBANK_FW=1", self.make_variable("CFLAGS"))
+        self.assertIn(
+            "-DDUALBANK_FW=1",
+            self.make_variable("CFLAGS", "DUALBANK_FW=1"),
+        )
+
+        cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertIn(
+            "target_compile_definitions(bootloader PUBLIC DUALBANK_FW=1)",
+            cmake,
+        )
+        screen = (ROOT / "src" / "screen.c").read_text(encoding="utf-8")
+        self.assertIn(
+            "#if defined(SIGNED_FW) && defined(DUALBANK_FW)",
+            screen,
+        )
 
     def test_ci_uses_the_documented_corrected_qualification_lineage(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")

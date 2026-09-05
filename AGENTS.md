@@ -82,6 +82,10 @@ Each board lives in `src/boards/{board_name}/` with:
   envelope. Use `tools/otafix_cf2.py` for read-only inspection; it refuses protected mutations before
   invoking the bundled patcher. Change `pinconfig.c`, rebuild, and regenerate the manifest CRC instead.
 - No heap (`__HEAP_SIZE=0`), static allocation only
+- Internal-only nRF52840 builds reserve `0x20030000..0x20040000` as a
+  fixed 64 KiB retained mOTA arena. The bootloader stack ends below it;
+  compatible applications may use the arena for the authenticated hybrid
+  flash/RAM handoff. QSPI/SD profiles keep the historical full-RAM layout.
 - Special sections: double-reset detection word, bond info for OTA, MBR params, bootloader settings
 
 ### Submodules (`lib/`)

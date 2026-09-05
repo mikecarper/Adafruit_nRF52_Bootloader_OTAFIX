@@ -70,8 +70,8 @@ python3 -m pip install --user pyserial
 python3 tools/otafix_mota_update.py
 ```
 
-OTAFIX 2.4.5 also publishes
-`GAT562-OTAFIX-2.4.5-LoRa-field-kit.zip`. That archive is a phone-driven field
+OTAFIX 2.4.6 also publishes
+`GAT562-OTAFIX-2.4.6-LoRa-field-kit.zip`. That archive is a phone-driven field
 kit for the exact `gat562` profile: Android talks over encrypted Bluetooth to
 a local Full Companion, which serves the signed package to the remote GAT562
 over LoRa. The kit includes builds for either a XIAO nRF52840 plus Wio-SX1262
@@ -95,7 +95,7 @@ serial mode removes the `meshcli` dependency but still requires PySerial:
 ```bash
 python3 tools/otafix_mota_update.py \
   --direct-serial \
-  --release-bundle OTAFIX-2.4.5-bootloader-mota.zip \
+  --release-bundle OTAFIX-2.4.6-bootloader-mota.zip \
   --motatool /path/to/motatool
 ```
 

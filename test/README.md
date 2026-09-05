@@ -220,9 +220,19 @@ range and requires a populated runtime range whose pending state clears only
 after successful queueing. It also guards retry events, disconnect cleanup,
 and nonfatal optional MTU/data-length replies. The release-tool tests build a
 synthetic one-board GAT562 field kit, require one top-level extraction
-directory, both Linux ELF architectures, the pinned PySerial wheel, exact
-identity gating, offline bundle selection, and content checksums. Nonrelease
-2.4.5 qualification uses packed version `0x02040501`.
+directory, a single-ABI Android APK, verified Full Companion UF2/DFU pairs for
+both XIAO and GAT562 sources, the pinned GAT562 receiver prerequisite, exact
+identity gating, and content checksums. Historical nonrelease 2.4.5
+qualification used packed version `0x02040501`.
+
+The OTAFIX 2.4.6 hybrid-source tests split authenticated format-2 application
+containers at a page-aligned boundary between internal flash and the fixed top
+64 KiB SRAM arena. They exercise reads across the boundary, full-container
+hashing with normalized approval bytes, one-shot record consumption, exact
+software-reset and geometry gates, RAM-read failures, power-cut safety, and
+candidate bootloader capability continuity. Every preflight failure must leave
+the current application and settings valid. Nonrelease 2.4.6 qualification
+uses packed version `0x02040601`.
 
 The UF2 clean-handoff regression keeps a completed application invalid until
 TinyUSB has acknowledged the final write and either the volume stays idle for
@@ -310,7 +320,7 @@ changes to the SoftDevice, signing policy or public key, dual-bank/UF2/DFU/debug
 features, USB timeout, source selection, or compiler/linker flags rewrite a
 content-hashed stamp and force both recompilation and relinking. The persisted
 stamp contains only a SHA-256 digest. The same regression pins nonrelease CI to
-the documented `0x02040501` BLE GATT-cache qualification lineage and rejects
+the documented `0x02040601` retained-RAM qualification lineage and rejects
 reuse of failed candidate ID `0x02040401` as an active override. It also pins
 both CI toolchain installs to Arm GNU Toolchain 14.2.Rel1, requires Make and
 CMake to build the signed-plus-dual-bank `heltec_t096` and `heltec_t114`

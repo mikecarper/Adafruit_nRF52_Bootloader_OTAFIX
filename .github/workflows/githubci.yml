@@ -14,8 +14,8 @@ permissions:
 
 env:
   # 0x02040401 identifies the failed global TinyUSB-budget candidate.
-  # 0x02040501 identifies the BLE GATT-cache release qualification lineage.
-  OTAFIX_QUALIFICATION_VERSION: '0x02040501'
+  # 0x02040601 identifies the retained-RAM mOTA release qualification lineage.
+  OTAFIX_QUALIFICATION_VERSION: '0x02040601'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

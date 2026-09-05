@@ -1,5 +1,49 @@
 # Adafruit nRF52 Bootloader with Enhanced OTA DFU
 
+## Changes in OTAFIX 2.4.6
+
+OTAFIX 2.4.6 adds an authenticated retained-RAM handoff for MeshCore
+application `.mota` updates on internal-only nRF52840 profiles.
+
+- The bootloader reserves its top 64 KiB SRAM window at
+  `0x20030000..0x20040000`. A compatible MeshCore application can keep a
+  page-aligned container prefix in internal flash and the final 64 KiB or less
+  in that RAM window across the software reset into OTAFIX. This extends the
+  flash-only staging limit without requiring QSPI, microSD, or source-radio
+  storage. Ordinary applications may still use all physical RAM when they are
+  not using this handoff.
+- The 72-byte handoff is copied and zero-consumed before validation. OTAFIX
+  requires an exact software-reset reason, fixed geometry, CRC32 and inverse,
+  exact container length, and the application's normalized full-container
+  SHA-256 before any application write. Malformed, stale, power-cycled, or
+  substituted data fails closed and leaves the installed application valid.
+- Internal-only bootloader `.mota` updates require the candidate to retain the
+  same RAM-handoff capability and stack boundary. Version ordering remains
+  unrestricted among compatible bootloaders. To deliberately return an
+  internal-only board from 2.4.6 to a pre-arena release, use its exact-board
+  dedicated `_mbr.uf2`, Legacy DFU package, or SWD instead of a bootloader
+  `.mota`. QSPI and microSD profiles retain their previous RAM layout and
+  bootloader `.mota` compatibility rules.
+- Space-constrained display builds now show a compact white `DFU` mark in USB
+  and BLE recovery mode instead of an ambiguous color-bar pattern. The compact
+  path renders directly into display lines to stay inside the fixed envelope.
+  The opt-in signed-plus-dual-bank compatibility build uses its board status
+  LED only. MeshCore and the release artifacts do not enable dual-bank DFU;
+  standard release builds retain the on-screen mark.
+- Make and CMake now both reserve the physical 64 KiB arena: the Make linker
+  definition is ordered before GNU ld reads the linker script, with regression
+  coverage preventing a hybrid build from silently retaining the old stack
+  boundary.
+- The GAT562 field kit is phone-driven and includes Full Companion source
+  firmware for either a XIAO nRF52840 plus Wio-SX1262 or a second GAT562 30S.
+  The phone owns the `.mota`; the source uses a 256-byte RAM bridge and does
+  not use the XIAO's 2 MB external flash.
+
+Nonrelease 2.4.6 qualification uses packed version `0x02040601`; the stable
+release uses `0x020406FF`. OTAFIX 2.4.6 also includes the 2.4.5 Android GATT
+cache fix and the 2.4.4 correction for the 2.4.3 mounted-drive application-UF2
+regression.
+
 ## Changes in OTAFIX 2.4.5
 
 OTAFIX 2.4.5 is a focused Legacy BLE DFU interoperability release. OTAFIX
@@ -491,8 +535,8 @@ instructions for signing a custom OTAFIX variant.
 
 ### Field recipe: update a GAT562 bootloader over LoRa
 
-Download `GAT562-OTAFIX-2.4.5-LoRa-field-kit.zip` and its `.sha256` sidecar from
-the OTAFIX 2.4.5 release. This is a phone-driven update:
+Download `GAT562-OTAFIX-2.4.6-LoRa-field-kit.zip` and its `.sha256` sidecar from
+the OTAFIX 2.4.6 release. This is a phone-driven update:
 
 ```text
 Android phone -- encrypted Bluetooth --> local Full Companion source
@@ -540,33 +584,36 @@ migration; the signed LoRa path deliberately cannot change identity.
    above. Use `ota key` and, only if needed, add the full official key from the
    kit with `ota key add <64-hex-public-key>`.
 4. Open **LoRa OTA**, choose
-   `update-gat562_bootloader-0.11.0-OTAFIX2.4.5.mota`, and set the normal and
+   `update-gat562_bootloader-0.11.0-OTAFIX2.4.6.mota`, and set the normal and
    temporary paths. For a direct link, both paths are Direct and no controlled
    intermediate is added.
 5. Select a legal temporary radio tuple. The tested fast example is 909.950
    MHz, BW500, SF5, CR5, with a 120-minute recovery window. Tap **Test radios
    and start source**.
-6. Tap **Pull** beside MID `0E2DE4B7`, keep the app foregrounded and Bluetooth
-   connected, and wait for target-confirmed completion.
-7. Tap **Install and reboot**. The app independently requires
-   `staged:ready mid=0E2DE4B7 hash=B23AD0E2E86C38E2` before it sends the
-   explicit bootloader approval command. A mismatch stops the install.
+6. Tap **Pull** beside the exact MID shown for the validated package, keep the
+   app foregrounded and Bluetooth connected, and wait for target-confirmed
+   completion. Match the MID against the field kit's `README.txt` and
+   `manifest.json`.
+7. Tap **Install and reboot**. The app independently requires the remote
+   `staged:ready` MID and image-hash prefix to equal that locally validated
+   package before it sends the explicit bootloader approval command. A
+   mismatch stops the install.
 8. After the GAT562 returns to the mesh, verify `get bootloader.ver` reports
-   OTAFIX 2.4.5 and `ota status` contains `blup:C8` and `no download`.
+   OTAFIX 2.4.6 and `ota status` contains `blup:C8` and `no download`.
 
 The bootloader path preserves MeshCore and node data. A direct BW500/SF5 run
 normally takes about 1m45s to 3m10s including verification and reboot. The
 included `README.txt` covers routed links, three-minute safety handoffs,
 pre-deployment provisioning, exact hashes, and recovery.
 
-### Example: ordinary RAK4631 from OTAFIX 2.4.3 or 2.4.4 to 2.4.5
+### Example: ordinary RAK4631 from an older OTAFIX to 2.4.6
 
 This example is only for the ordinary RAK4631 target
 `wiscore_rak4631_board`, whose bootloader identity is `4631_DFU`. It is not for
 a RAK3401, WisMesh Tag, `wiscore_rak4631_w25q16`, or
 `wiscore_rak4631_board_rak15001_slot_c`. Those targets require their own exact
 artifacts. All filenames below are on the
-[OTAFIX 2.4.5 release](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/0.11.0-OTAFIX2.4.5).
+[OTAFIX 2.4.6 release](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/0.11.0-OTAFIX2.4.6).
 
 **Do not do this while OTAFIX 2.4.3 is installed:** do not drag any application
 `.uf2`, such as a MeshCore application UF2, onto the mounted `RAK4631` drive.
@@ -578,14 +625,14 @@ The available paths have different preservation guarantees:
 
 | Path | Release artifact | Application and node data |
 | --- | --- | --- |
-| Signed LoRa bootloader update | `OTAFIX-2.4.5-bootloader-mota.zip`, containing `update-wiscore_rak4631_board_bootloader-0.11.0-OTAFIX2.4.5.mota` | Preserved by design |
-| Dedicated USB bootloader-family UF2 (not an application UF2) | `update-wiscore_rak4631_board_bootloader-0.11.0-OTAFIX2.4.5_mbr.uf2` | Preserved when the guarded staging check accepts the running application |
-| Serial or BLE Legacy DFU | `wiscore_rak4631_board_bootloader-0.11.0-OTAFIX2.4.5_s140_6.1.1.zip` | Application must be reinstalled; application-owned data is not guaranteed |
-| SWD sector programming | `wiscore_rak4631_board_bootloader-0.11.0-OTAFIX2.4.5_s140_6.1.1.hex` | Normally preserved without a chip recover; a recover erases everything |
+| Signed LoRa bootloader update | `OTAFIX-2.4.6-bootloader-mota.zip`, containing `update-wiscore_rak4631_board_bootloader-0.11.0-OTAFIX2.4.6.mota` | Preserved by design |
+| Dedicated USB bootloader-family UF2 (not an application UF2) | `update-wiscore_rak4631_board_bootloader-0.11.0-OTAFIX2.4.6_mbr.uf2` | Preserved when the guarded staging check accepts the running application |
+| Serial or BLE Legacy DFU | `wiscore_rak4631_board_bootloader-0.11.0-OTAFIX2.4.6_s140_6.1.1.zip` | Application must be reinstalled; application-owned data is not guaranteed |
+| SWD sector programming | `wiscore_rak4631_board_bootloader-0.11.0-OTAFIX2.4.6_s140_6.1.1.hex` | Normally preserved without a chip recover; a recover erases everything |
 
 Back up the node before using a path that does not guarantee preservation. A
 MeshCore application ZIP only replaces MeshCore and does not upgrade OTAFIX.
-Conversely, `OTAFIX-2.4.5-bootloader-mota.zip` is an archive of signed `.mota`
+Conversely, `OTAFIX-2.4.6-bootloader-mota.zip` is an archive of signed `.mota`
 packages and metadata; it is not a Nordic Legacy DFU ZIP and must not be given
 to a Serial/BLE DFU client.
 
@@ -613,8 +660,8 @@ replace S140 6.1.1, MeshCore, the node identity, settings, messages, or ExtraFS.
    `4631_DFU`, stages it, displays the staged MID and image hash, and asks once
    more before installation.
 6. After the RAK4631 reboots, run the updater again with `--check-only`, or run
-   `get bootloader.ver` in the MeshCore CLI. It should report OTAFIX 2.4.5
-   (`0x020405FF`).
+   `get bootloader.ver` in the MeshCore CLI. It should report OTAFIX 2.4.6
+   (`0x020406FF`).
 
 The equivalent manual MeshCore sequence, after a compatible source is serving
 the exact package, is:
@@ -635,11 +682,11 @@ from another board or release.
 Use this for a local USB upgrade when the RAK4631 exposes its UF2 volume.
 
 1. Download
-   `update-wiscore_rak4631_board_bootloader-0.11.0-OTAFIX2.4.5_mbr.uf2`.
+   `update-wiscore_rak4631_board_bootloader-0.11.0-OTAFIX2.4.6_mbr.uf2`.
 2. Enter UF2 mode with MeshCore's `uf2reset` command or a double reset.
 3. Confirm that the mounted volume belongs to the ordinary RAK4631, then copy
    the UF2 to it and wait for the device to reboot.
-4. Confirm `get bootloader.ver` reports OTAFIX 2.4.5.
+4. Confirm `get bootloader.ver` reports OTAFIX 2.4.6.
 
 This is a bootloader-family UF2 and uses the guarded bootloader staging path;
 it is not the application-UF2 partial-page path that regressed in OTAFIX 2.4.3.
@@ -650,12 +697,12 @@ path or one of the recovery paths below instead of trying to force it.
 #### Option 3: Legacy serial DFU with `meshfirmware` or `adafruit-nrfutil`
 
 This is a recovery-capable path, not an application-preserving bootloader-only
-update. The release ZIP contains S140 6.1.1 plus OTAFIX 2.4.5, and Legacy DFU
+update. The release ZIP contains S140 6.1.1 plus OTAFIX 2.4.6, and Legacy DFU
 uses application flash while replacing the bootloader.
 
 With [meshfirmware](https://github.com/mikecarper/meshfirmware), select
 **Custom**, select **nrf52**, and choose
-`wiscore_rak4631_board_bootloader-0.11.0-OTAFIX2.4.5_s140_6.1.1.zip`. Use
+`wiscore_rak4631_board_bootloader-0.11.0-OTAFIX2.4.6_s140_6.1.1.zip`. Use
 **flash-update (write only)**. Do not choose **flash-wipe + flash** unless a
 factory reset is intentional. Linux automatically classifies a custom nRF52
 ZIP as `flash-update`; Windows may ask when the filename is ambiguous.
@@ -664,7 +711,7 @@ The direct command, after putting the exact RAK4631 serial port into DFU, is:
 
 ```bash
 adafruit-nrfutil dfu serial \
-  -pkg wiscore_rak4631_board_bootloader-0.11.0-OTAFIX2.4.5_s140_6.1.1.zip \
+  -pkg wiscore_rak4631_board_bootloader-0.11.0-OTAFIX2.4.6_s140_6.1.1.zip \
   -p <RAK4631-DFU-serial-port> -b 115200 -sb
 ```
 
@@ -678,7 +725,7 @@ Finally verify `get bootloader.ver` after MeshCore is running again.
 Issue `start ota` while the current MeshCore application is still running, or
 use the bootloader's automatic BLE recovery when no valid application remains.
 Then send
-`wiscore_rak4631_board_bootloader-0.11.0-OTAFIX2.4.5_s140_6.1.1.zip` with one
+`wiscore_rak4631_board_bootloader-0.11.0-OTAFIX2.4.6_s140_6.1.1.zip` with one
 of these Legacy DFU senders:
 
 - Nordic's [nRF Device Firmware Update](https://www.nordicsemi.com/Products/Development-tools/nRF-Device-Firmware-Update)
@@ -687,8 +734,8 @@ of these Legacy DFU senders:
 - `tools/otafix_legacy_ble_dfu.py` on a Linux host, supplying its required exact
   BLE address, advertised name, Device Information model, and package SHA-256.
 
-OTAFIX 2.4.5 corrects the target-side GATT cache transition after it is
-installed. If an older bootloader stops a phone attempt at
+OTAFIX 2.4.5 and later correct the target-side GATT cache transition after one
+of them is installed. If an older bootloader stops a phone attempt at
 `GATT INVALID HANDLE`, use the signed LoRa `.mota`, dedicated bootloader UF2,
 serial DFU, hardened XIAO sender, or SWD for this one-time bootstrap.
 
@@ -705,7 +752,7 @@ the combined release HEX normally leaves application sectors untouched:
 
 ```bash
 nrfjprog --family NRF52 \
-  --program wiscore_rak4631_board_bootloader-0.11.0-OTAFIX2.4.5_s140_6.1.1.hex \
+  --program wiscore_rak4631_board_bootloader-0.11.0-OTAFIX2.4.6_s140_6.1.1.hex \
   --verify --sectorerase
 nrfjprog --family NRF52 --reset
 ```

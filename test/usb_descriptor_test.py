@@ -28,6 +28,12 @@ def main() -> None:
     if not total < interfaces < pid:
         raise AssertionError("CDC-only enumeration does not shorten the descriptor before use")
 
+    string_callback = SOURCE[SOURCE.index("tud_descriptor_string_cb") :]
+    if "strlen(str)" in string_callback:
+        raise AssertionError("bounded USB strings must not pull strlen into the bootloader")
+    if "chr_count < 31" not in string_callback:
+        raise AssertionError("USB string descriptors are not capped while being measured")
+
     # The branchless conversion replacing the 16-byte lookup table must still
     # emit exactly the uppercase hexadecimal alphabet used by existing devices.
     encoded = "".join(

@@ -261,6 +261,7 @@ C_SRC += $(SDK11_PATH)/libraries/bootloader_dfu/bootloader_util.c
 C_SRC += $(SDK11_PATH)/libraries/bootloader_dfu/dfu_transport_serial.c
 C_SRC += $(SDK11_PATH)/libraries/bootloader_dfu/dfu_transport_ble.c
 ifeq ($(DUALBANK_FW), 1)
+CFLAGS += -DDUALBANK_FW=1
 C_SRC += $(SDK11_PATH)/libraries/bootloader_dfu/dfu_dual_bank.c
 else
 C_SRC += $(SDK11_PATH)/libraries/bootloader_dfu/dfu_single_bank.c
@@ -502,14 +503,19 @@ LDFLAGS += \
 	-Wl,--sort-section=alignment \
 	$(CFLAGS) \
 	-nostartfiles \
-	-Wl,-L,linker -Wl,-T,$(LD_FILE) \
+	-Wl,-L,linker \
 	-Wl,--print-memory-usage \
 	-Wl,-Map=$@.map -Wl,-cref -Wl,-gc-sections \
 	-specs=nosys.specs -specs=nano.specs
 
+# GNU ld evaluates DEFINED() while reading the linker script, so the arena
+# symbol must appear before -T. Otherwise Make builds compile the hybrid path
+# but silently retain the old full-RAM linker layout.
 ifneq ($(MOTA_RAM_ARENA_SIZE),0)
 LDFLAGS += -Wl,--defsym=__mota_ram_arena_size__=$(MOTA_RAM_ARENA_SIZE)
 endif
+
+LDFLAGS += -Wl,-T,$(LD_FILE)
 
 LIBS += -lm -lc
 

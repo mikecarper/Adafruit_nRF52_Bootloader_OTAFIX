@@ -186,9 +186,12 @@ uint16_t const* tud_descriptor_string_cb(uint8_t index, uint16_t langid)
     // Convert ASCII string into UTF-16
     const char* str = string_desc_arr[index];
 
-    // Cap at max char
-    chr_count = strlen(str);
-    if ( chr_count > 31 ) chr_count = 31;
+    // Cap while measuring so the bootloader does not pull in strlen just to
+    // discard the tail of an overlong descriptor.
+    chr_count = 0;
+    while (chr_count < 31 && str[chr_count] != '\0') {
+      chr_count++;
+    }
 
     for(uint8_t i=0; i<chr_count; i++)
     {
