@@ -63,6 +63,9 @@
                               MOTA_BL_STORAGE_BOOT_UPDATE)
 #endif
 
+static const char TEST_DEVICE_NAME_FIELD[BOOTLOADER_UPDATE_DEVICE_NAME_SIZE] =
+  TEST_DEVICE_NAME;
+
 static uint8_t  FLASH[FLASH_LEN];
 static uint8_t  QSPI[QSPI_LEN];
 static uint8_t  APP_SNAPSHOT[TEST_PRESERVE_END - MOTA_NRF52_APP_BASE];
@@ -320,7 +323,7 @@ static uint8_t *make_boot_image(uint32_t board_id, uint16_t abi, uint8_t storage
   m->image_start = MOTA_NRF52_BL_START;
   m->image_size  = MOTA_NRF52_BL_SIZE;
   m->board_id    = board_id;
-  memcpy(m->device_name, TEST_DEVICE_NAME, sizeof(TEST_DEVICE_NAME) - 1u);
+  memcpy(m->device_name, TEST_DEVICE_NAME_FIELD, sizeof(m->device_name));
   envelope->extension.magic0 = BOOTLOADER_UPDATE_EXTENSION_MAGIC0;
   envelope->extension.magic1 = BOOTLOADER_UPDATE_EXTENSION_MAGIC1;
   envelope->extension.version = BOOTLOADER_UPDATE_EXTENSION_VERSION;
@@ -972,7 +975,7 @@ int main(void) {
   fix_image_crc(bad_image);
   report("generic recovery validation preserves full physical-RAM compatibility",
          bootloader_image_validate(bad_image, MOTA_NRF52_BL_START, MOTA_NRF52_BL_SIZE,
-                                   TEST_BOARD_ID, TEST_DEVICE_NAME),
+                                   TEST_BOARD_ID, TEST_DEVICE_NAME_FIELD),
          &failures);
   bad = make_mota(bad_image, MOTA_NRF52_BL_SIZE, 3, MFLAG_FULL | MFLAG_SIGNED | MFLAG_BOOTLOADER,
                   TEST_TARGET_ID, TEST_HW_ID, &total);
