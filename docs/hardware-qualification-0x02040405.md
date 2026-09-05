@@ -178,3 +178,23 @@ fault because the nRF52 radio requires it.
 - MeshCore's native tests, source-level all-dispatcher contract, representative
   Companion/Terminal/Repeater builds, and physical T096/T1000-E command tests
   cover the application-side CLI regression.
+
+## Mounted-drive application UF2 status
+
+The UF2 correction lineage received a real, bidirectional mounted-drive test on
+the wired RAK3401 at packed candidate `0x02040403`: both application files were
+copied through Linux FAT storage and flushed with `sync -f`, the application
+returned after each direction, and SWD matched every UF2 payload byte. The
+final `0x02040405` connected-board pass exercised real `uf2reset` entry on the
+T096 and T1000-E, but did not repeat a full application file copy on that exact
+packed candidate. Serial and BLE application restores are not substitutes for
+that OS-level path.
+
+`tools/uf2_drive_hil.py` now makes the missing boundary an explicit release
+gate. Future qualification must record its JSON result for a bidirectional
+RAK3401 run, including exact artifact hashes, `cp`, `sync -f`, kernel-log,
+application USB-return, and CLI-version evidence. The wired SWD connection must
+then independently compare every application UF2 payload byte and prove the
+bootloader region and UICR are unchanged. At least one S140 7.3.0 board must
+also pass the mounted-drive runner, and an available complete Mercerwood rig
+should exercise every connected USB-capable board.

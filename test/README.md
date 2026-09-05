@@ -15,6 +15,67 @@ make check        # apply the committed vector (apply_sim) + the LTO-readback re
 make sanitize     # rebuild and run the complete host suite with ASan and UBSan
 ```
 
+## Physical USB drive-copy gate
+
+`make check` models the MSC/UF2 state machine, but a host model cannot qualify
+the Linux block layer, FAT mount, writeback, USB command timing, or physical
+disconnect/re-enumeration path. A release candidate must therefore also copy a
+real application UF2 through the mounted bootloader drive. Merely running
+`uf2reset`, observing the volume, or installing the application by serial/BLE
+DFU does not satisfy this gate.
+
+Use `tools/uf2_drive_hil.py` on the hardware controller. First run it without
+`--execute`; that validates the exact artifact and selected application USB
+identity without changing the board. This RAK3401 example uses S140 6.1.1's
+`0x26000` application base:
+
+```bash
+python3 tools/uf2_drive_hil.py \
+  --board wiscore_rak3401 \
+  --port /dev/serial/by-id/usb-EXACT_RAK3401_ID \
+  --serial 0B81C9C68D8D01B4 \
+  --application /path/to/RAK_4631_repeater.uf2 \
+  --sha256 EXACT_64_CHARACTER_SHA256 \
+  --family 0xADA52840 \
+  --app-base 0x26000 \
+  --expect-before-reply CURRENT_APPLICATION_VERSION_TEXT \
+  --expect-reply EXPECTED_APPLICATION_VERSION_TEXT \
+  --report /path/to/rak3401-uf2-drive.json
+```
+
+Repeat the same command with `--execute` only after the preflight identifies
+the intended board and artifact. The physical runner then:
+
+1. Records the application's USB serial, VID/PID, physical USB topology, and
+   exact pre-update CLI version text.
+2. Sends the real local `uf2reset` command.
+3. Selects only the same physical board with the boot VID/PID and FAT volume
+   label compiled into that board's `board.h`, and derives the production
+   application ceiling from its MCU layout.
+4. Mounts the volume if needed, revalidates its source, copies the application
+   UF2 through the filesystem, and runs `sync -f` on that mount.
+5. Requires the original application USB identity and the expected CLI version
+   text to return, and rejects new kernel FAT, lost-write, offline-device, or
+   block I/O errors.
+
+The controller must provide passwordless `sudo -n` for mount, copy, sync,
+unmount, and `dmesg`, and ModemManager must be stopped. A run using
+`--skip-kernel-log` is diagnostic only and does not qualify a release. If the
+copy fails after the settings-valid word is cleared, leave the board in
+recovery and restore the application by a separately hash-pinned serial, BLE,
+or SWD path.
+
+Run both update directions on the wired RAK3401 using two distinct application
+artifacts and exact hashes, then compare the installed application payload to
+each UF2 through SWD. The return run proves downgrades/reinstalls do not depend
+on already-erased flash. Also run at least one S140 7.3.0 target with
+`--app-base 0x27000` (XIAO nRF52840 or T1000-E). When the complete Mercerwood
+rig is available, record one passing drive-copy result for every connected
+USB-capable board in the candidate qualification document. Add
+`--companion-terminal` when the installed application is a Full Companion;
+the runner then uses the same state-independent STOP/START terminal entry that
+is covered by the cross-role `uf2reset` tests.
+
 The internal, SD, and QSPI application tests also verify the advertised codec
 mask and reject unsupported codecs (including codec 3) before invalidating or
 changing the running application. Ordinary codec-2 updates, malformed detools
@@ -121,6 +182,17 @@ terminal geometry/kind aborts, and clearing every transfer/page mask at an
 explicit USB/MSC session reset. The production caller compares retransmitted
 application bytes with flash before accepting them; a conflicting same-geometry
 image remains fail-closed.
+
+`uf2_243_differential_test.py` is the explicit synthetic A/B for the released
+regression. It binds its legacy model to the exact tagged 2.4.3 source and
+injects the hardware-observed disconnect at that source's first partial-NVMC
+operation. The 2.4.3 policy has already invalidated settings and cannot program
+the first application block; the 2.4.4 complete-page policy never reaches the
+fault and completes the same synthetic one-block image. A sensitivity case
+also proves the legacy model completes when the injected hardware fault is
+disabled. This is a deterministic regression guard, not an electrical model
+of the nRF52840 USB and NVMC peripherals; the mounted-drive HIL gate remains
+the proof that the real host/device path works.
 
 The synthetic physical `CURRENT.UF2` extent is pinned read-only at its first,
 middle, and last sectors, including malformed or changed host data and a

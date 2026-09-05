@@ -178,7 +178,9 @@ check: apply_sim readback_test readback_test_v7 readback_internal_test bootloade
 	python3 signed_legacy_package_test.py
 	python3 usb_descriptor_test.py
 	python3 usb_task_budget_test.py
+	python3 uf2_243_differential_test.py
 	python3 uf2_handoff_test.py
+	python3 uf2_drive_hil_test.py
 	python3 test_otafix_mota_update.py
 	python3 bootloader_mota_release_test.py
 	python3 ../tools/check_internal_bootloader_targets.py
