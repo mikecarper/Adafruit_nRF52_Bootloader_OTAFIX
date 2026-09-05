@@ -37,6 +37,27 @@ set(DFU_USB_ENUMERATION_TIMEOUT_MS "30000" CACHE STRING
 set(SIGNED_FW_QX "" CACHE STRING "Public key Qx (comma-separated bytes)")
 set(SIGNED_FW_QY "" CACHE STRING "Public key Qy (comma-separated bytes)")
 
+# Internal-only nRF52840 targets use the fixed top-of-SRAM mOTA arena by
+# default. It remains an explicit cache setting so qualification builds can
+# disable it, while QSPI/SD targets keep their historical full-RAM layout.
+if (MOTA_INTERNAL_BOOTLOADER_UPDATE)
+  set(MOTA_RAM_ARENA_SIZE_DEFAULT 65536)
+else ()
+  set(MOTA_RAM_ARENA_SIZE_DEFAULT 0)
+endif ()
+set(MOTA_RAM_ARENA_SIZE "${MOTA_RAM_ARENA_SIZE_DEFAULT}" CACHE STRING
+    "Fixed mOTA SRAM arena size in bytes (0 or 65536)")
+if (NOT MOTA_RAM_ARENA_SIZE MATCHES "^(0|65536|0[xX]10000)$")
+  message(FATAL_ERROR "MOTA_RAM_ARENA_SIZE must be 0 or 65536 (0x10000)")
+endif ()
+math(EXPR MOTA_RAM_ARENA_SIZE_BYTES "${MOTA_RAM_ARENA_SIZE}")
+if (MOTA_RAM_ARENA_SIZE_BYTES GREATER 0 AND
+    (NOT MOTA_INTERNAL_BOOTLOADER_UPDATE OR MOTA_QSPI_FLASH OR MOTA_SD_CARD OR
+     NOT MCU_VARIANT STREQUAL "nrf52840"))
+  message(FATAL_ERROR
+    "The mOTA SRAM arena is supported only by internal-only nRF52840 targets")
+endif ()
+
 if (NOT DFU_USB_ENUMERATION_TIMEOUT_MS MATCHES "^[0-9]+$")
   message(FATAL_ERROR "DFU_USB_ENUMERATION_TIMEOUT_MS must be a non-negative integer")
 endif ()
@@ -136,6 +157,13 @@ if (MOTA_INTERNAL_BOOTLOADER_UPDATE)
     message(FATAL_ERROR "MOTA_INTERNAL_BOOTLOADER_UPDATE requires the nRF52840 1 MiB flash layout")
   endif ()
   target_compile_definitions(bootloader PUBLIC MOTA_INTERNAL_BOOTLOADER_UPDATE=1)
+endif ()
+
+if (MOTA_RAM_ARENA_SIZE_BYTES GREATER 0)
+  target_compile_definitions(bootloader PUBLIC
+    MOTA_RAM_ARENA_SIZE=${MOTA_RAM_ARENA_SIZE_BYTES})
+  target_link_options(bootloader PUBLIC
+    "LINKER:--defsym=__mota_ram_arena_size__=${MOTA_RAM_ARENA_SIZE_BYTES}")
 endif ()
 
 if (DUALBANK_FW)

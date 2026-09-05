@@ -4,6 +4,7 @@
 #include "ota_delta.h"
 #include "ota_layout.h"
 #include "ota_bl_info.h"
+#include "ota_ram_info.h"
 #if defined(MOTA_SD_CARD)
   #include "ota_sd_auth.h"
   #include "ota_sd_spi.h"
@@ -80,6 +81,22 @@ __attribute__((used, aligned(4))) const mota_bl_info_t g_mota_bl_info = {
 #endif
 };
 
+#if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
+  #if !defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_CARD) || defined(MOTA_QSPI_FLASH)
+    #error "The retained mOTA RAM arena requires the internal-only nRF52840 profile"
+  #endif
+// A separate marker preserves the old mota_bl_info_t ABI, whose reserved bytes
+// are required to stay zero by already-deployed OTAFIX self-update validators.
+__attribute__((used, aligned(4))) const mota_ram_info_t g_mota_ram_info = {
+  {MOTA_RAM_INFO_MAGIC0, MOTA_RAM_INFO_MAGIC1, MOTA_RAM_INFO_MAGIC2,
+   MOTA_RAM_INFO_MAGIC3, MOTA_RAM_INFO_MAGIC4, MOTA_RAM_INFO_MAGIC5,
+   MOTA_RAM_INFO_MAGIC6, MOTA_RAM_INFO_MAGIC7},
+  MOTA_RAM_INFO_ABI,
+  MOTA_HYBRID_HANDOFF_LEN,
+  MOTA_HYBRID_ARENA_SIZE,
+};
+#endif
+
 // ---- `.mota` / EndF on-wire constants (mirror of src/helpers/ota/OtaFormat.h, C-friendly) ---------
 static const uint8_t MAGIC[4]   = {'m', 'O', 'T', 'A'};
 static const uint8_t TRAILER[5] = {'v', 'k', '4', '9', '6'};
@@ -93,6 +110,7 @@ static const uint8_t APRV[4]    = {'A', 'P', 'R', 'V'};
 #define CODEC_FULL    0u
 #define CODEC_INPLACE 2u
 #define PAGE          MOTA_NRF52_FLASH_PAGE
+#define MOTA_MIN_LEN  (8u + MOTA_MFL + 5u)
 
 // ---- platform flash / settings / gpregret abstraction --------------------------------------------
 #ifdef OTA_DELTA_HOST_TEST
@@ -105,6 +123,12 @@ extern uint32_t otah_gpregret2_get(void);
 extern void     otah_gpregret2_set(uint32_t v);
 extern uint16_t otah_crc16(uint32_t addr, uint32_t len);
 extern void     otah_settings_commit(uint16_t bank0, uint16_t crc, uint32_t size);
+#if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
+extern uint32_t otah_resetreas_get(void);
+extern void     otah_hybrid_handoff_read(void *dst, uint32_t len);
+extern void     otah_hybrid_handoff_consume(void);
+extern int      otah_hybrid_ram_read(uint32_t offset, void *dst, uint32_t len);
+#endif
 #if defined(MOTA_SD_CARD)
 extern void     otah_sd_auth_read(void *dst, uint32_t len);
 extern void     otah_sd_auth_consume(void);
@@ -141,6 +165,18 @@ static void gpregret2_set(uint32_t v) {
 static uint16_t crc16_region(uint32_t a, uint32_t len) {
   return otah_crc16(a, len);
 }
+#if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
+static uint32_t resetreas_get(void) {
+  return otah_resetreas_get();
+}
+static void hybrid_handoff_read_and_consume(mota_hybrid_handoff_t *record) {
+  otah_hybrid_handoff_read(record, sizeof(*record));
+  otah_hybrid_handoff_consume();
+}
+static int hybrid_ram_read(uint32_t offset, void *dst, uint32_t len) {
+  return otah_hybrid_ram_read(offset, dst, len);
+}
+#endif
 #else
   #include "nrf.h"
   #include "nrfx_nvmc.h"
@@ -194,6 +230,37 @@ static void gpregret2_set(uint32_t v) {
 static uint16_t crc16_region(uint32_t a, uint32_t len) {
   return crc16_compute((const uint8_t *)(uintptr_t)a, len, NULL);
 }
+#if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
+static uint32_t resetreas_get(void) {
+  return NRF_POWER->RESETREAS;
+}
+static void hybrid_handoff_read_and_consume(mota_hybrid_handoff_t *record) {
+  volatile uint32_t *source =
+    (volatile uint32_t *)(uintptr_t)MOTA_HYBRID_HANDOFF_ADDRESS;
+  uint32_t *destination = (uint32_t *)(void *)record;
+  for (uint32_t i = 0; i < sizeof(*record) / sizeof(uint32_t); i++) {
+    destination[i] = source[i];
+  }
+  for (uint32_t i = 0; i < sizeof(*record) / sizeof(uint32_t); i++) {
+    source[i] = 0u;
+  }
+  __DMB();
+  __DSB();
+}
+static int hybrid_ram_read(uint32_t offset, void *dst, uint32_t len) {
+  if (offset > MOTA_HYBRID_ARENA_SIZE ||
+      len > MOTA_HYBRID_ARENA_SIZE - offset) {
+    return 0;
+  }
+  const volatile uint8_t *source =
+    (const volatile uint8_t *)(uintptr_t)(MOTA_HYBRID_ARENA_START + offset);
+  uint8_t *destination = (uint8_t *)dst;
+  for (uint32_t i = 0; i < len; i++) {
+    destination[i] = source[i];
+  }
+  return 1;
+}
+#endif
 static void otah_settings_commit(uint16_t bank0, uint16_t crc, uint32_t size) {
   bootloader_settings_t s;
   memset(&s, 0, sizeof(s));
@@ -298,6 +365,81 @@ static uint16_t rd_u16(const uint8_t *p) {
 }
 #endif
 
+#if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
+  #define MOTA_RESETREAS_SOFTWARE (1u << 2)
+static mota_hybrid_handoff_t g_hybrid;
+
+// Copy and erase the complete retained handoff before checking even its magic.
+// GPREGRET is consumed by the caller first, so malformed records, interrupted
+// publication, and every reset/power-loss path are unconditionally one-shot.
+static int hybrid_handoff_take(void) {
+  mota_hybrid_handoff_t record;
+  hybrid_handoff_read_and_consume(&record);
+  memset(&g_hybrid, 0, sizeof(g_hybrid));
+
+  if (resetreas_get() != MOTA_RESETREAS_SOFTWARE || !mota_hybrid_handoff_valid(&record) ||
+      (record.flash_start & (PAGE - 1u)) != 0u || (record.flash_len & (PAGE - 1u)) != 0u ||
+      record.flash_start < APP_BASE || record.flash_start > UINT32_MAX - record.flash_len) {
+    return 0;
+  }
+  const uint32_t flash_end = record.flash_start + record.flash_len;
+  if (flash_end != MOTA_NRF52_STAGE_CEILING_EXPANDED || record.container_total < MOTA_MIN_LEN ||
+      record.flash_start > UINT32_MAX - record.container_total) {
+    return 0;
+  }
+  // Use the smallest page-aligned flash prefix that leaves at most one arena
+  // in RAM. The fixed flash end above bounds this arithmetic below UINT32_MAX.
+  uint32_t required_flash_len = PAGE;
+  if (record.container_total > MOTA_HYBRID_ARENA_SIZE + PAGE) {
+    required_flash_len = (record.container_total - MOTA_HYBRID_ARENA_SIZE + PAGE - 1u) & ~(PAGE - 1u);
+  }
+  if (record.flash_len != required_flash_len) {
+    return 0;
+  }
+
+  g_hybrid = record;
+  return 1;
+}
+
+// Hybrid addresses use flash_start as the base of one contiguous virtual
+// container. Reads may straddle the physical flash/RAM boundary and therefore
+// must be split rather than selecting one backend for the whole request.
+static int hybrid_staged_read(uint32_t address, void *dst, uint32_t len) {
+  if (g_hybrid.container_total == 0u || address < g_hybrid.flash_start) {
+    return 0;
+  }
+  uint32_t offset = address - g_hybrid.flash_start;
+  if (offset > g_hybrid.container_total || len > g_hybrid.container_total - offset) {
+    return 0;
+  }
+
+  uint8_t *out = (uint8_t *)dst;
+  while (len != 0u) {
+    uint32_t chunk;
+    if (offset < g_hybrid.flash_len) {
+      chunk = g_hybrid.flash_len - offset;
+      if (chunk > len) {
+        chunk = len;
+      }
+      fl_read(g_hybrid.flash_start + offset, out, chunk);
+    } else {
+      const uint32_t ram_offset = offset - g_hybrid.flash_len;
+      chunk                     = g_hybrid.ram_len - ram_offset;
+      if (chunk > len) {
+        chunk = len;
+      }
+      if (!hybrid_ram_read(ram_offset, out, chunk)) {
+        return 0;
+      }
+    }
+    offset += chunk;
+    out += chunk;
+    len -= chunk;
+  }
+  return 1;
+}
+#endif
+
 #if defined(MOTA_SD_CARD)
 static uint32_t g_sd_first_sector;
 static uint32_t g_sd_total_size;
@@ -356,6 +498,11 @@ static int staged_read(uint32_t address_or_offset, void *dst, uint32_t len) {
 }
 #else
 static int staged_read(uint32_t address_or_offset, void *dst, uint32_t len) {
+#if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
+  if (g_hybrid.container_total != 0u) {
+    return hybrid_staged_read(address_or_offset, dst, len);
+  }
+#endif
   fl_read(address_or_offset, dst, len);
   return 1;
 }
@@ -700,7 +847,6 @@ static int parse_mota_at(uint32_t addr, uint32_t limit, struct mota_min *o) {
 // (EndF is the mirror image: the app image grows up from APP_BASE, so the current trailer is
 // the LOWEST valid marker and find_body_len scans bottom-up. Each marker is scanned from the end where
 // the current one is encountered first.)
-#define MOTA_MIN_LEN (8 + MOTA_MFL + 5)
 static uint32_t scan_mota(struct mota_min *o, uint32_t stage_ceiling) {
 #if defined(MOTA_SD_CARD)
   (void)stage_ceiling;
@@ -719,6 +865,17 @@ static uint32_t scan_mota(struct mota_min *o, uint32_t stage_ceiling) {
   }
   return 1; // nonzero sentinel; container begins at file offset 0
 #else
+  #if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
+  if (g_hybrid.container_total != 0u) {
+    const uint32_t virtual_limit = g_hybrid.flash_start + g_hybrid.container_total;
+    if (!parse_mota_at(g_hybrid.flash_start, virtual_limit, o) ||
+        o->total != g_hybrid.container_total ||
+        o->approval_addr > g_hybrid.flash_start + g_hybrid.flash_len - 4u) {
+      return 0;
+    }
+    return g_hybrid.flash_start;
+  }
+  #endif
   #if defined(MOTA_QSPI_FLASH)
   if (g_qspi_source) {
     if (!ota_qspi_init()) {
@@ -854,7 +1011,8 @@ static bool finish_apply(bool result);
 
 #if defined(MOTA_SD_CARD) || defined(MOTA_QSPI_FLASH) || defined(MOTA_BOOTLOADER_UPDATE_ENABLED)
 __attribute__((noinline, noclone)) static int sha256_staged_region_impl(
-    uint32_t offset, uint32_t len, uint8_t out[32], int normalize_sd_approval) {
+    uint32_t offset, uint32_t len, uint8_t out[32],
+    uint32_t normalize_approval_at) {
   sha256_ctx_t c;
   sha256_init(&c);
   uint8_t buf[256];
@@ -864,16 +1022,19 @@ __attribute__((noinline, noclone)) static int sha256_staged_region_impl(
     if (!staged_read(offset, buf, n)) {
       return 0;
     }
-#if defined(MOTA_SD_CARD)
-    // APRV is fixed at bytes 201..204, wholly inside the first chunk. The SD
-    // caller proves that those bytes exist before requesting normalization.
-    if (normalize_sd_approval && offset == 0u) {
-      memset(buf + MOTA_SD_AUTH_APPROVAL_OFFSET, 0,
-             MOTA_SD_AUTH_APPROVAL_LEN);
+    if (normalize_approval_at != UINT32_MAX) {
+      const uint32_t approval_end = normalize_approval_at + 4u;
+      const uint32_t chunk_end     = offset + n;
+      const uint32_t overlap_start = offset > normalize_approval_at
+                                       ? offset
+                                       : normalize_approval_at;
+      const uint32_t overlap_end = chunk_end < approval_end
+                                     ? chunk_end
+                                     : approval_end;
+      if (overlap_start < overlap_end) {
+        memset(buf + overlap_start - offset, 0, overlap_end - overlap_start);
+      }
     }
-#else
-    (void)normalize_sd_approval;
-#endif
     sha256_update(&c, buf, n);
     offset += n;
     len -= n;
@@ -884,7 +1045,7 @@ __attribute__((noinline, noclone)) static int sha256_staged_region_impl(
 
 static int sha256_staged_region(uint32_t offset, uint32_t len,
                                 uint8_t out[32]) {
-  return sha256_staged_region_impl(offset, len, out, 0);
+  return sha256_staged_region_impl(offset, len, out, UINT32_MAX);
 }
 #endif
 
@@ -899,8 +1060,22 @@ static int sd_authorized_container_valid(void) {
     return 0;
   }
   uint8_t digest[32];
-  return sha256_staged_region_impl(0, g_sd_total_size, digest, 1) &&
+  return sha256_staged_region_impl(0, g_sd_total_size, digest,
+                                   MOTA_SD_AUTH_APPROVAL_OFFSET) &&
          memcmp(digest, g_sd_auth.container_sha256, sizeof(digest)) == 0;
+}
+#endif
+
+#if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
+static int hybrid_authorized_container_valid(void) {
+  const uint32_t approval_at =
+    g_hybrid.flash_start + offsetof(mota_fixed_header_t, approval);
+  uint8_t digest[32];
+  return g_hybrid.container_total >= sizeof(mota_fixed_header_t) + sizeof(TRAILER) &&
+         sha256_staged_region_impl(g_hybrid.flash_start,
+                                   g_hybrid.container_total, digest,
+                                   approval_at) &&
+         memcmp(digest, g_hybrid.container_sha256, sizeof(digest)) == 0;
 }
 #endif
 
@@ -1005,7 +1180,13 @@ static int boot_vectors_valid(const uint8_t vectors[8]) {
   const uint32_t initial_sp = rd_u32(vectors);
   const uint32_t reset      = rd_u32(vectors + 4);
   const uint32_t reset_addr = reset & ~1u;
-  return (initial_sp & 7u) == 0 && initial_sp >= 0x20000000u && initial_sp <= 0x20040000u &&
+  const uint32_t ram_end =
+#if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
+    MOTA_HYBRID_ARENA_START;
+#else
+    0x20040000u;
+#endif
+  return (initial_sp & 7u) == 0 && initial_sp >= 0x20000000u && initial_sp <= ram_end &&
          (reset & 1u) != 0 && reset_addr >= MOTA_NRF52_BL_START &&
          reset_addr < MOTA_NRF52_BL_START + MOTA_NRF52_BL_SIZE;
 }
@@ -1054,6 +1235,34 @@ static const uint8_t *boot_image_pointer(uint32_t address) {
 #endif
 }
 
+#if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
+static int boot_image_ram_caps_valid(const uint8_t *image) {
+  uint32_t matches = 0;
+  for (uint32_t off = 0; off + sizeof(mota_ram_info_t) <= MOTA_NRF52_BL_SIZE;
+       off += sizeof(uint32_t)) {
+    const uint8_t *candidate = image + off;
+    if (candidate[0] == MOTA_RAM_INFO_MAGIC0 &&
+        candidate[1] == MOTA_RAM_INFO_MAGIC1 &&
+        candidate[2] == MOTA_RAM_INFO_MAGIC2 &&
+        candidate[3] == MOTA_RAM_INFO_MAGIC3 &&
+        candidate[4] == MOTA_RAM_INFO_MAGIC4 &&
+        candidate[5] == MOTA_RAM_INFO_MAGIC5 &&
+        candidate[6] == MOTA_RAM_INFO_MAGIC6 &&
+        candidate[7] == MOTA_RAM_INFO_MAGIC7 &&
+        rd_u16(candidate + offsetof(mota_ram_info_t, abi)) == MOTA_RAM_INFO_ABI &&
+        rd_u16(candidate + offsetof(mota_ram_info_t, handoff_len)) ==
+          MOTA_HYBRID_HANDOFF_LEN &&
+        rd_u32(candidate + offsetof(mota_ram_info_t, arena_size)) ==
+          MOTA_HYBRID_ARENA_SIZE) {
+      if (++matches > 1u) {
+        return 0;
+      }
+    }
+  }
+  return matches == 1u;
+}
+#endif
+
 static int boot_image_caps_valid(const uint8_t *image) {
   static const uint8_t magic[8] = {MOTA_BL_MAGIC0, MOTA_BL_MAGIC1, MOTA_BL_MAGIC2, MOTA_BL_MAGIC3,
                                    MOTA_BL_MAGIC4, MOTA_BL_MAGIC5, MOTA_BL_MAGIC6, MOTA_BL_MAGIC7};
@@ -1089,7 +1298,14 @@ static int boot_image_caps_valid(const uint8_t *image) {
       }
     }
   }
-  return matches == 1u;
+  if (matches != 1u) {
+    return 0;
+  }
+#if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
+  return boot_image_ram_caps_valid(image);
+#else
+  return 1;
+#endif
 }
 
 static int installed_boot_info(bootloader_image_info_t *info) {
@@ -1381,7 +1597,13 @@ bool ota_delta_check_and_apply(void) {
   // Force a volatile read of the capability marker so -flto / --gc-sections cannot fold the reference away
   // and drop it - the running app scans the bootloader flash for it (ota_bl_info.h / OtaBlInfo.h).
   volatile uint8_t keep = *(const volatile uint8_t *)&g_mota_bl_info.magic[0];
+#if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
+  volatile uint8_t keep_ram =
+    *(const volatile uint8_t *)&g_mota_ram_info.magic[0];
+  if (keep == 0 || keep_ram == 0) {
+#else
   if (keep == 0) {
+#endif
     return finish_apply(false); // 'M' (0x4D) != 0, so never taken; keeps the marker live
   }
 
@@ -1403,11 +1625,28 @@ bool ota_delta_check_and_apply(void) {
   // marker, so this bootloader scans only below ExtraFS. A new app uses EXPANDED only after finding the
   // matching capability bit in g_mota_bl_info.
   const uint32_t stage_handoff = gpregret2_get();
+  // Consume both retained trigger bytes before inspecting a hybrid record or
+  // any staged source. Every malformed/interrupted request is one-shot.
+  gpregret_set(0);
+  gpregret2_set(0xB1);
+#if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
+  if (stage_handoff == GPREGRET2_OTA_STAGE_HYBRID &&
+      !hybrid_handoff_take()) {
+    gpregret2_set(0xBE);
+    return finish_apply(false);
+  }
+#endif
 #if defined(MOTA_QSPI_FLASH)
   g_qspi_source = stage_handoff == GPREGRET2_OTA_STAGE_QSPI;
 #endif
   uint32_t stage_ceiling =
-    stage_handoff == GPREGRET2_OTA_STAGE_EXPANDED ? MOTA_NRF52_STAGE_CEILING_EXPANDED : MOTA_NRF52_STAGE_CEILING_LEGACY;
+    (stage_handoff == GPREGRET2_OTA_STAGE_EXPANDED
+#if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
+     || stage_handoff == GPREGRET2_OTA_STAGE_HYBRID
+#endif
+    )
+      ? MOTA_NRF52_STAGE_CEILING_EXPANDED
+      : MOTA_NRF52_STAGE_CEILING_LEGACY;
 #if defined(MOTA_QSPI_BOOTLOADER_UPDATE)
   if (stage_ceiling > APP_APPLY_END) {
     stage_ceiling = APP_APPLY_END;
@@ -1426,13 +1665,20 @@ bool ota_delta_check_and_apply(void) {
   // 0xB1 gate passed (GPREGRET was 0x6A) | 0xB2 no/unapproved mota |
   // 0xB3 bad full/codec | 0xB4 no body_len | 0xB5 base mismatch | 0xB9 bad detools geometry |
   // 0xBA external full pre-hash mismatch | 0xBB external read failure | 0xBC approval clear failure |
-  // 0x9N detools err N | 0xB6 wrong size | 0xB7 result-hash mismatch | 0xB8 SUCCESS.
-  gpregret_set(0); // consume the trigger so we never loop
-  gpregret2_set(0xB1);
+  // 0xBE invalid hybrid handoff/reset/geometry | 0x9N detools err N |
+  // 0xB6 wrong size | 0xB7 result-hash mismatch | 0xB8 SUCCESS.
 
 #if defined(MOTA_SD_CARD)
   if (!sd_auth_take(MOTA_SD_AUTH_PURPOSE_APP, 2u)) {
     gpregret2_set(0xBD);
+    return finish_apply(false);
+  }
+#endif
+
+#if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
+  if (g_hybrid.container_total != 0u &&
+      !hybrid_authorized_container_valid()) {
+    gpregret2_set(0xBA);
     return finish_apply(false);
   }
 #endif

@@ -10,6 +10,8 @@
 #include <string.h>
 
 #include "ota_layout.h"
+#include "ota_hybrid_handoff.h"
+#include "ota_ram_info.h"
 #include "usb/uf2/bootloader_image.h"
 #if defined(MOTA_SD_BOOTLOADER_UPDATE)
   #include "ota_sd_auth.h"
@@ -21,6 +23,7 @@
 #define SD_CARD_SECTORS  (QSPI_LEN / 512u)
 #define MANIFEST_OFFSET  (MOTA_NRF52_BL_SIZE - sizeof(bootloader_update_envelope_t))
 #define CAPS_OFFSET      0x00000300u
+#define RAM_CAPS_OFFSET  0x00000340u
 #define TEST_BLOCK_LOG2  10u
 #define TEST_INSTALLED_BOOT_VERSION 0x0204010Bu
 #define TEST_CANDIDATE_BOOT_VERSION 0x0204010Cu
@@ -75,6 +78,11 @@ static uint16_t g_runtime_fwid;
 #if defined(MOTA_SD_BOOTLOADER_UPDATE)
 static mota_sd_auth_t SD_AUTH;
 #endif
+#if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
+static uint8_t               HYBRID_RAM[MOTA_HYBRID_ARENA_SIZE];
+static mota_hybrid_handoff_t HYBRID_HANDOFF;
+static uint32_t              g_resetreas;
+#endif
 #if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_BOOTLOADER_UPDATE)
 static jmp_buf  g_power_cut_env;
 static int      g_power_cut_armed, g_power_cut_after_page;
@@ -128,6 +136,24 @@ uint32_t otah_gpregret2_get(void) {
 void otah_gpregret2_set(uint32_t value) {
   g_gpregret2 = value;
 }
+#if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
+uint32_t otah_resetreas_get(void) {
+  return g_resetreas;
+}
+void otah_hybrid_handoff_read(void *dst, uint32_t len) {
+  memcpy(dst, &HYBRID_HANDOFF, len);
+}
+void otah_hybrid_handoff_consume(void) {
+  memset(&HYBRID_HANDOFF, 0, sizeof(HYBRID_HANDOFF));
+}
+int otah_hybrid_ram_read(uint32_t offset, void *dst, uint32_t len) {
+  if (offset > sizeof(HYBRID_RAM) || len > sizeof(HYBRID_RAM) - offset) {
+    return 0;
+  }
+  memcpy(dst, HYBRID_RAM + offset, len);
+  return 1;
+}
+#endif
 uint16_t otah_crc16(uint32_t address, uint32_t len) {
   (void)address;
   (void)len;
@@ -254,7 +280,11 @@ static uint8_t *make_boot_image(uint32_t board_id, uint16_t abi, uint8_t storage
   for (uint32_t i = 0; i < MOTA_NRF52_BL_SIZE; i++) {
     image[i] = (uint8_t)(i * 29u + (i >> 7) + 0x35u);
   }
+#if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
+  wr32(image, MOTA_HYBRID_ARENA_START);
+#else
   wr32(image, 0x20040000u);
+#endif
   wr32(image + 4, MOTA_NRF52_BL_START + 0x101u);
 
   mota_bl_info_t *caps = (void *)(image + CAPS_OFFSET);
@@ -265,6 +295,19 @@ static uint8_t *make_boot_image(uint32_t board_id, uint16_t abi, uint8_t storage
   caps->codec_mask       = (1u << CODEC_FULL) | (1u << CODEC_INPLACE);
   caps->storage_flags[0] = storage_flags;
   memset(caps->storage_flags + 1, 0, 3);
+
+#if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
+  mota_ram_info_t *ram_caps = (void *)(image + RAM_CAPS_OFFSET);
+  const uint8_t ram_magic[8] = {
+    MOTA_RAM_INFO_MAGIC0, MOTA_RAM_INFO_MAGIC1, MOTA_RAM_INFO_MAGIC2,
+    MOTA_RAM_INFO_MAGIC3, MOTA_RAM_INFO_MAGIC4, MOTA_RAM_INFO_MAGIC5,
+    MOTA_RAM_INFO_MAGIC6, MOTA_RAM_INFO_MAGIC7
+  };
+  memcpy(ram_caps->magic, ram_magic, sizeof(ram_caps->magic));
+  ram_caps->abi         = MOTA_RAM_INFO_ABI;
+  ram_caps->handoff_len = MOTA_HYBRID_HANDOFF_LEN;
+  ram_caps->arena_size  = MOTA_HYBRID_ARENA_SIZE;
+#endif
 
   bootloader_update_envelope_t *envelope =
     (void *)(image + MANIFEST_OFFSET);
@@ -395,6 +438,12 @@ static void reset_device(void) {
   memset(QSPI, 0xFF, sizeof(QSPI));
 #if defined(MOTA_SD_BOOTLOADER_UPDATE)
   memset(&SD_AUTH, 0, sizeof(SD_AUTH));
+#endif
+#if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
+  memset(HYBRID_RAM, 0, sizeof(HYBRID_RAM));
+  memset(&HYBRID_HANDOFF, 0, sizeof(HYBRID_HANDOFF));
+  g_resetreas = MOTA_RESETREAS_SOFTWARE;
+  memset(&g_hybrid, 0, sizeof(g_hybrid));
 #endif
   g_gpregret              = GPREGRET_BOOTLOADER_APPLY;
   g_gpregret2             = TEST_SOURCE;
@@ -877,6 +926,61 @@ int main(void) {
   report("bad embedded manifest CRC is rejected", rejected_with(bad, total, GPREGRET2_BL_MANIFEST), &failures);
   free(bad);
   free(bad_image);
+
+#if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
+  uint8_t ordinary_app_vectors[8] = {0};
+  wr32(ordinary_app_vectors, 0x20040000u);
+  wr32(ordinary_app_vectors + 4u, MOTA_NRF52_APP_BASE + 1u);
+  report("ordinary app vectors may still use all physical RAM",
+         bootloader_image_vectors_valid(ordinary_app_vectors, sizeof(ordinary_app_vectors), MOTA_NRF52_APP_BASE,
+                                        sizeof(ordinary_app_vectors)),
+         &failures);
+
+  bad_image = make_boot_image(board_base, 3, required_caps);
+  memset(bad_image + RAM_CAPS_OFFSET, 0, sizeof(((mota_ram_info_t *)0)->magic));
+  fix_image_crc(bad_image);
+  bad = make_mota(bad_image, MOTA_NRF52_BL_SIZE, 3, MFLAG_FULL | MFLAG_SIGNED | MFLAG_BOOTLOADER,
+                  TEST_TARGET_ID, TEST_HW_ID, &total);
+  report("image that removes the fixed-RAM capability is rejected",
+         rejected_with(bad, total, GPREGRET2_BL_MANIFEST), &failures);
+  free(bad);
+  free(bad_image);
+
+  bad_image = make_boot_image(board_base, 3, required_caps);
+  ((mota_ram_info_t *)(void *)(bad_image + RAM_CAPS_OFFSET))->arena_size--;
+  fix_image_crc(bad_image);
+  bad = make_mota(bad_image, MOTA_NRF52_BL_SIZE, 3, MFLAG_FULL | MFLAG_SIGNED | MFLAG_BOOTLOADER,
+                  TEST_TARGET_ID, TEST_HW_ID, &total);
+  report("image with a mismatched fixed-RAM capability is rejected",
+         rejected_with(bad, total, GPREGRET2_BL_MANIFEST), &failures);
+  free(bad);
+  free(bad_image);
+
+  bad_image = make_boot_image(board_base, 3, required_caps);
+  memcpy(bad_image + RAM_CAPS_OFFSET + sizeof(mota_ram_info_t),
+         bad_image + RAM_CAPS_OFFSET, sizeof(mota_ram_info_t));
+  fix_image_crc(bad_image);
+  bad = make_mota(bad_image, MOTA_NRF52_BL_SIZE, 3, MFLAG_FULL | MFLAG_SIGNED | MFLAG_BOOTLOADER,
+                  TEST_TARGET_ID, TEST_HW_ID, &total);
+  report("image with duplicate fixed-RAM capabilities is rejected",
+         rejected_with(bad, total, GPREGRET2_BL_MANIFEST), &failures);
+  free(bad);
+  free(bad_image);
+
+  bad_image = make_boot_image(board_base, 3, required_caps);
+  wr32(bad_image, 0x20040000u);
+  fix_image_crc(bad_image);
+  report("generic recovery validation preserves full physical-RAM compatibility",
+         bootloader_image_validate(bad_image, MOTA_NRF52_BL_START, MOTA_NRF52_BL_SIZE,
+                                   TEST_BOARD_ID, TEST_DEVICE_NAME),
+         &failures);
+  bad = make_mota(bad_image, MOTA_NRF52_BL_SIZE, 3, MFLAG_FULL | MFLAG_SIGNED | MFLAG_BOOTLOADER,
+                  TEST_TARGET_ID, TEST_HW_ID, &total);
+  report("image whose initial stack enters the fixed RAM arena is rejected",
+         rejected_with(bad, total, GPREGRET2_BL_INTEGRITY), &failures);
+  free(bad);
+  free(bad_image);
+#endif
 
   bad_image = make_boot_image(board_base, 2, required_caps & (uint8_t)~MOTA_BL_STORAGE_BOOT_UPDATE);
   fix_image_crc(bad_image);

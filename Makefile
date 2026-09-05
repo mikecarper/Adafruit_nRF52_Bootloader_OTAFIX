@@ -38,6 +38,24 @@ endif
 # Board specific
 -include src/boards/$(BOARD)/board.mk
 
+# The existing internal-bootloader-update profile is the curated set of
+# nRF52840 boards with no SD/QSPI OTA backend. Reserve the fixed 64 KiB arena
+# there by default; external-storage boards retain the complete historical RAM.
+ifneq ($(findstring -DMOTA_INTERNAL_BOOTLOADER_UPDATE=1,$(CFLAGS)),)
+MOTA_RAM_ARENA_SIZE ?= 65536
+else
+MOTA_RAM_ARENA_SIZE ?= 0
+endif
+ifneq ($(MOTA_RAM_ARENA_SIZE),0)
+  ifneq ($(MCU_SUB_VARIANT),nrf52840)
+    $(error MOTA_RAM_ARENA_SIZE requires an nRF52840 target)
+  endif
+  ifeq ($(findstring -DMOTA_INTERNAL_BOOTLOADER_UPDATE=1,$(CFLAGS)),)
+    $(error MOTA_RAM_ARENA_SIZE requires the internal-only OTA profile)
+  endif
+  CFLAGS += -DMOTA_RAM_ARENA_SIZE=$(MOTA_RAM_ARENA_SIZE)
+endif
+
 SDK_PATH     = lib/sdk/components
 SDK11_PATH   = lib/sdk11/components
 TUSB_PATH    = lib/tinyusb/src
@@ -489,6 +507,10 @@ LDFLAGS += \
 	-Wl,-Map=$@.map -Wl,-cref -Wl,-gc-sections \
 	-specs=nosys.specs -specs=nano.specs
 
+ifneq ($(MOTA_RAM_ARENA_SIZE),0)
+LDFLAGS += -Wl,--defsym=__mota_ram_arena_size__=$(MOTA_RAM_ARENA_SIZE)
+endif
+
 LIBS += -lm -lc
 
 #------------------------------------------------------------------------------
@@ -523,6 +545,7 @@ SD_HEX=$(SD_HEX)
 MOTA_SOFTDEVICE_FAMILY=$(MOTA_SOFTDEVICE_FAMILY)
 MOTA_SOFTDEVICE_FWID=$(MOTA_SOFTDEVICE_FWID)
 MOTA_APP_BASE=$(MOTA_APP_BASE)
+MOTA_RAM_ARENA_SIZE=$(MOTA_RAM_ARENA_SIZE)
 SIGNED_FW=$(SIGNED_FW)
 SIGNED_FW_QX=$(SIGNED_FW_QX)
 SIGNED_FW_QY=$(SIGNED_FW_QY)

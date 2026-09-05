@@ -3,6 +3,8 @@
 SEARCH_DIR(.)
 /*GROUP(-lgcc -lc)*/
 
+MOTA_RAM_ARENA_SIZE = DEFINED(__mota_ram_arena_size__) ? __mota_ram_arena_size__ : 0;
+
 MEMORY
 {
   /** Flash start address for the bootloader. This setting will also be stored in UICR to allow the
@@ -26,7 +28,9 @@ MEMORY
 
   /** RAM Region for bootloader. */
   /* Avoid conflict with NOINIT for OTA bond sharing */
-  RAM (rwx) :  ORIGIN = 0x20008000, LENGTH = 0x20040000-0x20008000
+  RAM (rwx) :  ORIGIN = 0x20008000, LENGTH = 0x20040000-0x20008000-MOTA_RAM_ARENA_SIZE
+
+  MOTA_RAM (rwx) : ORIGIN = 0x20040000-MOTA_RAM_ARENA_SIZE, LENGTH = MOTA_RAM_ARENA_SIZE
 
   /* Location for double reset detection, no init */
   DBL_RESET (rwx) :  ORIGIN = 0x20007F7C, LENGTH = 0x04
@@ -111,7 +115,27 @@ SECTIONS
   ASSERT(__dfu_peer_data_end__ - __dfu_peer_data_start__ == 62,
          "retained BLE peer data ABI must be 60-byte data plus 2-byte CRC")
 
+  .mota_arena (NOLOAD) :
+  {
+    __mota_ram_start__ = .;
+    . += LENGTH(MOTA_RAM);
+    __mota_ram_end__ = .;
+  } > MOTA_RAM
+  ASSERT(MOTA_RAM_ARENA_SIZE == 0 || MOTA_RAM_ARENA_SIZE == 0x10000,
+         "mOTA RAM arena must be disabled or exactly 64 KiB")
+  ASSERT(__mota_ram_start__ == 0x20040000 - MOTA_RAM_ARENA_SIZE,
+         "mOTA RAM arena start does not match the retained ABI")
+  ASSERT(__mota_ram_end__ == 0x20040000,
+         "mOTA RAM arena must end at physical SRAM top")
+  ASSERT(SIZEOF(.mota_arena) == MOTA_RAM_ARENA_SIZE,
+         "mOTA RAM arena section has the wrong size")
+
   /* other placements follow here... */
 }
 
 INCLUDE "nrf_common.ld"
+
+ASSERT(__StackTop == __mota_ram_start__,
+       "bootloader stack must end immediately below the mOTA RAM arena")
+ASSERT(__StackLimit >= __HeapLimit,
+       "bootloader stack/data overlap after reserving the mOTA RAM arena")

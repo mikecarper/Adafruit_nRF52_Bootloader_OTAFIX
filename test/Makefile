@@ -48,8 +48,10 @@ readback_test_v7: readback_test.c $(SRC)/ota_delta.c $(SRC)/detools/detools.c $(
 
 readback_internal_test: readback_test.c $(SRC)/ota_delta.c $(SRC)/detools/detools.c $(SRC)/sha256.c \
                         $(SRC)/usb/uf2/bootloader_image.c $(SRC)/usb/uf2/bootloader_image.h \
-                        $(SRC)/ota_delta.h $(SRC)/ota_layout.h
+                        $(SRC)/ota_delta.h $(SRC)/ota_layout.h $(SRC)/ota_hybrid_handoff.h \
+                        $(SRC)/ota_ram_info.h
 	$(CC) $(CFLAGS) -DOTA_DELTA_HOST_TEST -DMOTA_INTERNAL_BOOTLOADER_UPDATE \
+		-DMOTA_RAM_ARENA_SIZE=65536 \
 		-DUSB_DESC_VID=0x239A -DUSB_DESC_UF2_PID=0x0029 -DDEVICE_NAME='"3401_DFU"' $(INC) \
 		readback_test.c $(SRC)/detools/detools.c $(SRC)/sha256.c \
 		$(SRC)/usb/uf2/bootloader_image.c -o $@
@@ -78,8 +80,10 @@ bootloader_mota_test: bootloader_mota_test.c $(SRC)/ota_delta.c $(SRC)/detools/d
 
 bootloader_mota_internal_test: bootloader_mota_test.c $(SRC)/ota_delta.c $(SRC)/detools/detools.c \
                                $(SRC)/sha256.c $(SRC)/usb/uf2/bootloader_image.c \
-                               $(SRC)/usb/uf2/bootloader_image.h $(SRC)/ota_bl_info.h $(SRC)/ota_layout.h
+                               $(SRC)/usb/uf2/bootloader_image.h $(SRC)/ota_bl_info.h $(SRC)/ota_layout.h \
+                               $(SRC)/ota_hybrid_handoff.h $(SRC)/ota_ram_info.h
 	$(CC) $(CFLAGS) -DOTA_DELTA_HOST_TEST -DMOTA_INTERNAL_BOOTLOADER_UPDATE \
+		-DMOTA_RAM_ARENA_SIZE=65536 \
 		-DUSB_DESC_VID=0x239A -DUSB_DESC_UF2_PID=0x0029 -DDEVICE_NAME='"3401_DFU"' $(INC) \
 		bootloader_mota_test.c $(SRC)/detools/detools.c $(SRC)/sha256.c \
 		$(SRC)/usb/uf2/bootloader_image.c -o $@

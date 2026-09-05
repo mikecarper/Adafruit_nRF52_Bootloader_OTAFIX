@@ -44,6 +44,9 @@
 #define GPREGRET2_OTA_STAGE_EXPANDED 0xEDu
 #define GPREGRET2_OTA_STAGE_QSPI     0x51u
 #define GPREGRET2_OTA_STAGE_SD       0x53u
+// One-shot retained-RAM handoff describing a format-v2 application container
+// split between an internal-flash prefix and the fixed 64 KiB SRAM arena.
+#define GPREGRET2_OTA_STAGE_HYBRID   0xA6u
 
 // Bootloader-update result diagnostics. C8 is written immediately before the
 // MBR COPY_BL handoff (success never returns); a returned MBR call replaces it

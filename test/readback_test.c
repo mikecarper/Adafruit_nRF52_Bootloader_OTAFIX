@@ -27,6 +27,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include "ota_layout.h"
+#include "ota_hybrid_handoff.h"
 
 // ----- simulated flash + a pre-apply SNAPSHOT used to model the LTO stale read -----
 #if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
@@ -41,6 +42,13 @@ static uint32_t g_ws_lo, g_ws_hi;        // workspace = [APP_BASE, mota_addr); t
 static uint32_t g_gpregret, g_gpregret2;
 static uint16_t g_bank0, g_crc; static uint32_t g_size; static int g_committed;
 static int g_settings_writes, g_app_write_while_valid, g_app_write_past_source;
+#if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
+static uint8_t               HYBRID_RAM[MOTA_HYBRID_ARENA_SIZE];
+static mota_hybrid_handoff_t HYBRID_HANDOFF;
+static uint32_t              g_resetreas;
+static int                   g_hybrid_consume_count;
+static int                   g_hybrid_read_fails;
+#endif
 
 void otah_read(uint32_t a, void* d, uint32_t n) {
     memcpy(d, FLASH + a, n);
@@ -69,6 +77,19 @@ uint32_t otah_gpregret_get(void)                           { return g_gpregret; 
 void     otah_gpregret_set(uint32_t v)                     { g_gpregret = v; }
 uint32_t otah_gpregret2_get(void)                          { return g_gpregret2; }
 void     otah_gpregret2_set(uint32_t v)                    { g_gpregret2 = v; }
+#if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
+uint32_t otah_resetreas_get(void)                          { return g_resetreas; }
+void otah_hybrid_handoff_read(void *dst, uint32_t len)     { memcpy(dst, &HYBRID_HANDOFF, len); }
+void otah_hybrid_handoff_consume(void) {
+    memset(&HYBRID_HANDOFF, 0, sizeof(HYBRID_HANDOFF));
+    g_hybrid_consume_count++;
+}
+int otah_hybrid_ram_read(uint32_t offset, void *dst, uint32_t len) {
+    if (g_hybrid_read_fails || offset > sizeof(HYBRID_RAM) || len > sizeof(HYBRID_RAM) - offset) return 0;
+    memcpy(dst, HYBRID_RAM + offset, len);
+    return 1;
+}
+#endif
 uint16_t otah_crc16(uint32_t a, uint32_t len)              { (void)a; (void)len; return 0x1234; }
 void otah_settings_commit(uint16_t b, uint16_t c, uint32_t s) {
     g_bank0 = b; g_crc = c; g_size = s; g_committed = (b == 0x01); g_settings_writes++;
@@ -128,6 +149,14 @@ static void stage_flash(void) {
     g_committed = 1; g_bank0 = 0x01; g_crc = 0; g_size = (uint32_t)g_base_n;
     g_settings_writes = 0; g_app_write_while_valid = 0; g_app_write_past_source = 0;
     g_cache_page = 0; g_cache_dirty = 0;                           // reset ota_delta.c's static page cache
+#if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
+    memset(HYBRID_RAM, 0, sizeof(HYBRID_RAM));
+    memset(&HYBRID_HANDOFF, 0, sizeof(HYBRID_HANDOFF));
+    memset(&g_hybrid, 0, sizeof(g_hybrid));
+    g_resetreas = MOTA_RESETREAS_SOFTWARE;
+    g_hybrid_consume_count = 0;
+    g_hybrid_read_fails = 0;
+#endif
 }
 
 // Run the REAL entry point once. Returns its bool; fills committed + matches(expected) for the caller.
@@ -182,6 +211,78 @@ static uint8_t *make_large_internal_mota(const uint8_t *source, size_t source_le
     *payload_offset = new_payload_offset;
     return mota;
 }
+
+#if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
+static void hybrid_container_hash(const uint8_t *mota, uint32_t total,
+                                  uint8_t out[32]) {
+  static const uint8_t zero_approval[4];
+  sha256_ctx_t ctx;
+  sha256_init(&ctx);
+  sha256_update(&ctx, mota, offsetof(mota_fixed_header_t, approval));
+  sha256_update(&ctx, zero_approval, sizeof(zero_approval));
+  sha256_update(&ctx, mota + offsetof(mota_fixed_header_t, approval) + 4u,
+                total - offsetof(mota_fixed_header_t, approval) - 4u);
+  sha256_final(&ctx, out);
+}
+
+static uint32_t hybrid_flash_len_for_total(uint32_t total) {
+  uint32_t flash_len = MOTA_NRF52_FLASH_PAGE;
+  if (total > MOTA_HYBRID_ARENA_SIZE + MOTA_NRF52_FLASH_PAGE) {
+    flash_len = (total - MOTA_HYBRID_ARENA_SIZE +
+                 MOTA_NRF52_FLASH_PAGE - 1u) &
+                ~(MOTA_NRF52_FLASH_PAGE - 1u);
+  }
+  return flash_len;
+}
+
+static void stage_hybrid(const uint8_t *mota, uint32_t total,
+                         uint32_t flash_len) {
+  if (flash_len < MOTA_NRF52_FLASH_PAGE ||
+      (flash_len & (MOTA_NRF52_FLASH_PAGE - 1u)) != 0u ||
+      total <= flash_len || total - flash_len > sizeof(HYBRID_RAM)) {
+    fprintf(stderr, "invalid hybrid test geometry\n");
+    exit(2);
+  }
+  g_write_start = MOTA_NRF52_STAGE_CEILING_EXPANDED - flash_len;
+  memset(FLASH, 0xFF, FLASH_LEN);
+  memcpy(FLASH + MOTA_NRF52_APP_BASE, g_base, (size_t)g_base_n);
+  memcpy(FLASH + g_write_start, mota, flash_len);
+  memset(HYBRID_RAM, 0, sizeof(HYBRID_RAM));
+  memcpy(HYBRID_RAM, mota + flash_len, total - flash_len);
+  static const uint8_t APRV4[4] = {'A','P','R','V'};
+  memcpy(FLASH + g_write_start + offsetof(mota_fixed_header_t, approval),
+         APRV4, sizeof(APRV4));
+
+  uint8_t digest[32];
+  hybrid_container_hash(mota, total, digest);
+  mota_hybrid_handoff_encode(&HYBRID_HANDOFF, total, g_write_start,
+                             flash_len, total - flash_len, digest);
+  memset(&g_hybrid, 0, sizeof(g_hybrid));
+  g_gpregret = GPREGRET_OTA_APPLY;
+  g_gpregret2 = GPREGRET2_OTA_STAGE_HYBRID;
+  g_resetreas = MOTA_RESETREAS_SOFTWARE;
+  g_hybrid_consume_count = 0;
+  g_hybrid_read_fails = 0;
+  g_committed = 1; g_bank0 = 0x01; g_crc = 0; g_size = (uint32_t)g_base_n;
+  g_settings_writes = 0; g_app_write_while_valid = 0; g_app_write_past_source = 0;
+  g_cache_page = 0; g_cache_dirty = 0;
+  g_ws_lo = MOTA_NRF52_APP_BASE;
+  g_ws_hi = g_write_start;
+  g_stale = 0;
+  memcpy(SNAPSHOT, FLASH, FLASH_LEN);
+}
+
+static bool run_hybrid_case(const uint8_t *mota, uint32_t total,
+                            int *committed, int *matches) {
+  stage_hybrid(mota, total, hybrid_flash_len_for_total(total));
+  const bool applied = ota_delta_check_and_apply();
+  *committed = g_committed;
+  *matches = (g_exp_n > 0) &&
+             memcmp(FLASH + MOTA_NRF52_APP_BASE, g_expect,
+                    (size_t)g_exp_n) == 0;
+  return applied;
+}
+#endif
 #endif
 
 // [3] Source guard: the DEVICE fl_read (the on-hardware #else branch) must read flash through a
@@ -496,9 +597,109 @@ int main(int argc, char** argv) {
     }
 #endif
 
+#if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
+    // The hybrid source keeps a page-aligned prefix in flash and serves the
+    // remaining payload/trailer from retained SRAM. Authentication and every
+    // failure gate run before the application settings commit point.
+    printf("[8] authenticated flash/RAM hybrid source: ");
+    {
+        long hybrid_mota_n = 0;
+        uint32_t hybrid_payload_offset = 0;
+        uint8_t *hybrid_mota = make_large_internal_mota(
+            g_mota, (size_t)g_mota_n, 90000u, &hybrid_mota_n,
+            &hybrid_payload_offset);
+        (void)hybrid_payload_offset;
+        mota_hybrid_handoff_t zero_handoff = {0};
+        int hybrid_ok = hybrid_mota != NULL;
+        if (hybrid_ok) {
+            int c_hybrid, m_hybrid;
+            const bool hybrid_applied = run_hybrid_case(
+                hybrid_mota, (uint32_t)hybrid_mota_n, &c_hybrid, &m_hybrid);
+            hybrid_ok = hybrid_applied && c_hybrid && m_hybrid &&
+                        g_settings_writes == 2 && !g_app_write_while_valid &&
+                        !g_app_write_past_source && g_gpregret == 0u &&
+                        g_gpregret2 == 0xB8u && g_hybrid_consume_count == 1 &&
+                        memcmp(&HYBRID_HANDOFF, &zero_handoff,
+                               sizeof(HYBRID_HANDOFF)) == 0 &&
+                        memcmp(FLASH + g_write_start +
+                                 offsetof(mota_fixed_header_t, approval),
+                               (uint8_t[4]){0}, 4u) == 0;
+        }
+        if (hybrid_ok) {
+            printf("PASS - cross-boundary source authenticated, consumed, and applied\n");
+        } else {
+            printf("FAIL - applied/commit/result/source-consumption invariant failed\n");
+            fails++;
+        }
+
+        printf("[9] hybrid reset/record/hash failures are one-shot: ");
+        int reject_ok = hybrid_mota != NULL;
+        if (reject_ok) {
+            const uint32_t hybrid_flash_len =
+                hybrid_flash_len_for_total((uint32_t)hybrid_mota_n);
+            stage_hybrid(hybrid_mota, (uint32_t)hybrid_mota_n,
+                         hybrid_flash_len);
+            g_resetreas = MOTA_RESETREAS_SOFTWARE | (1u << 1);
+            bool rejected = !ota_delta_check_and_apply();
+            const int writes_after_reject = g_settings_writes;
+            rejected = rejected && !ota_delta_check_and_apply();
+            reject_ok = rejected && g_gpregret == 0u &&
+                        g_gpregret2 == 0xBEu && g_hybrid_consume_count == 1 &&
+                        writes_after_reject == 0 && g_settings_writes == 0 &&
+                        memcmp(&HYBRID_HANDOFF, &zero_handoff,
+                               sizeof(HYBRID_HANDOFF)) == 0 &&
+                        memcmp(FLASH + MOTA_NRF52_APP_BASE, g_base,
+                               (size_t)g_base_n) == 0;
+
+            stage_hybrid(hybrid_mota, (uint32_t)hybrid_mota_n,
+                         hybrid_flash_len);
+            HYBRID_HANDOFF.crc32 ^= 1u;
+            reject_ok = reject_ok && !ota_delta_check_and_apply() &&
+                        g_gpregret2 == 0xBEu && g_settings_writes == 0 &&
+                        g_hybrid_consume_count == 1;
+
+            stage_hybrid(hybrid_mota, (uint32_t)hybrid_mota_n,
+                         hybrid_flash_len);
+            HYBRID_HANDOFF.flash_start += MOTA_NRF52_FLASH_PAGE;
+            HYBRID_HANDOFF.crc32 = mota_hybrid_handoff_crc32(
+                (const uint8_t *)&HYBRID_HANDOFF,
+                offsetof(mota_hybrid_handoff_t, crc32));
+            HYBRID_HANDOFF.crc32_inv = ~HYBRID_HANDOFF.crc32;
+            reject_ok = reject_ok && !ota_delta_check_and_apply() &&
+                        g_gpregret2 == 0xBEu && g_settings_writes == 0;
+
+            stage_hybrid(hybrid_mota, (uint32_t)hybrid_mota_n,
+                         hybrid_flash_len + MOTA_NRF52_FLASH_PAGE);
+            reject_ok = reject_ok && !ota_delta_check_and_apply() &&
+                        g_gpregret2 == 0xBEu && g_settings_writes == 0;
+
+            stage_hybrid(hybrid_mota, (uint32_t)hybrid_mota_n,
+                         hybrid_flash_len);
+            HYBRID_RAM[HYBRID_HANDOFF.ram_len - 1u] ^= 1u;
+            reject_ok = reject_ok && !ota_delta_check_and_apply() &&
+                        g_gpregret2 == 0xBAu && g_settings_writes == 0;
+
+            stage_hybrid(hybrid_mota, (uint32_t)hybrid_mota_n,
+                         hybrid_flash_len);
+            g_hybrid_read_fails = 1;
+            reject_ok = reject_ok && !ota_delta_check_and_apply() &&
+                        g_gpregret2 == 0xBAu && g_settings_writes == 0;
+        }
+        if (reject_ok) {
+            printf("PASS - reset, CRC, geometry, SHA, and read failures preserved app\n");
+        } else {
+            printf("FAIL - a hybrid preflight failure crossed the commit point\n");
+            fails++;
+        }
+        free(hybrid_mota);
+    }
+#endif
+
     // Source guard: the device fl_read must stay volatile.
     printf("[%d] source guard (device fl_read is volatile):\n",
-#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+#if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
+           10
+#elif defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
            8
 #else
            6
