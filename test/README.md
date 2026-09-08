@@ -15,6 +15,13 @@ make check        # apply the committed vector (apply_sim) + the LTO-readback re
 make sanitize     # rebuild and run the complete host suite with ASan and UBSan
 ```
 
+`make check` also runs `docker_build_test.py`. It checks the Dockerfile,
+architecture-specific GCC 14.2 pins, and the actual installer shell with
+download/extract/filesystem commands replaced by harmless test functions.
+Checksum mismatch, download failure and unsupported architecture must stop
+before extraction. This is not a substitute for building/running the Docker
+image on an installed Docker engine.
+
 ## Physical USB drive-copy gate
 
 `make check` models the MSC/UF2 state machine, but a host model cannot qualify

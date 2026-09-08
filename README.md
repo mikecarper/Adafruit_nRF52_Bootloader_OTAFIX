@@ -461,7 +461,7 @@ candidates are not release artifacts.
 - Nordic PCA10056 (nRF52840 DK)
 - Nologo ProMicro NRF52840 (aka SuperMini NRF52840)
 - RAK 3401
-- RAK 4631 ([See note](#notes-on-RAK4631-bootloader))
+- RAK 4631
 - RAK WisMesh Tag
 - Seeed Studio SenseCAP Card Tracker T1000-E
 - Seeed SenseCAP Solar Node P1
@@ -503,6 +503,42 @@ update; neither a name nor a shared USB VID/PID alone identifies an exact board.
 | XIAO NRF52 BLE / SENSE | `XIAO_DFU` |
 
 ---
+
+## Building from source (Docker)
+
+The Docker environment uses Arm GNU Toolchain **14.2.Rel1**, with pinned
+archive checksums for Linux x86_64 and AArch64. It includes both Make and
+CMake. The firmware sources and initialized submodules come from your mounted
+checkout, not from a separately downloaded source tree.
+
+```sh
+git submodule update --init --recursive
+docker build -t otafix-build .
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/src" -w /src \
+  otafix-build make BOARD=wismesh_tag all
+```
+
+The command above requires a clean, exact OTAFIX release tag. For an untagged
+merge or modified development checkout, explicitly mark the build as a test:
+
+```sh
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/src" -w /src \
+  otafix-build make BOARD=wismesh_tag MOTA_BOOTLOADER_TEST_BUILD=1 \
+  MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE=0x02040601 all
+```
+
+That packed version is for qualification only; this command does not create
+or publish a release. Replace `BOARD=` with the exact directory name under
+`src/boards/`. Output is written to `_build/build-<board>/`, including the
+dedicated bootloader `update-<board>_bootloader-<version>_mbr.uf2` and Legacy
+DFU ZIP. Choose the update pathway using the instructions below, especially
+when upgrading from 2.4.3; do not substitute an application updater UF2.
+
+For CMake, use the same container and mounted checkout with
+`cmake -S . -B cmake-build-<board> -DBOARD=<board>`, then
+`cmake --build cmake-build-<board>`. Development CMake builds also need
+`-DMOTA_BOOTLOADER_TEST_BUILD=ON` and
+`-DMOTA_BOOTLOADER_VERSION_TEST_OVERRIDE=0x02040601` at configure time.
 
 ## Installation
 
@@ -994,9 +1030,3 @@ To check:
 2. Open the `INFO_UF2.TXT` file on the mounted drive  
 
 If the file shows: "Board-ID: nRF52840-SeeedXiaoSense-v1" then you must install the ***SENSE*** variant if updating via UF2 file.
-
-## Notes on RAK4631 bootloader
-
-This version of the RAK4631 bootloader is based on a much newer version (0.9.2) of the Adafruit nRF52 bootloader than what RAK Wireless uses on their official bootloader (0.6.2-11).  
-
-I haven't looked to see what changes (if any) that RAK made to the Adafruit bootloader, so I'm not sure if there's any difference but I have tested this bootloader and I haven't found any problems thus far. If you would rather use the original RAK bootloader but with these patches included you can find that [here](https://github.com/oltaco/WisCore_RAK4631_Bootloader/releases).

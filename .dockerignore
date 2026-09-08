@@ -1,0 +1,14 @@
+_build
+_build-*
+_bin
+_bin-*
+cmake-build-*
+.git/modules
+**/.git
+**/__pycache__
+.venv
+venv
+*.o
+*.out
+*.map
+.DS_Store
