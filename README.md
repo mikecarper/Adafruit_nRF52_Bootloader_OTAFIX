@@ -439,28 +439,8 @@ candidates are not release artifacts.
   When connected to a USB host, devices now automatically reboot into the application after a successful OTA update, instead of requiring a manual reset.
 
 - **Unique BLE advertising names per board**  
-  In OTA DFU mode, devices advertise using a board-specific name instead of the generic `AdaDFU`:
-  - **Elecrow ThinkNode M1** -> `TNM1_DFU`
-  - **Elecrow ThinkNode M3** -> `TNM3_DFU`
-  - **Elecrow ThinkNode M6** -> `TNM6_DFU`
-  - **Heltec T114** -> `T114_DFU`
-  - **Heltec T096** -> `T096_DFU`
-  - **Heltec T1** -> `T1_DFU`
-  - **Heltec Mesh Pocket** -> `MESH_POCKET_OTA`
-  - **Heltec MeshTower V2 / V2H** -> `TOWER_V2_OTA`
-  - **Keepteen LT1** -> `KeepteenLT1_OTA`
-  - **LILYGO T-Echo** -> `LGTE_DFU`
-  - **LILYGO T-Echo Lite** -> `LTEL_DFU`
-  - **Minewsemi MX25LE01** -> `MX25_DFU`
-  - **Nordic PCA10056** -> `N056_DFU`
-  - **ProMicro NRF52840** -> `PROM_DFU`
-  - **RAK 3401** -> `3401_DFU`
-  - **RAK 4631** -> `4631_DFU`
-  - **RAK WisMesh Tag** -> `RTAG_DFU`
-  - **Seeed SenseCAP Solar Node P1** -> `SCAP_DFU`
-  - **Seeed T1000e** -> `T1KE_DFU`
-  - **Seeed WioTracker L1** -> `WTL1_DFU`
-  - **XIAO NRF52 BLE / SENSE** -> `XIAO_DFU`
+  In OTA DFU mode, devices use a board-specific name instead of the generic
+  `AdaDFU`. See [BLE advertising names](#ble-advertising-names).
 
 ---
 
@@ -490,6 +470,37 @@ candidates are not release artifacts.
 - Seeed Studio XIAO nRF52840 BLE SENSE
 
 If there is another nRF52840-based board you would like to see supported please raise a github issue and we can make it happen.
+
+## BLE advertising names
+
+These are the configured bootloader names, not the running MeshCore names.
+Legacy advertisements may shorten them to reserve room for the DFU service
+UUID. Select by service and verify the connected board metadata before an
+update; neither a name nor a shared USB VID/PID alone identifies an exact board.
+
+| Board | Configured OTA DFU name |
+| --- | --- |
+| Elecrow ThinkNode M1 | `TNM1_DFU` |
+| Elecrow ThinkNode M3 | `TNM3_DFU` |
+| Elecrow ThinkNode M6 | `TNM6_DFU` |
+| Heltec T096 | `T096_DFU` |
+| Heltec T1 | `T1_DFU` |
+| Heltec T114 | `T114_DFU` |
+| Heltec Mesh Pocket | `MESH_POCKET_OTA` |
+| Heltec MeshTower V2 / V2H | `TOWER_V2_OTA` |
+| Keepteen LT1 | `KeepteenLT1_OTA` |
+| LILYGO T-Echo | `LGTE_DFU` |
+| LILYGO T-Echo Lite | `LTEL_DFU` |
+| Minewsemi MX25LE01 | `MX25_DFU` |
+| Nordic PCA10056 | `N056_DFU` |
+| ProMicro NRF52840 | `PROM_DFU` |
+| RAK 3401 | `3401_DFU` |
+| RAK 4631 | `4631_DFU` |
+| RAK WisMesh Tag | `RTAG_DFU` |
+| Seeed SenseCAP Solar Node P1 | `SCAP_DFU` |
+| Seeed T1000e | `T1KE_DFU` |
+| Seeed WioTracker L1 | `WTL1_DFU` |
+| XIAO NRF52 BLE / SENSE | `XIAO_DFU` |
 
 ---
 
