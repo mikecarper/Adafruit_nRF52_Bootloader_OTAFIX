@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import hashlib
+from contextlib import ExitStack
 import importlib.util
 from pathlib import Path
 import struct
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 
@@ -263,6 +265,51 @@ class IdentityTests(unittest.TestCase):
 
 
 class CopyAndKernelTests(unittest.TestCase):
+    def test_owned_mount_is_unmounted_before_waiting_for_application(self) -> None:
+        selected = hil.UsbIdentity("/dev/ttyACM0", "1234", "usb-1.1", "239a", "8029", "RAK3401", "00")
+        block = hil.BlockDevice("/dev/sda", "vfat", "RAK3401", (), selected)
+        image = hil.Uf2Image("app.uf2", "0" * 64, 512, 1, "0xADA52840", "0x26000", "0x26100")
+        result = hil.CommandResult(0, "expected", 0.1)
+        args = SimpleNamespace(board="wiscore_rak3401", application=Path("app.uf2"),
+                               sha256="0" * 64, family=FAMILY, app_base=APP_BASE,
+                               meshcli="meshcli", companion_terminal=True, port=Path(selected.node),
+                               serial=selected.serial, verify_command="ver", expect_before_reply="expected",
+                               expect_reply="expected", execute=True, skip_kernel_log=False,
+                               enumeration_timeout=30, copy_timeout=30, return_timeout=30)
+        calls = []
+        stubs = {
+            "inspect_application_uf2": image, "check_dependencies": "meshcli",
+            "check_noninteractive_privilege": None, "usb_identity": selected,
+            "modem_manager_is_active": False, "verify_application_reply": result,
+            "read_kernel_log": ["unchanged kernel log"], "serial_text_command": result,
+            "wait_for_block_device": block, "mount_block_device": ("/tmp/uf2", True),
+            "revalidate_block_and_mount": block,
+        }
+        with ExitStack() as stack:
+            for name, value in stubs.items():
+                stack.enter_context(mock.patch.object(hil, name, return_value=value))
+            stack.enter_context(mock.patch.object(hil, "copy_and_sync", side_effect=lambda *a:
+                                                  (calls.append("copy/sync") or (result, result))))
+            unmount = stack.enter_context(mock.patch.object(hil, "unmount_owned", side_effect=lambda *a:
+                                                            calls.append("unmount")))
+            stack.enter_context(mock.patch.object(hil, "wait_for_application", side_effect=lambda *a:
+                                                  (calls.append("wait for app") or selected)))
+            report = hil.run_hil(args)
+        self.assertEqual(calls, ["copy/sync", "unmount", "wait for app"])
+        unmount.assert_called_once_with("/tmp/uf2", "/dev/sda")
+        self.assertTrue(report["unmounted_before_application_return"])
+        self.assertEqual(report["status"], "PASS")
+
+    def test_kernel_capture_uses_pi_compatible_raw_option(self) -> None:
+        with (
+            mock.patch.object(hil.os, "geteuid", return_value=0),
+            mock.patch.object(hil, "run_command", return_value=hil.CommandResult(
+                0, "<6>[ 1.000000] boot\n", 0.1
+            )) as run,
+        ):
+            self.assertEqual(hil.read_kernel_log(), ["<6>[ 1.000000] boot"])
+        run.assert_called_once_with(["dmesg", "--raw"], timeout=15)
+
     def test_companion_terminal_entry_is_state_independent(self) -> None:
         self.assertEqual(
             hil.COMPANION_TERMINAL_RESET,

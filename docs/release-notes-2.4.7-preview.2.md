@@ -40,5 +40,9 @@ investigation. This candidate must not be advertised as a Pi-freeze fix.
 - Compatible forward and reverse version updates remain supported.
 - The Heltec V4 is ESP32, not an OTAFIX bootloader target.
 
-Build sizes, timing and physical results are recorded in the qualification
-report after testing, not assumed from preview.1 or older releases.
+All 27 board builds and host/sanitizer tests pass. The RAK3401 passed two
+mounted-drive application updates and authenticated BLE reconnect/reboot
+checks. The tightest build has 39 bytes free. See the
+[qualification report](qualification-2.4.7-preview.2.md) for exact sources,
+timings, the corrected test-runner flush/unmount sequence, the older bootloader
+COPY_BL sync warning, and the remaining hardware gates.

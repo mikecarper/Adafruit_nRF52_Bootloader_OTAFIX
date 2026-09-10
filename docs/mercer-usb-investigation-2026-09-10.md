@@ -5,6 +5,10 @@ application-side USB wait hang. The Pi also lost its hub tree unattended;
 the electrical or controller-level cause of that event is not yet established.
 Neither observation is a successful 2.4.7 hardware qualification.
 
+Follow-up: the READY fix and RAK3401 validation are recorded in the
+[2.4.7-preview.2 qualification](qualification-2.4.7-preview.2.md).
+That result does not resolve the separate Pi host fault described below.
+
 ## Pi-side evidence
 
 All times below are Pacific daylight time. The owner confirmed that the hub

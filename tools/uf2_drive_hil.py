@@ -578,7 +578,10 @@ def wait_for_application(selected: UsbIdentity, timeout: float) -> UsbIdentity:
 
 def read_kernel_log() -> list[str]:
     result = run_command(
-        privileged(["dmesg", "--color=never", "--time-format=raw"]),
+        # --raw is supported by the Pi's util-linux 2.38.1. "raw" is not a
+        # --time-format value there, and --raw cannot be combined with --color.
+        # Raw output is uncolored with stable monotonic timestamps.
+        privileged(["dmesg", "--raw"]),
         timeout=15,
     )
     return result.output.splitlines()
@@ -715,7 +718,7 @@ def write_report(path: Path | None, report: dict[str, Any]) -> None:
 
 
 def check_dependencies(meshcli: str, companion: bool) -> str:
-    for command in ("udevadm", "lsblk", "findmnt", "mount", "cp", "sync", "dmesg"):
+    for command in ("udevadm", "lsblk", "findmnt", "mount", "umount", "cp", "sync", "dmesg"):
         if shutil.which(command) is None:
             raise HilError(f"required Linux command is not installed: {command}")
     if companion:
@@ -821,6 +824,14 @@ def run_hil(
         )
         report["copy"] = asdict(copy_result)
         report["sync"] = asdict(sync_result)
+
+        if owned_mount:
+            # Finish FAT metadata while the bootloader is still in its idle
+            # completion window. Waiting for application USB first guarantees
+            # that a later umount runs against a disconnected block device.
+            unmount_owned(mountpoint, block.node)
+            owned_mount = False
+            report["unmounted_before_application_return"] = True
 
         returned = wait_for_application(selected, args.return_timeout)
         report["returned_application_usb"] = asdict(returned)
