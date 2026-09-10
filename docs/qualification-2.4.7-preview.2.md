@@ -141,9 +141,10 @@ The A/B/A test restores application builds; it is not a bootloader rollback test
 
 The Pi remained reachable and its throttling mask was zero. No hub/driver
 reset, Pi reboot, kernel/boot-option change or power-plug operation was used.
-ModemManager and the serial bridge were restored and both were active at the
-final check. Earlier bridge restarts occurred while the RAK was unresponsive.
-The earlier unattended hub losses and
+ModemManager and the serial bridge were restored. ModemManager remained
+active; a later 03:11 service check showed the bridge continuing its existing
+auto-restart loop, despite the independently successful USB command tests.
+No bridge configuration was changed. The earlier unattended hub losses and
 Ethernet carrier drops still require separate host/cable/power investigation.
 
 ## Artifacts and private evidence
