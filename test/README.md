@@ -19,8 +19,12 @@ make sanitize     # rebuild and run the complete host suite with ASan and UBSan
 architecture-specific GCC 14.2 pins, and the actual installer shell with
 download/extract/filesystem commands replaced by harmless test functions.
 Checksum mismatch, download failure and unsupported architecture must stop
-before extraction. This is not a substitute for building/running the Docker
-image on an installed Docker engine.
+before extraction. It also guards the Node.js CF2 and Python signing/test
+dependencies and a modern native compiler for sanitizer tests, which the
+Dockerfile checks while building the image. These contracts are not a
+substitute for building/running the Docker image on an
+installed Docker engine; see the root README's Docker instructions to run
+the complete host suite in a container.
 
 ## Physical USB drive-copy gate
 

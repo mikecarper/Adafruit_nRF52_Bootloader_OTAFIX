@@ -1,7 +1,9 @@
 # OTAFIX build environment for Linux x86_64 and AArch64 hosts.
-# Keep the release toolchain at Arm GNU 14.2.Rel1, not Debian's older GCC.
+# Keep the firmware compiler pinned to Arm GNU 14.2.Rel1.
 # Initialize submodules and mount the checkout at /src; see README.md.
-FROM debian:bookworm-slim
+# Trixie's native sanitizer runtime avoids Bookworm's GCC 12 ASan startup
+# failures on newer host kernels. This does not select the firmware compiler.
+FROM debian:trixie-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential \
@@ -12,9 +14,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       python-is-python3 \
       python3-pip \
       python3-setuptools \
+      nodejs \
       git \
       ca-certificates \
-    && pip3 install --break-system-packages --no-cache-dir adafruit-nrfutil intelhex \
+    && pip3 install --break-system-packages --no-cache-dir adafruit-nrfutil intelhex cryptography \
     && rm -rf /var/lib/apt/lists/*
 
 # Hashes are from Arm's matching .tar.xz.sha256asc files at the URL below.
@@ -36,7 +39,11 @@ RUN set -eu; \
     rm /tmp/arm-gnu-toolchain.tar.xz
 
 ENV PATH="/opt/arm-gnu-toolchain/bin:${PATH}"
-RUN test "$(arm-none-eabi-gcc -dumpfullversion)" = 14.2.1
+# Fail during image creation if a CF2 or signed-DFU test dependency is missing.
+RUN test "$(arm-none-eabi-gcc -dumpfullversion)" = 14.2.1 \
+    && test "$(cc -dumpversion)" -ge 14 \
+    && node --version \
+    && python -c "import cryptography, intelhex"
 
 WORKDIR /src
 CMD ["make", "BOARD=wismesh_tag", "all"]

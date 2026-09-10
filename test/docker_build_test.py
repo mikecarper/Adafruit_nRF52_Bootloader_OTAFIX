@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
 import unittest
@@ -102,6 +103,26 @@ class DockerBuildTest(unittest.TestCase):
                                   if line.startswith("CMD ")))
         self.assertEqual(command, ["make", "BOARD=wismesh_tag", "all"])
         self.assertTrue((ROOT / "src/boards/wismesh_tag/board.mk").is_file())
+
+    def test_cf2_dependency_is_installed_and_checked(self):
+        install = next(command for command in RUNS if "apt-get install " in command)
+        packages = shlex.split(install.split("apt-get install ", 1)[1].split("&&", 1)[0])
+        self.assertIn("nodejs", packages)
+        smoke = next(command for command in RUNS if "-dumpfullversion" in command)
+        self.assertIn("node --version", smoke)
+
+    def test_python_dfu_dependencies_are_installed_and_checked(self):
+        install = next(command for command in RUNS if "pip3 install " in command)
+        packages = shlex.split(install.split("pip3 install ", 1)[1].split("&&", 1)[0])
+        for package in ("adafruit-nrfutil", "intelhex", "cryptography"):
+            self.assertIn(package, packages)
+        smoke = next(command for command in RUNS if "-dumpfullversion" in command)
+        self.assertIn('python -c "import cryptography, intelhex"', smoke)
+
+    def test_native_sanitizer_runtime_is_not_the_old_bookworm_build(self):
+        self.assertIn("FROM debian:trixie-slim", DOCKERFILE)
+        smoke = next(command for command in RUNS if "-dumpfullversion" in command)
+        self.assertIn('test "$(cc -dumpversion)" -ge 14', smoke)
 
     def test_readme_distinguishes_qualification_and_release_builds(self):
         readme = (ROOT / "README.md").read_text(encoding="ascii")

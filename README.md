@@ -508,8 +508,13 @@ update; neither a name nor a shared USB VID/PID alone identifies an exact board.
 
 The Docker environment uses Arm GNU Toolchain **14.2.Rel1**, with pinned
 archive checksums for Linux x86_64 and AArch64. It includes both Make and
-CMake. The firmware sources and initialized submodules come from your mounted
+CMake, Node.js for CF2 inspection, and the Python DFU/signing dependencies.
+The firmware sources and initialized submodules come from your mounted
 checkout, not from a separately downloaded source tree.
+
+The Debian 13 base supplies a modern native sanitizer runtime for host tests.
+The ARM firmware compiler is still the separately downloaded, checksum-pinned
+14.2.Rel1 toolchain.
 
 ```sh
 git submodule update --init --recursive
@@ -539,6 +544,20 @@ For CMake, use the same container and mounted checkout with
 `cmake --build cmake-build-<board>`. Development CMake builds also need
 `-DMOTA_BOOTLOADER_TEST_BUILD=ON` and
 `-DMOTA_BOOTLOADER_VERSION_TEST_OVERRIDE=0x02040601` at configure time.
+
+Run the host regression suite inside the same image, without hardware or
+network access:
+
+```sh
+docker run --rm --network none --user "$(id -u):$(id -g)" \
+  -v "$PWD:/src" -w /src otafix-build make -B -C test check
+docker run --rm --network none --user "$(id -u):$(id -g)" \
+  -v "$PWD:/src" -w /src otafix-build make -C test sanitize
+```
+
+`-B` rebuilds native test executables instead of reusing binaries from a
+different host environment. These simulations do not replace the physical
+USB drive-copy and radio update qualification tests.
 
 ## Installation
 
