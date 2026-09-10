@@ -128,7 +128,40 @@ This explains the RAK3401's silent USB application. The XIAO was also silent,
 but it has no SWD connection and the same cause has not been established there.
 It also does not prove that this application hang caused the Pi's hub resets.
 
-## Actions taken and remaining work
+## How the wait entered the codebase
+
+Git history traces the unbounded READY wait back at least to TinyUSB commit
+`d211035a0a` (5 August 2019). The duplicate-event guard was added by upstream
+commit [`7d9efd0697`](https://github.com/hathach/tinyusb/commit/7d9efd06979f6cdde2a4093f0c26e8100312c92c)
+on 4 August 2020. Both were inherited with the USB driver; the 2.4.7 upstream
+merge did not introduce them.
+
+Our TinyUSB commit `d4c8694e3a8f940adc658385dd73feb006b52431` on 24 August
+2026 backported a post-SoftDevice HFCLK request. It fixed a later clock wait,
+not this earlier READY wait. The prior tests did not reproduce a consumed
+READY event with the completed-state guard failing. This was an incomplete
+fix and a regression-test coverage gap, not evidence of a newly introduced
+2.4.7 USB driver regression.
+
+The follow-up fix requests HFCLK before waiting for READY, checks whether
+another callback already attached USB, and bounds both waits using a shared
+100,000-poll budget. Stale READY on a disabled peripheral returns, and removal
+during a wait aborts it. The budget is an iteration limit, not a calibrated
+millisecond timeout. A failed initialization no longer hangs the caller;
+USB itself can still require a subsequent power event or reconnect to retry.
+
+The test compiles the actual driver power handler with simulated clock and
+W1C registers. Restoring the inherited prefix must time out (the negative
+control). Fixed-handler scenarios include missing/delayed READY and HFCLK,
+duplicate/reentrant callbacks, removal during initialization, and retry.
+It runs in both TinyUSB CI and OTAFIX's normal host-test target.
+
+MeshCore requires the corresponding application fix independently. Its shared
+nRF52 pre-build hook compiles a patched driver into each build directory;
+it does not modify PlatformIO's shared framework cache. Updating only the
+bootloader does not change the USB driver in the installed application.
+
+## Initial capture actions and remaining work
 
 - Built and packaged 2.4.7-preview.1 without changing firmware logic.
 - Queried boards serially, one at a time. Paused ModemManager and `mctomqtt`
