@@ -4,6 +4,12 @@ Local test candidate based on Adafruit nRF52 bootloader 0.11.0. This is not a
 published stable release. Canonical tag: `0.11.0-OTAFIX2.4.7-preview.1`;
 packed bootloader version: `0x02040701`.
 
+Qualification checkpoint: all 27 builds and host tests pass, but physical
+updates are on hold after finding a USB READY wait hang on the existing
+RAK3401 application. The shared wait also exists in this bootloader candidate.
+This preview is not a fix for that issue. See the [qualification report](qualification-2.4.7-preview.1.md)
+and [USB investigation](mercer-usb-investigation-2026-09-10.md).
+
 ## Changes since 2.4.6
 
 - Integrates the stable OTAFIX and mOTA upstream histories. Adafruit's
