@@ -15,7 +15,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 MAKEFILE = ROOT / "Makefile"
 WORKFLOW = ROOT / ".github" / "workflows" / "githubci.yml"
-QUALIFICATION_VERSION = "0x02040601"
+QUALIFICATION_VERSION = "0x02040703"
 
 
 FAKE_TOOL = r"""#!/usr/bin/env python3
@@ -283,15 +283,15 @@ class BuildProfileTest(unittest.TestCase):
         self.assertIn("-DRECOVERY_ALLOW_ALL_BOARDS=1", self.make_variable("CFLAGS", flag))
         self.assertFalse(self.make_variable("OUT_NAME").startswith("R_"))
         self.assertTrue(self.make_variable("OUT_NAME", flag).startswith("R_"))
-        self.assertEqual("R_0x02040601", self.make_variable("FIRMWARE_VERSION_BASE", flag))
+        self.assertEqual(f"R_{QUALIFICATION_VERSION}", self.make_variable("FIRMWARE_VERSION_BASE", flag))
         firmware_version = self.make_variable("FIRMWARE_VERSION", flag)
-        self.assertEqual("R_0x02040601", firmware_version)
+        self.assertEqual(f"R_{QUALIFICATION_VERSION}", firmware_version)
         self.assertLess(len(firmware_version), 60)
         with self.assertRaises(subprocess.CalledProcessError):
             self.make("print-OUT_NAME", "RECOVERY_ALLOW_ALL_BOARDS=2")
 
         workflow = WORKFLOW.read_text(encoding="utf-8")
-        self.assertEqual(4, workflow.count("!startsWith(github.ref_name, 'R_')"))
+        self.assertEqual(5, workflow.count("!startsWith(github.ref_name, 'R_')"))
         recovery = (ROOT / ".github/workflows/recovery.yml").read_text(encoding="utf-8")
         self.assertIn("RECOVERY_ALLOW_ALL_BOARDS=1", recovery)
         self.assertIn("_bin/recovery-allow-all/", recovery)
@@ -306,6 +306,7 @@ class BuildProfileTest(unittest.TestCase):
 
     def test_ci_uses_the_documented_corrected_qualification_lineage(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("branches: [ master, feature/ota-delta-apply ]", workflow)
         self.assertRegex(
             workflow,
             rf"OTAFIX_QUALIFICATION_VERSION:\s*['\"]{QUALIFICATION_VERSION}['\"]",

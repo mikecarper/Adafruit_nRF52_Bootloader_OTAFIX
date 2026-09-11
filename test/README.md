@@ -337,7 +337,7 @@ changes to the SoftDevice, signing policy or public key, dual-bank/UF2/DFU/debug
 features, USB timeout, source selection, or compiler/linker flags rewrite a
 content-hashed stamp and force both recompilation and relinking. The persisted
 stamp contains only a SHA-256 digest. The same regression pins nonrelease CI to
-the documented `0x02040601` retained-RAM qualification lineage and rejects
+the documented `0x02040703` post-preview.2 qualification lineage and rejects
 reuse of failed candidate ID `0x02040401` as an active override. It also pins
 both CI toolchain installs to Arm GNU Toolchain 14.2.Rel1, requires Make and
 CMake to build the signed-plus-dual-bank `heltec_t096` and `heltec_t114`
@@ -346,6 +346,15 @@ profiles, keeps
 `-fipa-pta` size flags. It also prevents restoration of the obsolete global
 `-fno-ipa-modref` workaround now that every bundled Nordic SVC wrapper carries
 its own `noipa` and memory barriers.
+
+The field-kit regression pins all three radios to the USB-fixed MeshCore
+revision. It checks CI coverage on the development branch and guards against
+release-only field-firmware testing, stale receiver versions, wrong targets,
+missing capabilities, inconsistent UF2/DFU images, and altered provenance.
+CI builds the real pinned radios and runs the application's USB handler tests;
+`tools/check_field_firmware.py --artifacts-dir DIR --verify` rechecks the
+generated `FIELD-FIRMWARE.json` and `FIELD-FIRMWARE.SHA256SUMS` before release
+packaging. These checks do not claim physical-radio qualification.
 
 The all-board helper regression keeps each board in an isolated build
 directory and resolves the exact current `OUT_NAME`; an older versioned `.out`

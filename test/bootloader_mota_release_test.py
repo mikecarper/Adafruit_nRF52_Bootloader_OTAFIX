@@ -34,6 +34,12 @@ assert FIELD_SPEC is not None and FIELD_SPEC.loader is not None
 field = importlib.util.module_from_spec(FIELD_SPEC)
 sys.modules[FIELD_SPEC.name] = field
 FIELD_SPEC.loader.exec_module(field)
+CHECK_SPEC = importlib.util.spec_from_file_location(
+    "check_field_firmware", ROOT / "tools" / "check_field_firmware.py"
+)
+assert CHECK_SPEC is not None and CHECK_SPEC.loader is not None
+check_field = importlib.util.module_from_spec(CHECK_SPEC)
+CHECK_SPEC.loader.exec_module(check_field)
 
 
 def cmake_value(text: str, key: str) -> str:
@@ -174,7 +180,21 @@ class QualifiedReleaseInventoryTest(unittest.TestCase):
         self.assertIn(field.XIAO_COMPANION_ZIP, workflow)
         self.assertIn(field.GAT562_SOURCE_ZIP, workflow)
         self.assertIn(field.GAT562_RECEIVER_ZIP, workflow)
+        self.assertIn(field.GAT562_RECEIVER_CAPABILITIES, workflow)
         self.assertIn("tools/build_gat562_field_kit.py", workflow)
+        firmware_job = workflow.split("  field-firmware:\n", 1)[1].split(
+            "  bootloader-mota:\n", 1
+        )[0]
+        self.assertNotIn("github.event_name == 'release'", firmware_job)
+        self.assertIn("test/test_nrf52_usb_power.py -v", firmware_job)
+        self.assertIn("tools/check_field_firmware.py", firmware_job)
+        self.assertIn(field.GAT562_RECEIVER_TARGET, firmware_job)
+        self.assertNotIn("secrets.", firmware_job)
+        self.assertIn("needs: [build, field-firmware]", workflow)
+        self.assertIn("--artifacts-dir _field-deps --verify", workflow)
+        self.assertEqual(workflow.count("pattern: bootloader-*"), 2)
+        self.assertNotIn("51ce1f8f", workflow)
+        self.assertNotIn("4d5ccbdd", workflow)
 
     def test_field_builder_emits_one_checked_gat562_directory(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -231,6 +251,7 @@ class QualifiedReleaseInventoryTest(unittest.TestCase):
                 artifact_target: str,
                 application_start: int,
                 softdevice_id: int,
+                receiver: bool = False,
             ) -> dict[str, Path]:
                 uf2_name, zip_name, capabilities_name = names
                 firmware = b"\0".join(
@@ -242,6 +263,14 @@ class QualifiedReleaseInventoryTest(unittest.TestCase):
                         b"Bluetooth mOTA source",
                     )
                 )
+                if receiver:
+                    firmware = b"\0".join((
+                        field.MESHCORE_BUILD_VERSION.encode("ascii"),
+                        artifact_target.encode("ascii"),
+                        b"invalid in-place patch geometry",
+                        b"OTA: status",
+                        b"ERR usage: ota bootloader install <MID8> <HASH16>",
+                    ))
                 zip_path = root / zip_name
                 with zipfile.ZipFile(zip_path, "w") as archive:
                     archive.writestr("firmware.bin", firmware)
@@ -291,7 +320,7 @@ class QualifiedReleaseInventoryTest(unittest.TestCase):
                         {
                             "artifact_target": artifact_target,
                             "verified": True,
-                            "capabilities": [
+                            "capabilities": ["ota.update.lora"] if receiver else [
                                 "profile.full",
                                 "companion.temp_radio",
                                 "companion.ota_cli",
@@ -329,17 +358,62 @@ class QualifiedReleaseInventoryTest(unittest.TestCase):
                 182,
             )
 
-            release_component_paths = {}
-            release_component_hashes = {}
-            for index, name in enumerate(
-                field.MESHCORE_RELEASE_ASSET_SHA256, 1
-            ):
-                path = root / name
-                path.write_bytes(f"component {index}".encode("ascii"))
-                release_component_paths[name] = path
-                release_component_hashes[name] = hashlib.sha256(
-                    path.read_bytes()
-                ).hexdigest()
+            receiver_paths = fake_full_companion(
+                (field.GAT562_RECEIVER_UF2, field.GAT562_RECEIVER_ZIP,
+                 field.GAT562_RECEIVER_CAPABILITIES),
+                field.GAT562_RECEIVER_TARGET, 0x26000, 182, receiver=True,
+            )
+            check_field.check(root)
+            check_field.check(root, verify=True)
+            provenance_path = root / "FIELD-FIRMWARE.json"
+            provenance = provenance_path.read_bytes()
+            provenance_path.write_bytes(provenance.replace(
+                field.MESHCORE_COMMIT.encode("ascii"), b"0" * 40
+            ))
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                check_field.check(root, verify=True)
+            provenance_path.write_bytes(provenance)
+
+            # Reject stale/wrong-board/missing receiver capability evidence.
+            capability_path = receiver_paths[field.GAT562_RECEIVER_CAPABILITIES]
+            capability_blob = capability_path.read_bytes()
+            for change in ({"verified": False}, {"artifact_target": "wrong"},
+                           {"capabilities": ["companion.ble_mota_source"]}):
+                with self.subTest(receiver_manifest=change):
+                    metadata = json.loads(capability_blob)
+                    metadata.update(change)
+                    capability_path.write_text(json.dumps(metadata), encoding="ascii")
+                    with self.assertRaisesRegex(ValueError, "capabilities"):
+                        check_field.check(root, verify=True)
+            capability_path.write_bytes(capability_blob)
+
+            receiver_uf2 = receiver_paths[field.GAT562_RECEIVER_UF2]
+            receiver_uf2_blob = receiver_uf2.read_bytes()
+            damaged = bytearray(receiver_uf2_blob)
+            damaged[32] ^= 1
+            receiver_uf2.write_bytes(damaged)
+            with self.assertRaisesRegex(ValueError, "different images"):
+                check_field.check(root, verify=True)
+            receiver_uf2.write_bytes(receiver_uf2_blob)
+
+            # A self-consistent ZIP/UF2 pair from an older revision still fails.
+            old_version = b"v1.17.1-dev-51ce1f8f"
+            receiver_uf2.write_bytes(receiver_uf2_blob.replace(
+                field.MESHCORE_BUILD_VERSION.encode("ascii"), old_version
+            ))
+            receiver_zip = receiver_paths[field.GAT562_RECEIVER_ZIP]
+            receiver_zip_blob = receiver_zip.read_bytes()
+            with zipfile.ZipFile(io.BytesIO(receiver_zip_blob)) as archive:
+                contents = [(name, archive.read(name)) for name in archive.namelist()]
+            field.write_zip(receiver_zip, [
+                (name, blob.replace(field.MESHCORE_BUILD_VERSION.encode("ascii"),
+                                    old_version)) for name, blob in contents
+            ])
+            with self.assertRaisesRegex(ValueError, "firmware identity"):
+                check_field.check(root, verify=True)
+            receiver_zip.write_bytes(receiver_zip_blob)
+            receiver_uf2.write_bytes(receiver_uf2_blob)
+            check_field.check(root, verify=True)
             args = argparse.Namespace(
                 release_dir=release_dir,
                 android_apk=apk,
@@ -353,22 +427,18 @@ class QualifiedReleaseInventoryTest(unittest.TestCase):
                 gat562_source_capabilities=gat562_source_paths[
                     field.GAT562_SOURCE_CAPABILITIES
                 ],
-                gat562_receiver_uf2=release_component_paths[
+                gat562_receiver_uf2=receiver_paths[
                     field.GAT562_RECEIVER_UF2
                 ],
-                gat562_receiver_zip=release_component_paths[
+                gat562_receiver_zip=receiver_paths[
                     field.GAT562_RECEIVER_ZIP
+                ],
+                gat562_receiver_capabilities=receiver_paths[
+                    field.GAT562_RECEIVER_CAPABILITIES
                 ],
                 tag="0.11.0-OTAFIX2.4.6",
             )
-            with (
-                mock.patch.object(field, "parse_args", return_value=args),
-                mock.patch.object(
-                    field,
-                    "MESHCORE_RELEASE_ASSET_SHA256",
-                    release_component_hashes,
-                ),
-            ):
+            with mock.patch.object(field, "parse_args", return_value=args):
                 self.assertEqual(field.main(), 0)
 
             kit = release_dir / "GAT562-OTAFIX-2.4.6-LoRa-field-kit.zip"
@@ -400,6 +470,14 @@ class QualifiedReleaseInventoryTest(unittest.TestCase):
                 self.assertEqual(
                     components["meshcore_open"]["commit"],
                     field.MESHCORE_OPEN_COMMIT,
+                )
+                self.assertEqual(
+                    components["gat562_30s_receiver_prerequisite"]["commit"],
+                    field.MESHCORE_COMMIT,
+                )
+                self.assertIn(
+                    field.GAT562_RECEIVER_CAPABILITIES,
+                    components["gat562_30s_receiver_prerequisite"]["files"],
                 )
                 self.assertFalse(
                     components["transfer_model"][

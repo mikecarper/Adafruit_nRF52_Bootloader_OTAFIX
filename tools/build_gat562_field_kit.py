@@ -26,11 +26,8 @@ MESHCORE_OPEN_COMMIT = "40e440e7d5c3cbc925b7701225ea1f023b0d9ae7"
 ANDROID_APK_NAME = "MeshCore-Open-9.5.1-OTAFIX-field-arm64.apk"
 
 MESHCORE_REPOSITORY = "mikecarper/MeshCore"
-MESHCORE_COMMIT = "51ce1f8f0d3cc454b02f77c1535008682e2d5831"
+MESHCORE_COMMIT = "602dbfe3d9ad43630d9b4b6e8d9b6a73f4bc48b8"
 MESHCORE_BUILD_VERSION = f"v1.17.1-dev-{MESHCORE_COMMIT[:8]}"
-GAT562_RECEIVER_RELEASE_TAG = (
-    "lora-ota-v1.17.1.4-halo-keymind-cascade-dev-4d5ccbdd"
-)
 XIAO_COMPANION_UF2 = (
     f"Xiao_nrf52_companion_radio_full-{MESHCORE_BUILD_VERSION}.uf2"
 )
@@ -50,22 +47,11 @@ GAT562_SOURCE_CAPABILITIES = (
     f"GAT562_30S_Mesh_Kit_companion_radio_full-{MESHCORE_BUILD_VERSION}."
     "capabilities.json"
 )
-GAT562_RECEIVER_UF2 = (
-    "GAT562_30S_Mesh_Kit_repeater_lora_ota_no_external_sensors-ota-"
-    "v1.17.1.4-halo-keymind-cascade-dev-4d5ccbdd.uf2"
-)
-GAT562_RECEIVER_ZIP = (
-    "GAT562_30S_Mesh_Kit_repeater_lora_ota_no_external_sensors-ota-"
-    "v1.17.1.4-halo-keymind-cascade-dev-4d5ccbdd.zip"
-)
-MESHCORE_RELEASE_ASSET_SHA256 = {
-    GAT562_RECEIVER_UF2: (
-        "eee459634e32973763d29962300e88d424d15d028e212995447367ca1ce48f82"
-    ),
-    GAT562_RECEIVER_ZIP: (
-        "26c897f7837119c269bf8da8f729f246ca66c65cf507cb108720e5544e16c0e2"
-    ),
-}
+GAT562_RECEIVER_TARGET = "GAT562_30S_Mesh_Kit_repeater_lora_ota_no_external_sensors"
+GAT562_RECEIVER_BASE = f"{GAT562_RECEIVER_TARGET}-ota-{MESHCORE_BUILD_VERSION}"
+GAT562_RECEIVER_UF2 = f"{GAT562_RECEIVER_BASE}.uf2"
+GAT562_RECEIVER_ZIP = f"{GAT562_RECEIVER_BASE}.zip"
+GAT562_RECEIVER_CAPABILITIES = f"{GAT562_RECEIVER_BASE}.capabilities.json"
 
 
 def parse_args() -> argparse.Namespace:
@@ -80,6 +66,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gat562-source-capabilities", required=True, type=Path)
     parser.add_argument("--gat562-receiver-uf2", required=True, type=Path)
     parser.add_argument("--gat562-receiver-zip", required=True, type=Path)
+    parser.add_argument("--gat562-receiver-capabilities", required=True, type=Path)
     parser.add_argument("--tag", required=True)
     return parser.parse_args()
 
@@ -111,17 +98,7 @@ def checksum_file(files: list[tuple[str, bytes]]) -> bytes:
     ).encode("ascii")
 
 
-def checked_release_asset(path: Path, expected_name: str) -> bytes:
-    if path.name != expected_name:
-        raise ValueError(f"expected {expected_name}, found {path.name}")
-    blob = path.read_bytes()
-    expected_hash = MESHCORE_RELEASE_ASSET_SHA256[expected_name]
-    if sha256_bytes(blob) != expected_hash:
-        raise ValueError(f"{expected_name} does not match its pinned SHA-256")
-    return blob
-
-
-def checked_full_companion(
+def checked_firmware(
     uf2_path: Path,
     zip_path: Path,
     capabilities_path: Path,
@@ -132,6 +109,7 @@ def checked_full_companion(
     artifact_target: str,
     application_start: int,
     softdevice_id: int,
+    receiver: bool = False,
 ) -> dict[str, bytes]:
     expected_paths = {
         uf2_name: uf2_path,
@@ -151,6 +129,8 @@ def checked_full_companion(
         "companion.bluetooth",
         "companion.ble_mota_source",
     }
+    if receiver:
+        required_capabilities = {"ota.update.lora"}
     actual_capabilities = set(capabilities.get("capabilities", []))
     if (
         capabilities.get("verified") is not True
@@ -158,7 +138,7 @@ def checked_full_companion(
         != artifact_target
         or not required_capabilities.issubset(actual_capabilities)
     ):
-        raise ValueError(f"{artifact_target} does not permit phone mOTA")
+        raise ValueError(f"{artifact_target} lacks verified mOTA capabilities")
 
     zip_blob = zip_path.read_bytes()
     try:
@@ -191,8 +171,16 @@ def checked_full_companion(
         b"acf38a51-dd58-4dce-917f-0b1135e41b1a",
         b"Bluetooth mOTA source",
     )
+    if receiver:
+        required_binary_markers = (
+            MESHCORE_BUILD_VERSION.encode("ascii"),
+            artifact_target.encode("ascii"),
+            b"invalid in-place patch geometry",
+            b"OTA: status",
+            b"ERR usage: ota bootloader install <MID8> <HASH16>",
+        )
     if any(marker not in firmware for marker in required_binary_markers):
-        raise ValueError(f"{artifact_target} lacks its phone mOTA identity")
+        raise ValueError(f"{artifact_target} lacks its mOTA firmware identity")
 
     uf2_blob = uf2_path.read_bytes()
     if len(uf2_blob) == 0 or len(uf2_blob) % 512 != 0:
@@ -237,6 +225,20 @@ def checked_full_companion(
         zip_name: zip_blob,
         capabilities_name: capabilities_blob,
     }
+
+
+def checked_receiver(uf2_path: Path, zip_path: Path,
+                     capabilities_path: Path) -> dict[str, bytes]:
+    return checked_firmware(
+        uf2_path, zip_path, capabilities_path,
+        uf2_name=GAT562_RECEIVER_UF2,
+        zip_name=GAT562_RECEIVER_ZIP,
+        capabilities_name=GAT562_RECEIVER_CAPABILITIES,
+        artifact_target=GAT562_RECEIVER_TARGET,
+        application_start=0x26000,
+        softdevice_id=182,
+        receiver=True,
+    )
 
 
 def checked_apk(path: Path) -> bytes:
@@ -339,6 +341,9 @@ Files in this kit
 * `target-prerequisite/{GAT562_RECEIVER_ZIP}` and its `.uf2`: the GAT562 30S
   Mesh Kit LoRa-OTA receiver application, included only for initial bench
   provisioning or recovery. It is not sent during this bootloader update.
+  Like both source builds, it is built from commit {MESHCORE_COMMIT}, including
+  the application USB READY fix, and has a verified capability manifest.
+  Updating only the bootloader cannot fix an older application's USB driver.
 * `OTAFIX_MOTA_SIGNING_PUBLIC_KEY.txt`, `manifest.json`,
   `FIELD-COMPONENTS.json`, and `SHA256SUMS`: trust and integrity metadata.
 
@@ -460,7 +465,7 @@ def main() -> int:
         raise ValueError("release public key does not match the pinned key")
 
     apk_blob = checked_apk(args.android_apk)
-    xiao_blobs = checked_full_companion(
+    xiao_blobs = checked_firmware(
         args.xiao_companion_uf2,
         args.xiao_companion_zip,
         args.xiao_companion_capabilities,
@@ -471,7 +476,7 @@ def main() -> int:
         application_start=0x27000,
         softdevice_id=291,
     )
-    gat562_source_blobs = checked_full_companion(
+    gat562_source_blobs = checked_firmware(
         args.gat562_source_uf2,
         args.gat562_source_zip,
         args.gat562_source_capabilities,
@@ -482,14 +487,10 @@ def main() -> int:
         application_start=0x26000,
         softdevice_id=182,
     )
-    release_component_paths = {
-        GAT562_RECEIVER_UF2: args.gat562_receiver_uf2,
-        GAT562_RECEIVER_ZIP: args.gat562_receiver_zip,
-    }
-    release_component_blobs = {
-        name: checked_release_asset(path, name)
-        for name, path in release_component_paths.items()
-    }
+    receiver_blobs = checked_receiver(
+        args.gat562_receiver_uf2, args.gat562_receiver_zip,
+        args.gat562_receiver_capabilities,
+    )
 
     field_manifest = dict(manifest)
     field_manifest["package_count"] = 1
@@ -538,10 +539,9 @@ def main() -> int:
         },
         "gat562_30s_receiver_prerequisite": {
             "repository": MESHCORE_REPOSITORY,
-            "release_tag": GAT562_RECEIVER_RELEASE_TAG,
+            "commit": MESHCORE_COMMIT,
             "files": {
-                name: MESHCORE_RELEASE_ASSET_SHA256[name]
-                for name in (GAT562_RECEIVER_UF2, GAT562_RECEIVER_ZIP)
+                name: sha256_bytes(blob) for name, blob in receiver_blobs.items()
             },
         },
         "otafix_bootloader": {
@@ -592,11 +592,15 @@ def main() -> int:
         ),
         (
             f"target-prerequisite/{GAT562_RECEIVER_UF2}",
-            release_component_blobs[GAT562_RECEIVER_UF2],
+            receiver_blobs[GAT562_RECEIVER_UF2],
         ),
         (
             f"target-prerequisite/{GAT562_RECEIVER_ZIP}",
-            release_component_blobs[GAT562_RECEIVER_ZIP],
+            receiver_blobs[GAT562_RECEIVER_ZIP],
+        ),
+        (
+            f"target-prerequisite/{GAT562_RECEIVER_CAPABILITIES}",
+            receiver_blobs[GAT562_RECEIVER_CAPABILITIES],
         ),
     ]
     outer_files.append(("SHA256SUMS", checksum_file(outer_files)))
