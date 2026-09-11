@@ -55,10 +55,21 @@ bool bootloader_extension_validate(bootloader_update_extension_t const* extensio
          extension->reserved == 0u;
 }
 
+#if RECOVERY_ALLOW_ALL_BOARDS
+static bool recovery_identity_valid(bootloader_update_manifest_t const* manifest) {
+  // Identity is opaque in a bridge, but exclude blank/erased literal-pool
+  // decoys and require a bounded name. The complete field remains CRC-covered.
+  uint8_t const first = (uint8_t)manifest->device_name[0];
+  return manifest->board_id != 0U && manifest->board_id != UINT32_MAX &&
+         first >= 0x21U && first <= 0x7EU &&
+         manifest->device_name[BOOTLOADER_UPDATE_DEVICE_NAME_SIZE - 1U] == '\0';
+}
+#endif
+
 static bool bootloader_manifest_find(uint8_t const* image, uint32_t image_start,
                                      uint32_t image_size, uint32_t expected_board_id,
                                      char const* expected_device_name,
-                                     uint32_t* manifest_offset_out) {
+                                     uint32_t* manifest_offset_out, bool allow_other_boards) {
   if (image == NULL || image_size < sizeof(bootloader_update_manifest_t) ||
       expected_device_name == NULL) {
     return false;
@@ -70,7 +81,7 @@ static bool bootloader_manifest_find(uint8_t const* image, uint32_t image_start,
 
   static uint8_t const manifest_magic[8] = {'B','L','M','F','C','R','C','1'};
   uint32_t valid_offset = UINT32_MAX;
-  // Scan aligned legacy identities and require exactly one board-bound,
+  // Scan aligned legacy identities and require exactly one permitted,
   // complete-region CRC match. BLMF is deliberately independent of adjacent
   // bytes, preserving every released recovery layout.
   for (uint32_t offset = 0;
@@ -85,10 +96,23 @@ static bool bootloader_manifest_find(uint8_t const* image, uint32_t image_start,
     if (candidate_manifest.version != BOOTLOADER_UPDATE_MANIFEST_VERSION ||
         candidate_manifest.header_size != sizeof(bootloader_update_manifest_t) ||
         candidate_manifest.image_start != image_start ||
-        candidate_manifest.image_size != image_size ||
-        candidate_manifest.board_id != expected_board_id ||
-        memcmp(candidate_manifest.device_name, expected_device_name,
-               BOOTLOADER_UPDATE_DEVICE_NAME_SIZE) != 0) {
+        candidate_manifest.image_size != image_size) {
+      continue;
+    }
+    bool identity_matches;
+#if RECOVERY_ALLOW_ALL_BOARDS
+    if (allow_other_boards) {
+      identity_matches = recovery_identity_valid(&candidate_manifest);
+    } else {
+#else
+    (void)allow_other_boards;
+    {
+#endif
+      identity_matches = candidate_manifest.board_id == expected_board_id &&
+                         memcmp(candidate_manifest.device_name, expected_device_name,
+                                BOOTLOADER_UPDATE_DEVICE_NAME_SIZE) == 0;
+    }
+    if (!identity_matches) {
       continue;
     }
     if (bootloader_image_crc32(
@@ -111,13 +135,13 @@ static bool bootloader_manifest_find(uint8_t const* image, uint32_t image_start,
   return true;
 }
 
-bootloader_image_format_t bootloader_image_classify(
+static bootloader_image_format_t bootloader_image_classify_impl(
   uint8_t const* image, uint32_t image_start, uint32_t image_size,
   uint32_t expected_board_id, char const* expected_device_name,
-  bootloader_image_info_t* info_out) {
+  bootloader_image_info_t* info_out, bool allow_other_boards) {
   uint32_t manifest_offset;
   if (!bootloader_manifest_find(image, image_start, image_size, expected_board_id,
-                                expected_device_name, &manifest_offset)) {
+                                expected_device_name, &manifest_offset, allow_other_boards)) {
     return BOOTLOADER_IMAGE_INVALID;
   }
   if (image_size < sizeof(bootloader_update_envelope_t) ||
@@ -144,6 +168,22 @@ bootloader_image_format_t bootloader_image_classify(
   return BOOTLOADER_IMAGE_V2;
 }
 
+bootloader_image_format_t bootloader_image_classify(
+  uint8_t const* image, uint32_t image_start, uint32_t image_size,
+  uint32_t expected_board_id, char const* expected_device_name,
+  bootloader_image_info_t* info_out) {
+  return bootloader_image_classify_impl(image, image_start, image_size, expected_board_id,
+                                        expected_device_name, info_out, false);
+}
+
+bootloader_image_format_t bootloader_image_classify_manual(
+  uint8_t const* image, uint32_t image_start, uint32_t image_size,
+  uint32_t expected_board_id, char const* expected_device_name,
+  bootloader_image_info_t* info_out) {
+  return bootloader_image_classify_impl(image, image_start, image_size, expected_board_id,
+                                        expected_device_name, info_out, RECOVERY_ALLOW_ALL_BOARDS);
+}
+
 bool bootloader_image_info(uint8_t const* image, uint32_t image_start, uint32_t image_size,
                            uint32_t expected_board_id, char const* expected_device_name,
                            bootloader_image_info_t* info_out) {
@@ -155,5 +195,5 @@ bool bootloader_image_info(uint8_t const* image, uint32_t image_start, uint32_t 
 bool bootloader_image_validate(uint8_t const* image, uint32_t image_start, uint32_t image_size,
                                uint32_t expected_board_id, char const* expected_device_name) {
   return bootloader_manifest_find(image, image_start, image_size, expected_board_id,
-                                  expected_device_name, NULL);
+                                  expected_device_name, NULL, false);
 }

@@ -1,0 +1,94 @@
+name: Recovery allow-all boards
+
+on:
+  workflow_dispatch:
+  release:
+    types: [created]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref_name, 'R_') }}
+    runs-on: ubuntu-latest
+    outputs:
+      boards: ${{ steps.boards.outputs.boards }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      - id: boards
+        working-directory: src/boards
+        run: |
+          echo "boards=$(ls -d */ | sed 's/\/$//' | jq -R -s -c 'split("\n")[:-1]')" >> "$GITHUB_OUTPUT"
+      - name: Validate normal and recovery policies
+        run: |
+          make -C test bootloader_image_test bootloader_image_recovery_test dfu_image_policy_test dfu_image_policy_recovery_test
+          test/bootloader_image_test
+          test/bootloader_image_recovery_test
+          test/dfu_image_policy_test
+          test/dfu_image_policy_recovery_test
+          python3 test/version_derivation_test.py
+          python3 test/build_all_test.py
+
+  build:
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        board: ${{ fromJSON(needs.prepare.outputs.boards) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: true
+      - uses: carlosperate/arm-none-eabi-gcc-action@v1
+        with:
+          release: '14.2.Rel1'
+      - name: Install packaging tools
+        run: pip3 install adafruit-nrfutil intelhex setuptools
+      - name: Build recovery bridge
+        shell: bash
+        run: |
+          version_args=()
+          if [[ "$GITHUB_EVENT_NAME" != "release" ]]; then
+            version_args=(MOTA_BOOTLOADER_TEST_BUILD=1 MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE=0x02040601)
+          fi
+          make BOARD=${{ matrix.board }} RECOVERY_ALLOW_ALL_BOARDS=1 "${version_args[@]}" all copy-artifact
+      - uses: actions/upload-artifact@v7
+        with:
+          name: R_${{ matrix.board }}
+          path: _bin/recovery-allow-all/${{ matrix.board }}/
+          if-no-files-found: error
+
+  release:
+    if: ${{ github.event_name == 'release' && startsWith(github.ref_name, 'R_') }}
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: R_*
+          path: _recovery-release
+          merge-multiple: true
+      - name: Include recovery instructions and checksums
+        run: |
+          cp docs/recovery-allow-all.md _recovery-release/RECOVERY-README.md
+          cd _recovery-release
+          sha256sum *.zip *.hex *.uf2 RECOVERY-README.md > SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v3
+        with:
+          fail_on_unmatched_files: true
+          prerelease: true
+          make_latest: false
+          files: |
+            _recovery-release/*

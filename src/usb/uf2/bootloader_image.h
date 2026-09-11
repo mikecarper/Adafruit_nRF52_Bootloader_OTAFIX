@@ -5,6 +5,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifndef RECOVERY_ALLOW_ALL_BOARDS
+#define RECOVERY_ALLOW_ALL_BOARDS 0
+#endif
+#if RECOVERY_ALLOW_ALL_BOARDS != 0 && RECOVERY_ALLOW_ALL_BOARDS != 1
+#error "RECOVERY_ALLOW_ALL_BOARDS must be 0 or 1"
+#endif
+
 #define BOOTLOADER_UPDATE_MANIFEST_MAGIC0       0x464D4C42UL
 #define BOOTLOADER_UPDATE_MANIFEST_MAGIC1       0x31435243UL
 #define BOOTLOADER_UPDATE_MANIFEST_VERSION      1U
@@ -79,7 +86,7 @@ bool bootloader_image_vectors_valid(uint8_t const* image, uint32_t image_size,
                                     uint32_t code_start, uint32_t code_size);
 bool bootloader_extension_validate(bootloader_update_extension_t const* extension);
 // Accepts the board-bound BLMF format used by preview.8 and newer. This is the
-// local/manual recovery predicate and deliberately permits forward or reverse
+// strict identity predicate and deliberately permits forward or reverse
 // version movement. bootloader_image_info() additionally requires canonical
 // BLM2 compatibility metadata.
 bool bootloader_image_validate(uint8_t const* image, uint32_t image_start, uint32_t image_size,
@@ -91,11 +98,18 @@ bootloader_image_format_t bootloader_image_classify(
   uint8_t const* image, uint32_t image_start, uint32_t image_size,
   uint32_t expected_board_id, char const* expected_device_name,
   bootloader_image_info_t* info_out);
+// Manual Legacy DFU / UF2 only. Recovery builds waive board/name equality;
+// the strict APIs above and below (including remote .mota) never waive it.
+// Callers must still enforce the SoftDevice and flash-layout policy.
+bootloader_image_format_t bootloader_image_classify_manual(
+  uint8_t const* image, uint32_t image_start, uint32_t image_size,
+  uint32_t expected_board_id, char const* expected_device_name,
+  bootloader_image_info_t* info_out);
 bool bootloader_image_info(uint8_t const* image, uint32_t image_start, uint32_t image_size,
                            uint32_t expected_board_id, char const* expected_device_name,
                            bootloader_image_info_t* info_out);
 
-// expected_device_name in both APIs points to the complete zero-padded
+// expected_device_name in these APIs points to the complete zero-padded
 // BOOTLOADER_UPDATE_DEVICE_NAME_SIZE-byte identity field, not a shorter C
 // string. The running bootloader passes its own embedded manifest field.
 

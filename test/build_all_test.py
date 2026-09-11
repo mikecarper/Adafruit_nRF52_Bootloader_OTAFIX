@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -22,6 +23,39 @@ SPEC.loader.exec_module(BUILD_ALL)
 
 
 class BuildAllTest(unittest.TestCase):
+    def test_recovery_defaults_are_isolated_and_opt_in(self) -> None:
+        with mock.patch.object(sys, "argv", ["build_all.py"]):
+            normal = BUILD_ALL.parse_args()
+        with mock.patch.object(sys, "argv", ["build_all.py", "--recovery-allow-all-boards"]):
+            recovery = BUILD_ALL.parse_args()
+        self.assertFalse(normal.recovery_allow_all_boards)
+        self.assertEqual(Path("_build"), normal.build_root)
+        self.assertTrue(recovery.recovery_allow_all_boards)
+        self.assertEqual(Path("_build-recovery-allow-all"), recovery.build_root)
+
+    def test_recovery_build_collects_only_its_own_profile(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="otafix-recovery-") as temporary:
+            build_root = Path(temporary)
+            board_build = build_root / "build-gat562"
+            board_build.mkdir()
+            current = board_build / "gat562-recovery-allow-all.out"
+            current.write_bytes(b"recovery")
+
+            def fake_run(command, **kwargs):
+                self.assertIn("RECOVERY_ALLOW_ALL_BOARDS=1", command)
+                self.assertIn(f"BIN={ROOT / '_bin' / 'recovery-allow-all' / 'gat562'}", command)
+                if command[-1] == "copy-artifact":
+                    self.assertEqual(["all", "copy-artifact"], command[-2:])
+                    return subprocess.CompletedProcess(command, 0, stdout="build ok\n")
+                self.assertEqual("print-OUT_NAME", command[-1])
+                return subprocess.CompletedProcess(command, 0, stdout="OUT_NAME = gat562-recovery-allow-all\n")
+
+            with mock.patch.object(BUILD_ALL.subprocess, "run", side_effect=fake_run), \
+                 mock.patch.object(BUILD_ALL, "image_sizes", return_value=(123, 45)) as sizes:
+                result = BUILD_ALL.build_board("gat562", 1, None, "size", build_root, True)
+            self.assertTrue(result[1], result[-1])
+            sizes.assert_called_once_with("size", current)
+
     def test_selects_current_named_output_with_stale_artifacts_present(self) -> None:
         with tempfile.TemporaryDirectory(prefix="otafix-build-all-") as temporary:
             build_root = Path(temporary)
@@ -55,6 +89,8 @@ class BuildAllTest(unittest.TestCase):
             sizes.assert_called_once_with("arm-none-eabi-size", current)
             self.assertEqual(2, len(calls))
             self.assertIn(f"BUILD={board_build}", calls[0])
+            self.assertIn(f"PYTHON={sys.executable}", calls[0])
+            self.assertIn("RECOVERY_ALLOW_ALL_BOARDS=0", calls[0])
             self.assertIn("MOTA_BOOTLOADER_TEST_BUILD=1", calls[0])
             self.assertIn(
                 "MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE=0x02040403", calls[0]

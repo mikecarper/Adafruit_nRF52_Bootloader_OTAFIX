@@ -10,6 +10,12 @@ flash-and-pray on a board.
 
 ## Run
 
+`make check` also builds the image and Legacy DFU policy tests with and without
+`RECOVERY_ALLOW_ALL_BOARDS=1`. They cover shared VID/PID with differing names,
+different board IDs, CRC/vector rejection, unchanged SoftDevice/layout policy,
+and strict remote identity checks while the manual recovery bridge is enabled.
+Build helper/version tests verify separate recovery labels and release routing.
+
 ```bash
 make check        # apply the committed vector (apply_sim) + the LTO-readback regression (readback_test)
 make sanitize     # rebuild and run the complete host suite with ASan and UBSan

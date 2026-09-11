@@ -121,7 +121,7 @@ static bool bootloader_info(uint8_t const* image, uint32_t image_size,
   }
 
   bootloader_image_info_t candidate;
-  bootloader_image_format_t const format = bootloader_image_classify(
+  bootloader_image_format_t const format = bootloader_image_classify_manual(
     image, BOOTLOADER_REGION_START, image_size, expected_board, expected_name,
     &candidate);
   if (format == BOOTLOADER_IMAGE_INVALID) {

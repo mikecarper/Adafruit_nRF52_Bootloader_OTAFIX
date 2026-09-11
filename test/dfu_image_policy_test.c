@@ -250,6 +250,35 @@ int main(void) {
   assert(dfu_image_policy_validate(sd_bl_image, sizeof(sd_bl_image), &packet) ==
          NRF_ERROR_INVALID_DATA);
 
+  // A valid cross-board image is accepted only by the opt-in bridge. Test
+  // both shared VID/PID but different name (GAT562/RAK4631) and different IDs.
+  for (unsigned int shared_id = 0; shared_id < 2; shared_id++) {
+    make_bootloader(BOOT_VERSION, runtime_fwid, runtime_app_base);
+    write_u32(bootloader, board_offset, shared_id ? BOARD_ID : 0x239A0029UL);
+    char const foreign_name[BOOTLOADER_UPDATE_DEVICE_NAME_SIZE] = "4631_DFU";
+    memcpy(bootloader + manifest_offset + offsetof(bootloader_update_manifest_t, device_name),
+           foreign_name, sizeof(foreign_name));
+    seal_bootloader_manifest(bootloader, manifest_offset);
+    uint32_t const expected_result = RECOVERY_ALLOW_ALL_BOARDS ? NRF_SUCCESS : NRF_ERROR_INVALID_DATA;
+    packet = start_packet(DFU_UPDATE_SD | DFU_UPDATE_BL, SD_IMAGE_SIZE, BL_IMAGE_SIZE, 0);
+    assert(dfu_image_policy_validate(sd_bl_image, sizeof(sd_bl_image), &packet) == expected_result);
+    packet = start_packet(DFU_UPDATE_BL, 0, BL_IMAGE_SIZE, 0);
+    assert(dfu_image_policy_validate(bootloader, BL_IMAGE_SIZE, &packet) == expected_result);
+
+    // Valid CRC does not waive SoftDevice/layout metadata, even cross-board.
+    size_t const extension_offset = manifest_offset + sizeof(bootloader_update_manifest_t);
+    write_u16(bootloader, extension_offset + offsetof(bootloader_update_extension_t, softdevice_fwid),
+              runtime_fwid + 1U);
+    seal_bootloader_manifest(bootloader, manifest_offset);
+    assert(dfu_image_policy_validate(bootloader, BL_IMAGE_SIZE, &packet) == NRF_ERROR_INVALID_DATA);
+    write_u16(bootloader, extension_offset + offsetof(bootloader_update_extension_t, softdevice_fwid),
+              runtime_fwid);
+    write_u16(bootloader, extension_offset + offsetof(bootloader_update_extension_t, layout_abi),
+              BOOTLOADER_UPDATE_LAYOUT_ABI + 1U);
+    seal_bootloader_manifest(bootloader, manifest_offset);
+    assert(dfu_image_policy_validate(bootloader, BL_IMAGE_SIZE, &packet) == NRF_ERROR_INVALID_DATA);
+  }
+
   puts("Legacy DFU image policy: PASS");
   return 0;
 }

@@ -83,6 +83,8 @@ class ManifestPatcherTest(unittest.TestCase):
         cmake = (MODULE_PATH.parents[1] / "CMakeLists.txt").read_text(encoding="utf-8")
         self.assertIn("COMMAND ${BOOTLOADER_VERIFY_COMMAND}", cmake)
         self.assertIn("COMMAND ${BOOTLOADER_MERGED_VERIFY_COMMAND}", cmake)
+        self.assertIn("set(BOOTLOADER_ARTIFACT_NAME bootloader)", cmake)
+        self.assertIn('set(BOOTLOADER_ARTIFACT_NAME "R_${BOARD}_bootloader")', cmake)
         self.assertNotIn("hexmerge.py --overlap=replace", cmake)
         for target in ("flash-bootloader", "flash-all"):
             match = re.search(
@@ -92,7 +94,7 @@ class ManifestPatcherTest(unittest.TestCase):
             )
             self.assertIsNotNone(match, target)
             block = match.group(1)
-            self.assertIn("$<TARGET_FILE_DIR:bootloader>/bootloader.hex", block)
+            self.assertIn("$<TARGET_FILE_DIR:bootloader>/${BOOTLOADER_ARTIFACT_NAME}.hex", block)
             self.assertNotIn("$<TARGET_FILE:bootloader>", block)
 
     def test_make_verifies_mbr_merge_without_overlap_replacement(self):

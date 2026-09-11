@@ -13,7 +13,9 @@ PATTERN = re.compile(
 )
 
 
-def derive(text: str) -> int:
+def derive(text: str, recovery_allow_all_boards: bool = False) -> int:
+    if recovery_allow_all_boards:
+        text = text.removeprefix("R_")
     match = PATTERN.fullmatch(text)
     if not match:
         raise ValueError("version is not an exact canonical [upstream-]OTAFIXX.Y.Z[-preview.N] tag")
@@ -35,9 +37,11 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("version")
     parser.add_argument("--hex", action="store_true")
+    parser.add_argument("--recovery-allow-all-boards", action="store_true",
+                        help="also accept a separate R_ recovery release tag")
     args = parser.parse_args()
     try:
-        value = derive(args.version)
+        value = derive(args.version, args.recovery_allow_all_boards)
     except ValueError as exc:
         print(f"derive_otafix_version: {exc}: {args.version!r}", file=sys.stderr)
         return 2

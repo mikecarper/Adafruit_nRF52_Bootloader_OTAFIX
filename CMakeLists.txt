@@ -32,6 +32,7 @@ option(DEFAULT_TO_OTA_DFU "Default to OTA DFU instead of Serial DFU" OFF)
 option(SIGNED_FW "Enable signed firmware verification" OFF)
 option(DUALBANK_FW "Enable dual bank DFU support" OFF)
 option(FORCE_UF2 "Force UF2 support even with SIGNED_FW" OFF)
+option(RECOVERY_ALLOW_ALL_BOARDS "Recovery-only manual cross-board bootloader updates" OFF)
 set(DFU_USB_ENUMERATION_TIMEOUT_MS "30000" CACHE STRING
     "USB grace period for no-valid-image and explicit buttonless recovery, in milliseconds")
 set(SIGNED_FW_QX "" CACHE STRING "Public key Qx (comma-separated bytes)")
@@ -429,9 +430,15 @@ execute_process(
 string(STRIP "${GIT_VERSION}" GIT_VERSION)
 string(REGEX REPLACE "-[0-9]+-g[0-9a-f]+(-dirty)?$" "" GIT_VERSION_BASE "${GIT_VERSION}")
 
+if(RECOVERY_ALLOW_ALL_BOARDS)
+  set(RECOVERY_VERSION_ARG --recovery-allow-all-boards)
+  target_compile_definitions(bootloader PUBLIC RECOVERY_ALLOW_ALL_BOARDS=1)
+  message(WARNING "RECOVERY BUILD: manual bootloader board-identity checks are disabled")
+endif()
+
 execute_process(
   COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/tools/derive_otafix_version.py
-          "${GIT_VERSION}" --hex
+          "${GIT_VERSION}" --hex ${RECOVERY_VERSION_ARG}
   RESULT_VARIABLE MOTA_VERSION_RESULT
   OUTPUT_VARIABLE MOTA_BOOTLOADER_VERSION
   ERROR_VARIABLE MOTA_VERSION_ERROR
@@ -444,6 +451,12 @@ if(DEFINED MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE)
   string(APPEND GIT_VERSION "-test-version-${MOTA_BOOTLOADER_VERSION}")
 elseif(NOT MOTA_VERSION_RESULT EQUAL 0 OR MOTA_BOOTLOADER_VERSION STREQUAL "")
   message(FATAL_ERROR "Cannot derive OTAFIX X.Y.Z[-preview.N] from '${GIT_VERSION}': ${MOTA_VERSION_ERROR}")
+endif()
+if(RECOVERY_ALLOW_ALL_BOARDS)
+  set(BOOTLOADER_ARTIFACT_NAME "R_${BOARD}_bootloader")
+  set_target_properties(bootloader PROPERTIES OUTPUT_NAME "${BOOTLOADER_ARTIFACT_NAME}")
+else()
+  set(BOOTLOADER_ARTIFACT_NAME bootloader)
 endif()
 execute_process(
   COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/tools/softdevice_fwid.py
@@ -476,7 +489,8 @@ endif()
 #   1.2.3
 #   1.2.3-147-gd71abcd
 # If the version string does not match MAJOR.MINOR.PATCH, defaults to 0.0.0.
-if(GIT_VERSION MATCHES "^v?([0-9]+)\\.([0-9]+)\\.([0-9]+)")
+string(REGEX REPLACE "^R_" "" SEMANTIC_GIT_VERSION "${GIT_VERSION}")
+if(SEMANTIC_GIT_VERSION MATCHES "^v?([0-9]+)\\.([0-9]+)\\.([0-9]+)")
   set(RELEASE_VERSION_MAJOR ${CMAKE_MATCH_1})
   set(RELEASE_VERSION_MINOR ${CMAKE_MATCH_2})
   set(RELEASE_VERSION_PATCH ${CMAKE_MATCH_3})
@@ -489,10 +503,19 @@ math(EXPR MK_BOOTLOADER_VERSION "((${RELEASE_VERSION_MAJOR} << 16) | (${RELEASE_
 
 cmake_print_variables(GIT_VERSION MK_BOOTLOADER_VERSION)
 
+set(FIRMWARE_VERSION "${GIT_VERSION}")
+set(FIRMWARE_VERSION_BASE "${GIT_VERSION_BASE}")
+set(BLE_FIRMWARE_VERSION "${FIRMWARE_VERSION} ${SD_NAME} ${SD_VERSION}")
+if(RECOVERY_ALLOW_ALL_BOARDS)
+  set(FIRMWARE_VERSION "R_${MOTA_BOOTLOADER_VERSION}")
+  set(FIRMWARE_VERSION_BASE "${FIRMWARE_VERSION}")
+  set(BLE_FIRMWARE_VERSION "${FIRMWARE_VERSION}")
+endif()
+
 target_compile_definitions(bootloader PUBLIC
-  UF2_VERSION_BASE="${GIT_VERSION_BASE}"
-  UF2_VERSION="${GIT_VERSION}"
-  BLEDIS_FW_VERSION="${GIT_VERSION} ${SD_NAME} ${SD_VERSION}"
+  UF2_VERSION_BASE="${FIRMWARE_VERSION_BASE}"
+  UF2_VERSION="${FIRMWARE_VERSION}"
+  BLEDIS_FW_VERSION="${BLE_FIRMWARE_VERSION}"
   MK_BOOTLOADER_VERSION=${MK_BOOTLOADER_VERSION}
   MOTA_BOOTLOADER_VERSION=${MOTA_BOOTLOADER_VERSION}
   MOTA_SOFTDEVICE_FAMILY=${MOTA_SOFTDEVICE_FAMILY}
@@ -510,7 +533,7 @@ if (MCU_VARIANT STREQUAL "nrf52")
     --remove-section=.uicrMbrParamsPageAddress
     -Obinary
     $<TARGET_FILE:bootloader>
-    $<TARGET_FILE_DIR:bootloader>/bootloader.bin
+    $<TARGET_FILE_DIR:bootloader>/${BOOTLOADER_ARTIFACT_NAME}.bin
     )
   set(BOOTLOADER_VERIFY_COMMAND ${CMAKE_COMMAND} -E true)
   set(BOOTLOADER_MERGED_VERIFY_COMMAND ${CMAKE_COMMAND} -E true)
@@ -518,34 +541,34 @@ else ()
   set(BOOTLOADER_BIN_COMMAND
     ${Python_EXECUTABLE}
     ${CMAKE_CURRENT_LIST_DIR}/tools/patch_bootloader_manifest.py
-    $<TARGET_FILE_DIR:bootloader>/bootloader.hex
+    $<TARGET_FILE_DIR:bootloader>/${BOOTLOADER_ARTIFACT_NAME}.hex
     --bin-out
-    $<TARGET_FILE_DIR:bootloader>/bootloader.bin
+    $<TARGET_FILE_DIR:bootloader>/${BOOTLOADER_ARTIFACT_NAME}.bin
     )
   set(BOOTLOADER_VERIFY_COMMAND
     ${Python_EXECUTABLE}
     ${CMAKE_CURRENT_LIST_DIR}/tools/patch_bootloader_manifest.py
-    $<TARGET_FILE_DIR:bootloader>/bootloader.hex
+    $<TARGET_FILE_DIR:bootloader>/${BOOTLOADER_ARTIFACT_NAME}.hex
     --verify
     )
   set(BOOTLOADER_MERGED_VERIFY_COMMAND
     ${Python_EXECUTABLE}
     ${CMAKE_CURRENT_LIST_DIR}/tools/patch_bootloader_manifest.py
-    $<TARGET_FILE_DIR:bootloader>/bootloader_mbr.hex
+    $<TARGET_FILE_DIR:bootloader>/${BOOTLOADER_ARTIFACT_NAME}_mbr.hex
     --verify
     )
 endif ()
 
 add_custom_command(TARGET bootloader POST_BUILD
-  COMMAND ${CMAKE_OBJCOPY} -Oihex $<TARGET_FILE:bootloader> $<TARGET_FILE_DIR:bootloader>/bootloader.hex
+  COMMAND ${CMAKE_OBJCOPY} -Oihex $<TARGET_FILE:bootloader> $<TARGET_FILE_DIR:bootloader>/${BOOTLOADER_ARTIFACT_NAME}.hex
   COMMAND ${BOOTLOADER_BIN_COMMAND}
   COMMAND ${BOOTLOADER_VERIFY_COMMAND}
   # Slicing each Intel HEX input from address zero discards incompatible
   # execution-start records while retaining the default fail-on-data-overlap
   # merge policy.
-  COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/tools/hexmerge.py -o $<TARGET_FILE_DIR:bootloader>/bootloader_mbr.hex $<TARGET_FILE_DIR:bootloader>/bootloader.hex:0: ${MBR_HEX}:0:
+  COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/tools/hexmerge.py -o $<TARGET_FILE_DIR:bootloader>/${BOOTLOADER_ARTIFACT_NAME}_mbr.hex $<TARGET_FILE_DIR:bootloader>/${BOOTLOADER_ARTIFACT_NAME}.hex:0: ${MBR_HEX}:0:
   COMMAND ${BOOTLOADER_MERGED_VERIFY_COMMAND}
-  COMMAND ${Python_EXECUTABLE} ${UF2CONV_PY} -f ${UF2_FAMILY_ID_BOOTLOADER} -c -o $<TARGET_FILE_DIR:bootloader>/bootloader_mbr.uf2 $<TARGET_FILE_DIR:bootloader>/bootloader_mbr.hex
+  COMMAND ${Python_EXECUTABLE} ${UF2CONV_PY} -f ${UF2_FAMILY_ID_BOOTLOADER} -c -o $<TARGET_FILE_DIR:bootloader>/${BOOTLOADER_ARTIFACT_NAME}_mbr.uf2 $<TARGET_FILE_DIR:bootloader>/${BOOTLOADER_ARTIFACT_NAME}_mbr.hex
   VERBATIM)
 
 #----------------------------------
@@ -557,12 +580,12 @@ endif()
 
 add_custom_target(flash-bootloader
   DEPENDS bootloader
-  COMMAND ${NRFJPROG} --program $<TARGET_FILE_DIR:bootloader>/bootloader.hex --verify --sectoranduicrerase -f nrf52 --reset
+  COMMAND ${NRFJPROG} --program $<TARGET_FILE_DIR:bootloader>/${BOOTLOADER_ARTIFACT_NAME}.hex --verify --sectoranduicrerase -f nrf52 --reset
   )
 
 add_custom_target(flash-uf2
   DEPENDS bootloader
-  COMMAND ${Python_EXECUTABLE} ${UF2CONV_PY} -f ${UF2_FAMILY_ID_BOOTLOADER} --deploy $<TARGET_FILE_DIR:bootloader>/bootloader_mbr.uf2
+  COMMAND ${Python_EXECUTABLE} ${UF2CONV_PY} -f ${UF2_FAMILY_ID_BOOTLOADER} --deploy $<TARGET_FILE_DIR:bootloader>/${BOOTLOADER_ARTIFACT_NAME}_mbr.uf2
   )
 
 add_custom_target(flash-sd
@@ -581,7 +604,7 @@ add_custom_target(flash-erase
 add_custom_target(flash-all
   DEPENDS bootloader flash-erase
   COMMAND ${NRFJPROG} --program ${SD_HEX} --verify --sectorerase -f nrf52
-  COMMAND ${NRFJPROG} --program $<TARGET_FILE_DIR:bootloader>/bootloader.hex --verify --sectoranduicrerase -f nrf52 --reset
+  COMMAND ${NRFJPROG} --program $<TARGET_FILE_DIR:bootloader>/${BOOTLOADER_ARTIFACT_NAME}.hex --verify --sectoranduicrerase -f nrf52 --reset
   )
 
 # flash skip crc magic ( app valid = 0x0001, crc = 0x0000 )

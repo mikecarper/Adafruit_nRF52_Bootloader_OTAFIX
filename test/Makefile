@@ -56,7 +56,8 @@ readback_internal_test: readback_test.c $(SRC)/ota_delta.c $(SRC)/detools/detool
 		readback_test.c $(SRC)/detools/detools.c $(SRC)/sha256.c \
 		$(SRC)/usb/uf2/bootloader_image.c -o $@
 
-bootloader_image_test: bootloader_image_test.c $(SRC)/usb/uf2/bootloader_image.c \
+bootloader_image_recovery_test: override CFLAGS += -DRECOVERY_ALLOW_ALL_BOARDS=1
+bootloader_image_test bootloader_image_recovery_test: bootloader_image_test.c $(SRC)/usb/uf2/bootloader_image.c \
                        $(SRC)/usb/uf2/bootloader_image.h
 	$(CC) $(CFLAGS) -I $(SRC) bootloader_image_test.c $(SRC)/usb/uf2/bootloader_image.c -o $@
 
@@ -70,7 +71,8 @@ qspi_apply_test: sd_apply_test.c $(SRC)/ota_delta.c $(SRC)/detools/detools.c $(S
 	$(CC) $(CFLAGS) -DOTA_DELTA_HOST_TEST -DMOTA_QSPI_FLASH $(INC) sd_apply_test.c \
 		$(SRC)/detools/detools.c $(SRC)/sha256.c -o $@
 
-bootloader_mota_test: bootloader_mota_test.c $(SRC)/ota_delta.c $(SRC)/detools/detools.c \
+bootloader_mota_recovery_test: override CFLAGS += -DRECOVERY_ALLOW_ALL_BOARDS=1
+bootloader_mota_test bootloader_mota_recovery_test: bootloader_mota_test.c $(SRC)/ota_delta.c $(SRC)/detools/detools.c \
                       $(SRC)/sha256.c $(SRC)/usb/uf2/bootloader_image.c \
                       $(SRC)/usb/uf2/bootloader_image.h $(SRC)/ota_bl_info.h $(SRC)/ota_layout.h
 	$(CC) $(CFLAGS) -DOTA_DELTA_HOST_TEST -DMOTA_QSPI_FLASH -DMOTA_QSPI_BOOTLOADER_UPDATE \
@@ -134,7 +136,8 @@ bootloader_settings_guard_test: bootloader_settings_guard_test.c \
 		-I ../lib/sdk/components/libraries/crc16 \
 		bootloader_settings_guard_test.c $(SRC)/bootloader_settings_guard.c -o $@
 
-dfu_image_policy_test: dfu_image_policy_test.c $(SRC)/dfu_image_policy.c \
+dfu_image_policy_recovery_test: override CFLAGS += -DRECOVERY_ALLOW_ALL_BOARDS=1
+dfu_image_policy_test dfu_image_policy_recovery_test: dfu_image_policy_test.c $(SRC)/dfu_image_policy.c \
                        $(SRC)/dfu_image_policy.h $(SRC)/usb/uf2/bootloader_image.c
 	$(CC) $(CFLAGS) $(DFU_INIT_HOST_WARNINGS) $(DFU_INIT_FLAGS) \
 		-DDFU_IMAGE_POLICY_HOST_TEST -DMOTA_SOFTDEVICE_FAMILY=140 \
@@ -202,12 +205,14 @@ check: apply_sim readback_test readback_test_v7 readback_internal_test bootloade
 	./readback_internal_test
 	@echo
 	./bootloader_image_test
+	./bootloader_image_recovery_test
 	@echo
 	./sd_apply_test
 	@echo
 	./qspi_apply_test
 	@echo
 	./bootloader_mota_test
+	./bootloader_mota_recovery_test
 	@echo
 	./bootloader_mota_internal_test
 	@echo
@@ -231,6 +236,7 @@ check: apply_sim readback_test readback_test_v7 readback_internal_test bootloade
 	./bootloader_settings_guard_test
 	@echo
 	./dfu_image_policy_test
+	./dfu_image_policy_recovery_test
 	@echo
 	./dfu_entry_test
 	@echo
@@ -245,6 +251,9 @@ sanitize:
 	$(MAKE) CFLAGS="$(SANITIZER_CFLAGS)" check
 
 clean:
+	rm -f bootloader_image_recovery_test dfu_image_policy_recovery_test bootloader_mota_recovery_test
 	rm -f apply_sim readback_test readback_test_v7 readback_internal_test bootloader_image_test sd_apply_test qspi_apply_test bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test softdevice_fwid_test dfu_init_bounds_test dfu_init_signed_bounds_test qspi_alignment_test qspi_wake_test usb_wait_test dfu_timeout_test uf2_write_state_test bootloader_settings_guard_test dfu_image_policy_test dfu_entry_test peer_data_layout_test peer_data_layout_nrf52_test peer_data_layout_nrf52833_test pstorage_busy_test
 
 .PHONY: check sanitize clean
+
+check: bootloader_image_recovery_test dfu_image_policy_recovery_test bootloader_mota_recovery_test

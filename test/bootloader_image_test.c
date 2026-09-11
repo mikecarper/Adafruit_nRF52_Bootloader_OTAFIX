@@ -86,6 +86,42 @@ static void make_valid_image(void) {
 }
 
 int main(void) {
+  // The manual bridge relaxes identity only. Remote/strict APIs must reject
+  // cross-board images even when linked into a recovery bootloader.
+  make_valid_image();
+  assert(bootloader_image_classify_manual(image, IMAGE_START, IMAGE_SIZE,
+                                          EXPECTED_BOARD_ID, expected_device_name, NULL) == BOOTLOADER_IMAGE_V2);
+  assert(bootloader_image_classify_manual(image, IMAGE_START, IMAGE_SIZE,
+                                          EXPECTED_BOARD_ID, wrong_device_name, NULL) ==
+         (RECOVERY_ALLOW_ALL_BOARDS ? BOOTLOADER_IMAGE_V2 : BOOTLOADER_IMAGE_INVALID));
+  assert(bootloader_image_classify_manual(image, IMAGE_START, IMAGE_SIZE,
+                                          0x239A0029UL, wrong_device_name, NULL) ==
+         (RECOVERY_ALLOW_ALL_BOARDS ? BOOTLOADER_IMAGE_V2 : BOOTLOADER_IMAGE_INVALID));
+  assert(!bootloader_image_info(image, IMAGE_START, IMAGE_SIZE,
+                                EXPECTED_BOARD_ID, wrong_device_name, NULL));
+  assert(!bootloader_image_validate(image, IMAGE_START, IMAGE_SIZE,
+                                    EXPECTED_BOARD_ID, wrong_device_name));
+
+  image[1000] ^= 1U;
+  assert(bootloader_image_classify_manual(image, IMAGE_START, IMAGE_SIZE,
+                                          EXPECTED_BOARD_ID, expected_device_name, NULL) == BOOTLOADER_IMAGE_INVALID);
+  make_valid_image();
+  write_u32(4, IMAGE_START + IMAGE_SIZE + 1U);
+  seal_manifest(MANIFEST_OFFSET);
+  assert(bootloader_image_classify_manual(image, IMAGE_START, IMAGE_SIZE,
+                                          EXPECTED_BOARD_ID, expected_device_name, NULL) == BOOTLOADER_IMAGE_INVALID);
+  make_valid_image();
+  write_u32(MANIFEST_OFFSET + offsetof(bootloader_update_manifest_t, board_id), 0U);
+  seal_manifest(MANIFEST_OFFSET);
+  assert(bootloader_image_classify_manual(image, IMAGE_START, IMAGE_SIZE,
+                                          EXPECTED_BOARD_ID, expected_device_name, NULL) == BOOTLOADER_IMAGE_INVALID);
+  make_valid_image();
+  memset(image + MANIFEST_OFFSET + offsetof(bootloader_update_manifest_t, device_name), ' ',
+         BOOTLOADER_UPDATE_DEVICE_NAME_SIZE);
+  seal_manifest(MANIFEST_OFFSET);
+  assert(bootloader_image_classify_manual(image, IMAGE_START, IMAGE_SIZE,
+                                          EXPECTED_BOARD_ID, expected_device_name, NULL) == BOOTLOADER_IMAGE_INVALID);
+
   uint8_t too_short[sizeof(bootloader_update_envelope_t) - 1u] = {0};
   assert(!bootloader_image_validate(too_short, IMAGE_START, sizeof(too_short),
                                     EXPECTED_BOARD_ID, expected_device_name));
@@ -152,6 +188,9 @@ int main(void) {
   assert(bootloader_image_classify(image, IMAGE_START, IMAGE_SIZE,
                                    EXPECTED_BOARD_ID, expected_device_name,
                                    &info) == BOOTLOADER_IMAGE_LEGACY);
+  assert(bootloader_image_classify_manual(image, IMAGE_START, IMAGE_SIZE,
+                                          EXPECTED_BOARD_ID, wrong_device_name, NULL) ==
+         (RECOVERY_ALLOW_ALL_BOARDS ? BOOTLOADER_IMAGE_LEGACY : BOOTLOADER_IMAGE_INVALID));
 
   make_valid_image();
   write_u32(MANIFEST_OFFSET + sizeof(bootloader_update_manifest_t) +
@@ -288,6 +327,8 @@ int main(void) {
          0x58BA5E2EUL);
   assert(!bootloader_image_validate(image, IMAGE_START, IMAGE_SIZE,
                                     EXPECTED_BOARD_ID, expected_device_name));
+  assert(bootloader_image_classify_manual(image, IMAGE_START, IMAGE_SIZE,
+                                          EXPECTED_BOARD_ID, expected_device_name, NULL) == BOOTLOADER_IMAGE_INVALID);
 
   // A CRC fixed point alone does not establish an identity when the declared
   // board or its canonical padded device name is structurally invalid.
@@ -309,6 +350,8 @@ int main(void) {
          0xCEC92344UL);
   assert(bootloader_image_validate(image, IMAGE_START, IMAGE_SIZE,
                                    EXPECTED_BOARD_ID, expected_device_name));
+  assert(bootloader_image_classify_manual(image, IMAGE_START, IMAGE_SIZE,
+                                          EXPECTED_BOARD_ID, expected_device_name, NULL) == BOOTLOADER_IMAGE_V2);
 
   make_valid_image();
   memcpy(image + FALSE_MANIFEST_OFFSET, image + MANIFEST_OFFSET,
@@ -328,6 +371,8 @@ int main(void) {
          0xA7AC001BUL);
   assert(bootloader_image_validate(image, IMAGE_START, IMAGE_SIZE,
                                    EXPECTED_BOARD_ID, expected_device_name));
+  assert(bootloader_image_classify_manual(image, IMAGE_START, IMAGE_SIZE,
+                                          EXPECTED_BOARD_ID, expected_device_name, NULL) == BOOTLOADER_IMAGE_V2);
 
   puts("bootloader image validation: PASS");
   return 0;

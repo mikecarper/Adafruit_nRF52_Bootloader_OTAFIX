@@ -51,6 +51,11 @@ def parse_args():
         help="packed test-only version for a dirty qualification tree",
     )
     parser.add_argument(
+        "--recovery-allow-all-boards",
+        action="store_true",
+        help="build and collect separate manual cross-board recovery packages for every board",
+    )
+    parser.add_argument(
         "--keep-build",
         action="store_true",
         help="keep existing per-board build directories",
@@ -58,12 +63,14 @@ def parse_args():
     parser.add_argument(
         "--build-root",
         type=Path,
-        default=Path("_build"),
+        default=None,
         help="per-board build root, relative to the repository by default",
     )
     args = parser.parse_args()
     if args.jobs < 1 or args.make_jobs < 1:
         parser.error("--jobs and --make-jobs must be positive")
+    if args.build_root is None:
+        args.build_root = Path("_build-recovery-allow-all" if args.recovery_allow_all_boards else "_build")
     return args
 
 
@@ -101,9 +108,14 @@ def image_sizes(size_tool, image):
     return text_size + data_size, data_size + bss_size
 
 
-def build_board(board, make_jobs, test_version, size_tool, build_root):
+def build_board(board, make_jobs, test_version, size_tool, build_root, recovery_allow_all_boards=False):
     board_build = build_root / f"build-{board}"
-    make_args = [f"BOARD={board}", f"BUILD={board_build}"]
+    make_args = [f"BOARD={board}", f"BUILD={board_build}", f"PYTHON={sys.executable}"]
+    # Explicit zero prevents a local Makefile.user/environment setting from
+    # turning an ordinary all-board build into an unlabelled recovery run.
+    make_args.append(f"RECOVERY_ALLOW_ALL_BOARDS={int(recovery_allow_all_boards)}")
+    if recovery_allow_all_boards:
+        make_args.append(f"BIN={REPO_ROOT / '_bin' / 'recovery-allow-all' / board}")
     if test_version is not None:
         make_args.extend(
             [
@@ -112,6 +124,8 @@ def build_board(board, make_jobs, test_version, size_tool, build_root):
             ]
         )
     command = ["make", f"-j{make_jobs}", *make_args, "all"]
+    if recovery_allow_all_boards:
+        command.append("copy-artifact")
 
     start_time = time.monotonic()
     result = subprocess.run(
@@ -192,6 +206,9 @@ def main():
     worker_count = min(args.jobs, len(boards))
 
     print(f"Arm GNU Toolchain {compiler_version}; {worker_count} board workers")
+    if args.recovery_allow_all_boards:
+        print("RECOVERY ONLY: manual bootloader board-identity checks are disabled.")
+        print("Packages: _bin/recovery-allow-all/<board>/; restore a normal bootloader after recovery.")
     if args.test_version is not None:
         print(f"Qualification build version: {args.test_version} (test-only)")
     print(BUILD_SEPARATOR)
@@ -209,6 +226,7 @@ def main():
                 args.test_version,
                 size_tool,
                 build_root,
+                args.recovery_allow_all_boards,
             ): board
             for board in boards
         }

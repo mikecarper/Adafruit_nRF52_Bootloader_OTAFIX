@@ -1,5 +1,14 @@
 # Adafruit nRF52 Bootloader with Enhanced OTA DFU
 
+## Separate allow-all recovery builds
+
+For devices stuck with another board's OTAFIX bootloader, an opt-in
+`RECOVERY_ALLOW_ALL_BOARDS=1` bridge is available for every board. Normal releases
+remain board-protected. See [recovery instructions and Linux build/release steps](docs/recovery-allow-all.md)
+before using it: first install the bridge matching the **installed bootloader**,
+then the normal bootloader matching the **physical board**. Recovery packages are
+separately labelled and must not be left installed for normal operation.
+
 ## Changes in OTAFIX 2.4.6
 
 OTAFIX 2.4.6 adds an authenticated retained-RAM handoff for MeshCore

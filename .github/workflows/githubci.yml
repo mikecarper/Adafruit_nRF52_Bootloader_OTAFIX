@@ -23,6 +23,7 @@ concurrency:
 
 jobs:
   set-matrix:
+    if: ${{ !startsWith(github.ref_name, 'R_') }}
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
@@ -88,6 +89,7 @@ jobs:
         if-no-files-found: error
 
   feature-builds:
+    if: ${{ !startsWith(github.ref_name, 'R_') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -128,6 +130,11 @@ jobs:
           QX=0x6b,0x17,0xd1,0xf2,0xe1,0x2c,0x42,0x47,0xf8,0xbc,0xe6,0xe5,0x63,0xa4,0x40,0xf2,0x77,0x03,0x7d,0x81,0x2d,0xeb,0x33,0xa0,0xf4,0xa1,0x39,0x45,0xd8,0x98,0xc2,0x96
           QY=0x4f,0xe3,0x42,0xe2,0xfe,0x1a,0x7f,0x9b,0x8e,0xe7,0xeb,0x4a,0x7c,0x0f,0x9e,0x16,0x2b,0xce,0x33,0x57,0x6b,0x31,0x5e,0xce,0xcb,0xb6,0x40,0x68,0x37,0xbf,0x51,0xf5
           for board in heltec_t096 heltec_t114; do
+            make BOARD="$board" RECOVERY_ALLOW_ALL_BOARDS=1 \
+              "${mota_make_args[@]}" all
+            cmake -S . -B "cmake-build-recovery-$board" -DBOARD="$board" \
+              -DRECOVERY_ALLOW_ALL_BOARDS=ON "${mota_cmake_args[@]}"
+            cmake --build "cmake-build-recovery-$board"
             make BOARD="$board" BUILD="_build/signed-$board" SIGNED_FW=1 \
               SIGNED_FW_QX="$QX" SIGNED_FW_QY="$QY" "${mota_make_args[@]}" all
             make BOARD="$board" BUILD="_build/dualbank-$board" DUALBANK_FW=1 \
@@ -150,7 +157,7 @@ jobs:
           done
 
   bootloader-mota:
-    if: ${{ github.event_name == 'release' }}
+    if: ${{ github.event_name == 'release' && !startsWith(github.ref_name, 'R_') }}
     needs: build
     runs-on: ubuntu-22.04
     steps:
@@ -348,7 +355,7 @@ jobs:
             _mota-release/*.py
 
   release:
-    if: ${{ github.event_name == 'release' }}
+    if: ${{ github.event_name == 'release' && !startsWith(github.ref_name, 'R_') }}
     needs: [build, feature-builds, bootloader-mota]
     runs-on: ubuntu-latest
     permissions:

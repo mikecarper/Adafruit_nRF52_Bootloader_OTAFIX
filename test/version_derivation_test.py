@@ -41,6 +41,18 @@ class VersionDerivationTest(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 MODULE.derive(value)
 
+    def test_recovery_tags_require_explicit_opt_in_and_remain_exact(self):
+        tag = "R_0.11.0-OTAFIX2.4.6"
+        with self.assertRaises(ValueError):
+            MODULE.derive(tag)
+        self.assertEqual(0x020406FF, MODULE.derive(tag, recovery_allow_all_boards=True))
+        self.assertEqual(0x020406FF, MODULE.derive("0.11.0-OTAFIX2.4.6", recovery_allow_all_boards=True))
+        for suffix in ("-dirty", "-2-gdeadbeef", "-recovery-allow-all"):
+            with self.subTest(suffix=suffix), self.assertRaises(ValueError):
+                MODULE.derive(tag + suffix, recovery_allow_all_boards=True)
+        with self.assertRaises(ValueError):
+            MODULE.derive("R_" + tag, recovery_allow_all_boards=True)
+
 
 if __name__ == "__main__":
     unittest.main()

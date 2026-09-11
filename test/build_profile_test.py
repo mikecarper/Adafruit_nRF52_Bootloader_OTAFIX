@@ -83,6 +83,7 @@ class BuildProfileTest(unittest.TestCase):
             "DUALBANK_FW",
             "FORCE_UF2",
             "DEFAULT_TO_OTA_DFU",
+            "RECOVERY_ALLOW_ALL_BOARDS",
             "DEBUG",
             "DFU_USB_ENUMERATION_TIMEOUT_MS",
             "MOTA_RAM_ARENA_SIZE",
@@ -112,15 +113,20 @@ class BuildProfileTest(unittest.TestCase):
         self.tempdir.cleanup()
 
     def make(self, target: str, *variables: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
+        result = subprocess.run(
             [*self.common, *variables, target],
             cwd=ROOT,
             env=self.env,
-            check=True,
+            check=False,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
+        if result.returncode:
+            print(result.stdout, result.stderr, file=sys.stderr)
+            raise subprocess.CalledProcessError(result.returncode, result.args,
+                                                output=result.stdout, stderr=result.stderr)
+        return result
 
     def make_variable(self, name: str, *variables: str) -> str:
         result = self.make(f"print-{name}", *variables)
@@ -168,6 +174,7 @@ class BuildProfileTest(unittest.TestCase):
             "dual bank": ("DUALBANK_FW=1",),
             "forced UF2": ("FORCE_UF2=1",),
             "default BLE DFU": ("DEFAULT_TO_OTA_DFU=1",),
+            "recovery allow-all": ("RECOVERY_ALLOW_ALL_BOARDS=1",),
             "debug": ("DEBUG=1",),
             "USB timeout": ("DFU_USB_ENUMERATION_TIMEOUT_MS=12345",),
             "mOTA RAM arena": ("MOTA_RAM_ARENA_SIZE=0",),
@@ -269,6 +276,33 @@ class BuildProfileTest(unittest.TestCase):
             "#if defined(SIGNED_FW) && defined(DUALBANK_FW)",
             screen,
         )
+
+    def test_recovery_is_labelled_and_release_workflows_are_separate(self) -> None:
+        flag = "RECOVERY_ALLOW_ALL_BOARDS=1"
+        self.assertNotIn("-DRECOVERY_ALLOW_ALL_BOARDS=1", self.make_variable("CFLAGS"))
+        self.assertIn("-DRECOVERY_ALLOW_ALL_BOARDS=1", self.make_variable("CFLAGS", flag))
+        self.assertFalse(self.make_variable("OUT_NAME").startswith("R_"))
+        self.assertTrue(self.make_variable("OUT_NAME", flag).startswith("R_"))
+        self.assertEqual("R_0x02040601", self.make_variable("FIRMWARE_VERSION_BASE", flag))
+        firmware_version = self.make_variable("FIRMWARE_VERSION", flag)
+        self.assertEqual("R_0x02040601", firmware_version)
+        self.assertLess(len(firmware_version), 60)
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.make("print-OUT_NAME", "RECOVERY_ALLOW_ALL_BOARDS=2")
+
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        self.assertEqual(4, workflow.count("!startsWith(github.ref_name, 'R_')"))
+        recovery = (ROOT / ".github/workflows/recovery.yml").read_text(encoding="utf-8")
+        self.assertIn("RECOVERY_ALLOW_ALL_BOARDS=1", recovery)
+        self.assertIn("_bin/recovery-allow-all/", recovery)
+        self.assertIn("prerelease: true", recovery)
+        self.assertIn("make_latest: false", recovery)
+        self.assertNotIn("build_bootloader_mota_release.py", recovery)
+
+        cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertIn("target_compile_definitions(bootloader PUBLIC RECOVERY_ALLOW_ALL_BOARDS=1)", cmake)
+        self.assertIn('R_${BOARD}_bootloader', cmake)
+        self.assertNotIn("$<TARGET_FILE_DIR:bootloader>/bootloader", cmake)
 
     def test_ci_uses_the_documented_corrected_qualification_lineage(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")

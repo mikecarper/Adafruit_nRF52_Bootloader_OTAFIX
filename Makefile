@@ -12,6 +12,7 @@
 # - DUALBANK_FW        : If bootloader will implement a dual bank feature to allow autorecover from failed
 # - FORCE_UF2          : if SIGNED_FW is 1, will force to include UF2 support (UNSECURE, UF2 does NOT validate signature!)
 # - DEFAULT_TO_OTA_DFU : if entering DFU, by default enter OTA DFU instead of Serial DFU
+# - RECOVERY_ALLOW_ALL_BOARDS : recovery-only manual cross-board bootloader updates
 # - DFU_USB_ENUMERATION_TIMEOUT_MS : no-valid-image USB grace period while VBUS is present
 #------------------------------------------------------------------------------
 
@@ -20,6 +21,17 @@ DFU_USB_ENUMERATION_TIMEOUT_MS ?= 30000
 
 # local customization
 -include Makefile.user
+
+RECOVERY_ALLOW_ALL_BOARDS ?= 0
+ifneq ($(RECOVERY_ALLOW_ALL_BOARDS),0)
+  ifneq ($(RECOVERY_ALLOW_ALL_BOARDS),1)
+    $(error RECOVERY_ALLOW_ALL_BOARDS must be 0 or 1)
+  endif
+endif
+ifeq ($(RECOVERY_ALLOW_ALL_BOARDS),1)
+  RECOVERY_VERSION_ARG := --recovery-allow-all-boards
+  $(warning RECOVERY BUILD: manual bootloader board-identity checks are disabled)
+endif
 
 # Select the board before loading board-specific configuration.
 BOARD_LIST := $(sort $(notdir $(patsubst %/,%,$(dir $(wildcard src/boards/*/board.mk)))))
@@ -94,7 +106,7 @@ else
 endif
 
 GIT_VERSION := $(shell git describe --dirty --always --tags)
-MOTA_BOOTLOADER_VERSION := $(shell $(PYTHON) tools/derive_otafix_version.py "$(GIT_VERSION)" --hex 2>$(NULL_DEVICE))
+MOTA_BOOTLOADER_VERSION := $(shell $(PYTHON) tools/derive_otafix_version.py "$(GIT_VERSION)" --hex $(RECOVERY_VERSION_ARG) 2>$(NULL_DEVICE))
 ifneq ($(MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE),)
   ifneq ($(MOTA_BOOTLOADER_TEST_BUILD),1)
     $(error MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE requires MOTA_BOOTLOADER_TEST_BUILD=1)
@@ -108,8 +120,22 @@ endif
 GIT_SUBMODULE_VERSIONS := $(shell git submodule status | cut -d" " -f3,4 | paste -s -d" " -)
 GIT_VERSION_BASE := $(shell echo "$(GIT_VERSION)" | sed -E 's/-[0-9]+-g[0-9a-f]+(-dirty)?$$//')
 
+# Keep full provenance in filenames, but bound on-device recovery text so
+# dirty/test git descriptions do not crowd out code in the fixed 40 KiB region.
+FIRMWARE_VERSION = $(GIT_VERSION)
+FIRMWARE_VERSION_BASE = $(GIT_VERSION_BASE)
+BLE_FIRMWARE_VERSION = $(FIRMWARE_VERSION) $(SD_NAME) $(SD_VERSION)
+ifeq ($(RECOVERY_ALLOW_ALL_BOARDS),1)
+  FIRMWARE_VERSION = R_$(MOTA_BOOTLOADER_VERSION)
+  FIRMWARE_VERSION_BASE = $(FIRMWARE_VERSION)
+  BLE_FIRMWARE_VERSION = $(FIRMWARE_VERSION)
+endif
+
 # compiled file name
 OUT_NAME = $(BOARD)_bootloader-$(GIT_VERSION)
+ifeq ($(RECOVERY_ALLOW_ALL_BOARDS),1)
+OUT_NAME = R_$(BOARD)_bootloader-$(patsubst R_%,%,$(GIT_VERSION))
+endif
 
 # merged file = compiled + sd
 MERGED_FILE = $(OUT_NAME)_$(SD_NAME)_$(SD_VERSION)
@@ -169,8 +195,13 @@ BMP_PORT ?= $(shell ls -1 /dev/cu.usbmodem????????1 | head -1)
 GDB_BMP = $(GDB) -ex 'target extended-remote $(BMP_PORT)' -ex 'monitor swdp_scan' -ex 'attach 1'
 
 # Build directory
+ifeq ($(RECOVERY_ALLOW_ALL_BOARDS),1)
+BUILD = _build-recovery-allow-all/build-$(BOARD)
+BIN = _bin/recovery-allow-all/$(BOARD)
+else
 BUILD = _build/build-$(BOARD)
 BIN = _bin/$(BOARD)
+endif
 
 # MCU_SUB_VARIANT can be nrf52 (nrf52832), nrf52833, nrf52840
 ifeq ($(MCU_SUB_VARIANT),nrf52)
@@ -432,14 +463,18 @@ ifneq ($(USE_NFCT),yes)
 endif
 
 CFLAGS += -DSOFTDEVICE_PRESENT
-CFLAGS += -DUF2_VERSION_BASE='"$(GIT_VERSION_BASE)"'
-CFLAGS += -DUF2_VERSION='"$(GIT_VERSION)"'
-CFLAGS += -DBLEDIS_FW_VERSION='"$(GIT_VERSION) $(SD_NAME) $(SD_VERSION)"'
+CFLAGS += -DUF2_VERSION_BASE='"$(FIRMWARE_VERSION_BASE)"'
+CFLAGS += -DUF2_VERSION='"$(FIRMWARE_VERSION)"'
+CFLAGS += -DBLEDIS_FW_VERSION='"$(BLE_FIRMWARE_VERSION)"'
 CFLAGS += -DDFU_USB_ENUMERATION_TIMEOUT_MS=$(DFU_USB_ENUMERATION_TIMEOUT_MS)
 CFLAGS += -DMOTA_BOOTLOADER_VERSION=$(MOTA_BOOTLOADER_VERSION)
 CFLAGS += -DMOTA_SOFTDEVICE_FAMILY=$(MOTA_SOFTDEVICE_FAMILY)
 CFLAGS += -DMOTA_SOFTDEVICE_FWID=$(MOTA_SOFTDEVICE_FWID)
 CFLAGS += -DMOTA_APP_BASE=$(MOTA_APP_BASE)
+
+ifeq ($(RECOVERY_ALLOW_ALL_BOARDS),1)
+CFLAGS += -DRECOVERY_ALLOW_ALL_BOARDS=1
+endif
 
 ifeq ($(SIGNED_FW), 1)
 CFLAGS += -DSIGNED_FW
@@ -461,7 +496,7 @@ endif
 #   1.2.3
 #   1.2.3-147-gd71abcd
 # If the version string does not match MAJOR.MINOR.PATCH, defaults to 0.0.0.
-_VER3 := $(shell printf '%s\n' "$(GIT_VERSION)" | sed -n \
+_VER3 := $(shell printf '%s\n' "$(patsubst R_%,%,$(GIT_VERSION))" | sed -n \
 	's/^v\{0,1\}\([0-9][0-9]*\)\.\([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1 \2 \3/p')
 _VER3 := $(if $(_VER3),$(_VER3),0 0 0)
 
@@ -558,6 +593,7 @@ SIGNED_FW_QY=$(SIGNED_FW_QY)
 DUALBANK_FW=$(DUALBANK_FW)
 FORCE_UF2=$(FORCE_UF2)
 DEFAULT_TO_OTA_DFU=$(DEFAULT_TO_OTA_DFU)
+RECOVERY_ALLOW_ALL_BOARDS=$(RECOVERY_ALLOW_ALL_BOARDS)
 DEBUG=$(DEBUG)
 DFU_USB_ENUMERATION_TIMEOUT_MS=$(DFU_USB_ENUMERATION_TIMEOUT_MS)
 USE_NFCT=$(USE_NFCT)
