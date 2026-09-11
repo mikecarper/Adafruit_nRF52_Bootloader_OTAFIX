@@ -35,7 +35,7 @@ RELEASE_TAG_RE = re.compile(
     r"^(?:v?[0-9]+\.[0-9]+\.[0-9]+-)?"
     r"OTAFIX[0-9]+\.[0-9]+\.[0-9]+(?:-preview\.[0-9]+)?$"
 )
-SEEDER_READY_RE = re.compile(r"(?mi)^\s*\[dev\]\s+COUNT\s*->\s*\d+\b")
+SEEDER_READY_RE = re.compile(r"(?mi)^\s*\[dev\]\s+COUNT\s*->\s*(?P<count>\d+)\b")
 SEEDER_ATTACH_ERROR_RE = re.compile(
     r"(?mi)^\s*\[dev\].*\b(?:ERR|ERROR)\b|"
     r"folder\s+(?:is\s+)?already\s+(?:owned|attached)|"
@@ -616,8 +616,6 @@ def wait_for_seeder_attachment(
     deadline = time.monotonic() + timeout
     while True:
         detail = seeder_log_tail(log_path, log_stream)
-        if SEEDER_READY_RE.search(detail):
-            return
         if SEEDER_ATTACH_ERROR_RE.search(detail):
             raise UpdateError(f"motatool could not attach to the source: {detail}")
         return_code = process.poll()
@@ -625,6 +623,14 @@ def wait_for_seeder_attachment(
             raise UpdateError(
                 f"motatool seeder exited with status {return_code}: {detail}"
             )
+        counts = list(SEEDER_READY_RE.finditer(detail))
+        if counts:
+            if int(counts[-1].group("count")) == 0:
+                raise UpdateError(
+                    "motatool attached with an empty catalog (COUNT -> 0); "
+                    f"no update can be discovered: {detail}"
+                )
+            return
         if time.monotonic() >= deadline:
             raise UpdateError(
                 "motatool did not receive the source COUNT response before "

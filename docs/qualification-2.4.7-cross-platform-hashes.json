@@ -1,0 +1,654 @@
+{
+  "firmware_source": "a3ff2e076d2110bf334f3f257a16a47b0e52f864",
+  "test_version": "0x02040703",
+  "source_date_epoch": 1789114216,
+  "compiler": "arm-none-eabi-gcc (Arm GNU Toolchain 14.2.Rel1 (Build arm-14.52)) 14.2.1 20241119",
+  "build_system": "CMake",
+  "hosts": [
+    "native Windows (MinGW Makefiles)",
+    "Linux (Unix Makefiles)"
+  ],
+  "comparison": "All 140 artifacts match byte-for-byte: 27 standard boards plus T096/T114 signed, dual-bank, signed dual-bank and recovery profiles.",
+  "boards": {
+    "gat562": {
+      "bootloader.bin": {
+        "size": 40960,
+        "sha256": "6043cb4e95a670099f4cdf62f833884f0b4dc83f1905061d6ad88ac27909bfdc"
+      },
+      "bootloader.hex": {
+        "size": 109690,
+        "sha256": "817712e8c47b8b469d0a015175fd6767d1b86589644b48c80f989867f41173aa"
+      },
+      "bootloader_mbr.hex": {
+        "size": 117430,
+        "sha256": "f8bfc2bb75b9823c7dbc04d230ac84cf48381d29cb8c8ac172c715ed34338ddc"
+      },
+      "bootloader_mbr.uf2": {
+        "size": 86528,
+        "sha256": "8eec42ed5e1ada3b380d4565ba0e4fac2f67059aefb8d90ef3aa54736df3743c"
+      }
+    },
+    "heltec_mesh_pocket": {
+      "bootloader.bin": {
+        "size": 40960,
+        "sha256": "f8e0b3dfc1ebcc9f8a19f1784986af1b5b562e4b968d42d3a5c341c51b03e5e8"
+      },
+      "bootloader.hex": {
+        "size": 108998,
+        "sha256": "a30a43dc339c10f5f529b09d8659e85769a073905e52e56e32f406b06d7ddec1"
+      },
+      "bootloader_mbr.hex": {
+        "size": 116738,
+        "sha256": "6bdfca43c6850be4c626d4c9480514dba2ee4fe161bd5f45031aedb52b1e112c"
+      },
+      "bootloader_mbr.uf2": {
+        "size": 86016,
+        "sha256": "dc10fd235b6bdba66ab93efba7f393b1bf77aeeeb8009b0869af7f49a30824fc"
+      }
+    },
+    "heltec_mesh_tower_v2": {
+      "bootloader.bin": {
+        "size": 40960,
+        "sha256": "7be43aff05f7dfb16d6e35abeb5d45631715ad8850dba36aaaf4662b706a0e3b"
+      },
+      "bootloader.hex": {
+        "size": 109496,
+        "sha256": "54c10c0011f6f25c8a8ad05a6dfe01d0b3d7729cd4364d0faf9589ed29e57008"
+      },
+      "bootloader_mbr.hex": {
+        "size": 117236,
+        "sha256": "2f84ddd8840715096b2c94e1c9ff9d0dc2f1d06d714c79d50ce1c6723bc26ae0"
+      },
+      "bootloader_mbr.uf2": {
+        "size": 86016,
+        "sha256": "6fb3482b3be6bcda3416783053a4a956fd5abcd9c926c4c87311d7f5d2b22734"
+      }
+    },
+    "heltec_mesh_tower_v2_sdcard": {
+      "bootloader.bin": {
+        "size": 40960,
+        "sha256": "9c91e02906a13f1609bc89b011c80d611c4dffa45d4d174447c94ecd46808ab5"
+      },
+      "bootloader.hex": {
+        "size": 112568,
+        "sha256": "ec706940c76d5cfdd7fa0ae164dd4713c4817a1bcea9521891730a616da2debc"
+      },
+      "bootloader_mbr.hex": {
+        "size": 120308,
+        "sha256": "07dbd8510c1fe938a8c89efda241e8eda4a170adb5981d235f1be6927ac48776"
+      },
+      "bootloader_mbr.uf2": {
+        "size": 88064,
+        "sha256": "d5f508a58e44746f393b0ed372ba7b3d9f22e9ba1ff8ed583ba1bb5552633bbe"
+      }
+    },
+    "heltec_t096": {
+      "bootloader.bin": {
+        "size": 40960,
+        "sha256": "7d99dd21aa4b45a61c3ed37a0b695237386e30899e312eefcba9abf9746a04d7"
+      },
+      "bootloader.hex": {
+        "size": 111052,
+        "sha256": "ed6a05f3c83abd32558d7e0137241083b04443f5f93bf92078f2e488d06f3834"
+      },
+      "bootloader_mbr.hex": {
+        "size": 118792,
+        "sha256": "292cd39a1a0f86652372f5e515a6df66ed869c3b68601ddc144e8c9cac857f13"
+      },
+      "bootloader_mbr.uf2": {
+        "size": 87040,
+        "sha256": "fdeeb2536575e0ef7a0f060051aee8701800946208d3f6383582faed14ae533d"
+      }
+    },
+    "heltec_t1": {
+      "bootloader.bin": {
+        "size": 40960,
+        "sha256": "68a75a07fccfde892f86bd861c163bfe23d13e4969d45259a8ce0da2a5197a97"
+      },
+      "bootloader.hex": {
+        "size": 111094,
+        "sha256": "34f89ce6883553b97955a92d3a50c63aeec3058444c069ce6604fa29fa8149b9"
+      },
+      "bootloader_mbr.hex": {
+        "size": 118834,
+        "sha256": "5350bff817ac2b7cae399a9533e42570acba63265c867026cbaf61bceebce9be"
+      },
+      "bootloader_mbr.uf2": {
+        "size": 87552,
+        "sha256": "d092955057c4dfb7e908fc08b24a74727464abf928ddf00b525b16ecd85a4927"
+      }
+    },
+    "heltec_t114": {
+      "bootloader.bin": {
+        "size": 40960,
+        "sha256": "45a5bdbabf88e22c09ea1bfd92adda8725742fa165bd2f9a9beb08d56443d8a1"
+      },
+      "bootloader.hex": {
+        "size": 112154,
+        "sha256": "21e5826335f2f29ad5d49327871cd2fc14552e3f49b6af0b9d936106b293e3d7"
+      },
+      "bootloader_mbr.hex": {
+        "size": 119894,
+        "sha256": "30335de1529c25b6d8221c56885ef66f79aaf110fa2d0e4a400ab9c30e39eca1"
+      },
+      "bootloader_mbr.uf2": {
+        "size": 88064,
+        "sha256": "f7ca4606b114259d7f11e17c68c905a89224df818f1c363551f6d71f5460a505"
+      }
+    },
+    "keepteen_lt1": {
+      "bootloader.bin": {
+        "size": 40960,
+        "sha256": "352bb58f4d16d126761698e5c1c0386c7a5a12ac9d8bdeaa8996cf0f0e27d4b0"
+      },
+      "bootloader.hex": {
+        "size": 108952,
+        "sha256": "e5fd9595d18a1947368a48ae2cfd187dbe5c6090aa252bccf8f259fd8fff6fbf"
+      },
+      "bootloader_mbr.hex": {
+        "size": 116692,
+        "sha256": "596dab876f6ec18c3da41d8f7ec9a012116bcf700331461c14b9ff4424cc4363"
+      },
+      "bootloader_mbr.uf2": {
+        "size": 85504,
+        "sha256": "b1993dd4d5cc85795b56b6446375eef103291eb06f033d7fd41a0c7f5186d8d6"
+      }
+    },
+    "lilygo_techo": {
+      "bootloader.bin": {
+        "size": 40960,
+        "sha256": "2f3f98d57fcbddc4b6da920252bba24183eef6a61a740e9ac948bd2c3c4cedba"
+      },
+      "bootloader.hex": {
+        "size": 110704,
+        "sha256": "1cbecd456151841599c42aef187f42ce1133a14fba323022ff7e0cf263646529"
+      },
+      "bootloader_mbr.hex": {
+        "size": 118444,
+        "sha256": "3e3e87efebe3b5a5153f169bcacd6f3135d1c74517d5b5a65339eb096542b346"
+      },
+      "bootloader_mbr.uf2": {
+        "size": 87040,
+        "sha256": "10609c797b5fdabe6e65fc6fa0f307c6c43ad6c2f620dacf38f8532b601bf63c"
+      }
+    },
+    "lilygo_techo_lite": {
+      "bootloader.bin": {
+        "size": 40960,
+        "sha256": "88c7a22070857057e425e106c70e3e5f66d7b9a5af424bd929e0ffbfc3ed33e8"
+      },
+      "bootloader.hex": {
+        "size": 111376,
+        "sha256": "3ed86f0a977367f6574c18bcc33534d79a00aa0d9f427ccf042f6d9e4956f7ff"
+      },
+      "bootloader_mbr.hex": {
+        "size": 119116,
+        "sha256": "71d277c21dbc10e0433c0a72eb5daf853bc4cbae68d3a707b704debf566252c1"
+      },
+      "bootloader_mbr.uf2": {
+        "size": 87552,
+        "sha256": "6935d58a287fba55362bb22667c9bd60957dfe580e520a4439795f53ddc79cad"
+      }
+    },
+    "minewsemi_mx25le01": {
+      "bootloader.bin": {
+        "size": 40960,
+        "sha256": "be2d7e448ccc6e68361affa0d7e68b5d624e2d3ddf51065bc1d8c13844a8fbe0"
+      },
+      "bootloader.hex": {
+        "size": 109188,
+        "sha256": "845127e398bb5da42affc9426626671267cc6d036afb7f30fa6d35dc343fc3ba"
+      },
+      "bootloader_mbr.hex": {
+        "size": 116928,
+        "sha256": "a3242b263c1de0ab5548c96a342972d3de0c5b2e8c7d96e38e6b8152886db523"
+      },
+      "bootloader_mbr.uf2": {
+        "size": 86016,
+        "sha256": "978f9f73a3d8c1ac62d571352d6162432dcaafb0775b723e42318b89ddb38864"
+      }
+    },
+    "pca10056": {
+      "bootloader.bin": {
+        "size": 40960,
+        "sha256": "75a9fd21c67c2a8307dc4f4a239c1fc38bd6e58b0d20d8937f1e46c9316ae11a"
+      },
+      "bootloader.hex": {
+        "size": 110750,
+        "sha256": "94219576823ca0cc2b821e1553358252066463fc688db0d1e1b5673342ea9dba"
+      },
+      "bootloader_mbr.hex": {
+        "size": 118490,
+        "sha256": "73aca00259cadcfb1bb955c9b1162556c87a7199d7770a75c4b2bb5b49994710"
+      },
+      "bootloader_mbr.uf2": {
+        "size": 87040,
+        "sha256": "5bfc229672738e7464efc229344fa8752d32128e61a03c8c6eb65c896b071b2c"
+      }
+    },
+    "promicro_nrf52840": {
+      "bootloader.bin": {
+        "size": 40960,
+        "sha256": "6d495483462dbe9f487aa1029e302618fed962d6d92ad92c8203d95b64635204"
+      },
+      "bootloader.hex": {
+        "size": 109256,
+        "sha256": "ff620e52bbc2832aebda5cda8351182e4350183ec619a4d794597f07a8326c18"
+      },
+      "bootloader_mbr.hex": {
+        "size": 116996,
+        "sha256": "74b721309e298f18a9a9f5dc1bfe5ca74f837cb1193ab3bd5a94469606ce2780"
+      },
+      "bootloader_mbr.uf2": {
+        "size": 86016,
+        "sha256": "d8a1fa5e4231fd04fc4393eab7d201f6e30f6c2718939e211fecc10f1bdfe6bb"
+      }
+    },
+    "sensecap_solar_p1": {
+      "bootloader.bin": {
+        "size": 40960,
+        "sha256": "93a11752181fdff95e851409058ef90b9211a0acccb65d0e6bf5e5b6d69d9a82"
+      },
+      "bootloader.hex": {
+        "size": 110402,
+        "sha256": "1296c102d6bd4dfde7ad51b6dc4a3267e184ef39af48b2178a6ce779b5b67a0e"
+      },
+      "bootloader_mbr.hex": {
+        "size": 118142,
+        "sha256": "31d22f7cea7325250ae99aed256cb82887e0738b8742d27d43e7eda0ab33045f"
+      },
+      "bootloader_mbr.uf2": {
+        "size": 87040,
+        "sha256": "855e07a4949ece71a0ba15dcfd81cf6c34b1aea917d3a6d28819fdd181a6bded"
+      }
+    },
+    "t1000_e": {
+      "bootloader.bin": {
+        "size": 40960,
+        "sha256": "0ff2125874ba3908bacd55af765859f8a383321ff67f5bdbc0176c4e1a2d13c0"
+      },
+      "bootloader.hex": {
+        "size": 108896,
+        "sha256": "004955fe939962db9b065ad0c3bf6704c13afa451c2db3ba787d41d1b5e6c2a8"
+      },
+      "bootloader_mbr.hex": {
+        "size": 116636,
+        "sha256": "c4bd081201b3c8cbcf33da368df94d35c731ef24091c5ad45e36d6ea0bde2e93"
+      },
+      "bootloader_mbr.uf2": {
+        "size": 85504,
+        "sha256": "cee19cb9071cc1ab562e87664396cb2ee3225c7f2f09c56b3a388f0eb9694573"
+      }
+    },
+    "thinknode_m1": {
+      "bootloader.bin": {
+        "size": 40960,
+        "sha256": "ce4fb514125bc01c03b3e8c886b6d24469c4053df075c3807336ce77f90e8b9e"
+      },
+      "bootloader.hex": {
+        "size": 110376,
+        "sha256": "edeec4165bd8c793b71bbfad318f87a11bb50ec2cb132b1dccd32b36ea78208a"
+      },
+      "bootloader_mbr.hex": {
+        "size": 118116,
+        "sha256": "ff765949df9716bc033d24151f3edbe20be6a8b6214b38760b7671138dfbe398"
+      },
+      "bootloader_mbr.uf2": {
+        "size": 86528,
+        "sha256": "e3522c62cd4b6c18d1f179075692655275695745a91ac8751c3803e2cb37514f"
+      }
+    },
+    "thinknode_m3": {
+      "bootloader.bin": {
+        "size": 40960,
+        "sha256": "fd4b2573077519ddb6f7c3d49f3ae66133d9ebca81ec25a7b772b341a45d8645"
+      },
+      "bootloader.hex": {
+        "size": 108940,
+        "sha256": "d117a894dbe9ec1b1683173be37f2f9f2dd4d5dbdc44bacdd11d305bf7c0ff8c"
+      },
+      "bootloader_mbr.hex": {
+        "size": 116680,
+        "sha256": "0c46090ee51d4997fd0c33bc27edae6d26c0ab8482dce2ff11a7a9c7d9b4c067"
+      },
+      "bootloader_mbr.uf2": {
+        "size": 85504,
+        "sha256": "7a8c89c20c72486b420673c394f3b46cad0280d236f793690755caa35cb844f0"
+      }
+    },
+    "thinknode_m6": {
+      "bootloader.bin": {
+        "size": 40960,
+        "sha256": "4c8a4375279f0e5cbfbf1d71bdcf04c4d490939238d8b8975298ee3e2a4e45e8"
+      },
+      "bootloader.hex": {
+        "size": 110420,
+        "sha256": "2eebb197819abdab6a90201b34d3ac8af04337099abadcfd34220dcf261f44b9"
+      },
+      "bootloader_mbr.hex": {
+        "size": 118160,
+        "sha256": "ca0adaf23c9b1018b6589637925084f88e7367a70b63312b4751e3f2b9de6513"
+      },
+      "bootloader_mbr.uf2": {
+        "size": 87040,
+        "sha256": "371187b0afeffe8d9b8bf33760cdcdc8a42985c6385d836a1676bf2407b6bf97"
+      }
+    },
+    "wio_tracker_l1": {
+      "bootloader.bin": {
+        "size": 40960,
+        "sha256": "269d2a6e285971d71fd437adf1c6556bc2a81046cc0ee1ae00219cf9b6153874"
+      },
+      "bootloader.hex": {
+        "size": 110268,
+        "sha256": "287f3331a9fc6d1abd5964e6475802af12f933e071f49338a8684dc340995ce3"
+      },
+      "bootloader_mbr.hex": {
+        "size": 118008,
+        "sha256": "78d26db240e693d0fe1b4e715d7d68ff136177d2825b0ca318b719a4f860cf3b"
+      },
+      "bootloader_mbr.uf2": {
+        "size": 86528,
+        "sha256": "47b8d3605a61418d6b463362664e3f695a331c403f173a9aa410b2d93563acf6"
+      }
+    },
+    "wiscore_rak3401": {
+      "bootloader.bin": {
+        "size": 40960,
+        "sha256": "235250f9a5b452ba5114553cf058d4887376f25f8c071bde596732604f36dad9"
+      },
+      "bootloader.hex": {
+        "size": 109308,
+        "sha256": "e8a4ea02ac9c37ae8a3fa7403a490494ddecb887f36fcbb7d90d76fd9c2e4ee5"
+      },
+      "bootloader_mbr.hex": {
+        "size": 117048,
+        "sha256": "2a59bf3f0a254a3857178a206e4f62da0edf117c5800d8cc6c43cf0d04c73112"
+      },
+      "bootloader_mbr.uf2": {
+        "size": 86016,
+        "sha256": "697c789ee525b6c3e0f565c1f3a6498d8c5185437fa96236b7f87437652a9d54"
+      }
+    },
+    "wiscore_rak3401_rak13302_w25q16": {
+      "bootloader.bin": {
+        "size": 40960,
+        "sha256": "d967c51de1cc7ecacdfd8fc6c64e297e46eaedb717cb072543b536dafb78f99f"
+      },
+      "bootloader.hex": {
+        "size": 110888,
+        "sha256": "c4e29f4ffec8f624fd20ebc8068f41c593585024b08e41fa68f09f9e7eb09432"
+      },
+      "bootloader_mbr.hex": {
+        "size": 118628,
+        "sha256": "baa34ceac148721564bf5aba4c311cde043079c70833a4245b38932c33c4da63"
+      },
+      "bootloader_mbr.uf2": {
+        "size": 87040,
+        "sha256": "252865d339dcc1cab3e9d8d5384e6971ec26cbb6a14667accd9afa7a8b3582dd"
+      }
+    },
+    "wiscore_rak4631_board": {
+      "bootloader.bin": {
+        "size": 40960,
+        "sha256": "42ba48c618f2a230a61664e6bfe0edee829d7b192c1fd6b40646c9d11750f492"
+      },
+      "bootloader.hex": {
+        "size": 109660,
+        "sha256": "2e9683ff9c09b05477c30a2a5b2e4ceca3b79b6290393031c2f042c8f1eeb357"
+      },
+      "bootloader_mbr.hex": {
+        "size": 117400,
+        "sha256": "75e4a9aafccc07afd295dc4484515fd0e74a8ad3ae71aabb18155e225533cceb"
+      },
+      "bootloader_mbr.uf2": {
+        "size": 86016,
+        "sha256": "afacf2ef5ba7d9ecefae8230604ed4ccb9dc39fe5c4f7b617378c027ff7f502e"
+      }
+    },
+    "wiscore_rak4631_board_rak15001_slot_c": {
+      "bootloader.bin": {
+        "size": 40960,
+        "sha256": "3d31fb9fd7f44e87e1107f512bad634377b9ae6ca329247d08d33671917a7aa0"
+      },
+      "bootloader.hex": {
+        "size": 111168,
+        "sha256": "1351a4c9beb53b7674a95436097719e5b0cd7cd4ae0f8d36173ed9bd053726b0"
+      },
+      "bootloader_mbr.hex": {
+        "size": 118908,
+        "sha256": "4bc54631980ded877411cd568c8cf2a3e2a2a8738329f4e0f7b68711dead2a27"
+      },
+      "bootloader_mbr.uf2": {
+        "size": 87552,
+        "sha256": "bfbe48c12fcb547b8ffb600adbea271ffe5a7b6004a8f9297eb4754d4cafbd12"
+      }
+    },
+    "wiscore_rak4631_w25q16": {
+      "bootloader.bin": {
+        "size": 40960,
+        "sha256": "93d84e5d2db28403bb915694d37d139859061d14f2092320bc5a047407eda5b6"
+      },
+      "bootloader.hex": {
+        "size": 111110,
+        "sha256": "37bfc06e8a3f19ffbdaff78fcc8195746037263278edcc410d62bb047d75a28e"
+      },
+      "bootloader_mbr.hex": {
+        "size": 118850,
+        "sha256": "fbe8a29701444da31a544f147a9b0ff07dd20921da3e37dcce49ee2cd94db8c6"
+      },
+      "bootloader_mbr.uf2": {
+        "size": 87552,
+        "sha256": "c3117ad2ab879b80cd35f19b22700841f2a9aff5d6a5b8f73546e1e7db48179c"
+      }
+    },
+    "wismesh_tag": {
+      "bootloader.bin": {
+        "size": 40960,
+        "sha256": "546d8f3841406bdc0a00185e9c05f5b8af29108b330efaf7cbf18e98208d40bc"
+      },
+      "bootloader.hex": {
+        "size": 109650,
+        "sha256": "1b101c5120b25cf56c18f06cc7c581c4417d88487643286525ce7babeed10092"
+      },
+      "bootloader_mbr.hex": {
+        "size": 117390,
+        "sha256": "38d2807028c32a270a0dacc147bbf4b262c47dc3a91ed8fd19522df5c0687938"
+      },
+      "bootloader_mbr.uf2": {
+        "size": 86016,
+        "sha256": "c88a54920259efc3ef8937ec73777c635222761c86f23757745a63334cbcc922"
+      }
+    },
+    "xiao_nrf52840_ble": {
+      "bootloader.bin": {
+        "size": 40960,
+        "sha256": "7bd511c336e1ac2cdd2ba0d72c2cf4fa8d87a16d9fa6911ad1d6f23cd1922068"
+      },
+      "bootloader.hex": {
+        "size": 111108,
+        "sha256": "ab9343538ec7731adbf33d149a89e293cea828b721399d90d620f2e7cd9d08eb"
+      },
+      "bootloader_mbr.hex": {
+        "size": 118848,
+        "sha256": "43db1d4e5dae8e52b1caacff52d454cc3b2137f817dd3dd5912016a88052f781"
+      },
+      "bootloader_mbr.uf2": {
+        "size": 87552,
+        "sha256": "75ad02505619565992bd11d23189cff91c8b98ab13f608355a9cb1dc1c82ca3e"
+      }
+    },
+    "xiao_nrf52840_ble_sense": {
+      "bootloader.bin": {
+        "size": 40960,
+        "sha256": "a86d55dfab036fa3647bb7875341a4ba113a797c45229f8875bc43f5a058caab"
+      },
+      "bootloader.hex": {
+        "size": 111120,
+        "sha256": "fab91d10fbf5ae961b96e7be1ce34e59e2d92630bec54f8032f926876e4569dd"
+      },
+      "bootloader_mbr.hex": {
+        "size": 118860,
+        "sha256": "cd49687c4df396a05bd88290f13ace39031aa92ec38fda92f9f260c47978bfe2"
+      },
+      "bootloader_mbr.uf2": {
+        "size": 87552,
+        "sha256": "3a28aa56189fabc3cf253f3095594461b1da8ea183aa1b605db6ba1bb3aa71d4"
+      }
+    }
+  },
+  "additional_profiles": {
+    "signed": {
+      "heltec_t096": {
+        "bootloader.bin": {
+          "size": 40960,
+          "sha256": "797b39d91757e087e085224632bee5597b13bfc658117876baf6c5e25c9e9200"
+        },
+        "bootloader.hex": {
+          "size": 111518,
+          "sha256": "5cf3fe7cbbf26a0bdf1c46d23203a866259dedccb14ac6f7995e51d57b14c34c"
+        },
+        "bootloader_mbr.hex": {
+          "size": 119258,
+          "sha256": "197793f72cf609196427297dad7fb98f445dafefdb2a1b258009701aee63513c"
+        },
+        "bootloader_mbr.uf2": {
+          "size": 87552,
+          "sha256": "53f9e37e2e433f1aa49ed10098c7eef7d0ebdb5e0ca232e56fb272754a708805"
+        }
+      },
+      "heltec_t114": {
+        "bootloader.bin": {
+          "size": 40960,
+          "sha256": "bdfa7ec276b04996644768423433a7d44d730410dc8f3c3e7ec93c2418cae6fe"
+        },
+        "bootloader.hex": {
+          "size": 112664,
+          "sha256": "f23b42d59c48341e295218e11d8073d7d1794deda0957e3404868ea3073d9c55"
+        },
+        "bootloader_mbr.hex": {
+          "size": 120404,
+          "sha256": "52d13a8cb8cdd52944b7d67bab5de145b6ffa7103387dc51ae2e9c67c68255d3"
+        },
+        "bootloader_mbr.uf2": {
+          "size": 88064,
+          "sha256": "ec55d7f33bad743d5f5b0a823987a9788103c8d8f92deb92703ed613d2a83c51"
+        }
+      }
+    },
+    "dualbank": {
+      "heltec_t096": {
+        "bootloader.bin": {
+          "size": 40960,
+          "sha256": "c82f14b414e5a81037ba406d9cf6ce8fd1d04be052429d7c9b50759539649256"
+        },
+        "bootloader.hex": {
+          "size": 111448,
+          "sha256": "5f18c6005a748c3a298b1960d85af858db5ab78895d451a4c10f3f9d50698c31"
+        },
+        "bootloader_mbr.hex": {
+          "size": 119188,
+          "sha256": "71d8e0cb80d2278ad497416049bd19d3298a8b64a6696eb2159d0e7a843c990a"
+        },
+        "bootloader_mbr.uf2": {
+          "size": 87552,
+          "sha256": "55bedd5a2421842ae6a551aa6d2fca8708841803f94d867c590aa4b66127d22c"
+        }
+      },
+      "heltec_t114": {
+        "bootloader.bin": {
+          "size": 40960,
+          "sha256": "2f10ca1e33104a67ace859f08525b2a3773d8c693bad33b4ce252dcb06be5a8c"
+        },
+        "bootloader.hex": {
+          "size": 112594,
+          "sha256": "f5eb3c73a4b1fc5d18e70015c806bd91378f223bb4860a644335df599e9d696c"
+        },
+        "bootloader_mbr.hex": {
+          "size": 120334,
+          "sha256": "b6e5fa0e0d7fd6a3948f0d9ae262a03802fb7c821a9eeea8422a6e34e9149bdc"
+        },
+        "bootloader_mbr.uf2": {
+          "size": 88064,
+          "sha256": "ee72eaa6ef983469ce848e167ad8bb7632fd4d89f7bfb2492dccff156b20513f"
+        }
+      }
+    },
+    "signed-dualbank": {
+      "heltec_t096": {
+        "bootloader.bin": {
+          "size": 40960,
+          "sha256": "9e40c3cc66b7c21aff28957753822a16721a0a6926922ccbc7048fbf84b45e43"
+        },
+        "bootloader.hex": {
+          "size": 111540,
+          "sha256": "44196853e55c598821492b5011a96301e1c4a6d73914144a63f47e4ee9dcee05"
+        },
+        "bootloader_mbr.hex": {
+          "size": 119280,
+          "sha256": "1f93a41ed2b686fa6a186030152ec36c861808043e68ae5353149941cd1dbbb8"
+        },
+        "bootloader_mbr.uf2": {
+          "size": 87552,
+          "sha256": "e97b9d22d0b0a6d307c4e96aa3cc65ee21b5b459ef1132d485c6d18303e0d004"
+        }
+      },
+      "heltec_t114": {
+        "bootloader.bin": {
+          "size": 40960,
+          "sha256": "3fbeef120da3750b0b72d5922870f5787cce3cdf01cd714421e6abccd5e7f3cf"
+        },
+        "bootloader.hex": {
+          "size": 112598,
+          "sha256": "7fe4af68cf186946e7919b1abb02f1d8ca3bb8d6086a5e17589ce933345f8fbe"
+        },
+        "bootloader_mbr.hex": {
+          "size": 120338,
+          "sha256": "2fc92bd3e1c206d1ec0b80383c68075c5cc12ba4b93d5a9537d9537f699851e5"
+        },
+        "bootloader_mbr.uf2": {
+          "size": 88064,
+          "sha256": "4ffc11f8c9c4a2148a5fe6403a8fd1c0123b06514b41733e107c6ed193241266"
+        }
+      }
+    },
+    "recovery": {
+      "heltec_t096": {
+        "R_heltec_t096_bootloader.bin": {
+          "size": 40960,
+          "sha256": "40d223d26d01b2b91fe6a8f9c8aad147be96c325720a7142468e48d9c7ccc65f"
+        },
+        "R_heltec_t096_bootloader.hex": {
+          "size": 111144,
+          "sha256": "7f06d56b9a86537ea1d2cfda0b6e8da51ab792b37bfab8e51b512c383d7784f7"
+        },
+        "R_heltec_t096_bootloader_mbr.hex": {
+          "size": 118884,
+          "sha256": "b5354f7b4292fb89ee4bb21da8ee1ffa4620f9a1571e93dc5cf74aa05c86219d"
+        },
+        "R_heltec_t096_bootloader_mbr.uf2": {
+          "size": 87552,
+          "sha256": "c050ed5739fb0f71753fc8d8985109b27bbb6338364b73eb2c650eb4defe88fb"
+        }
+      },
+      "heltec_t114": {
+        "R_heltec_t114_bootloader.bin": {
+          "size": 40960,
+          "sha256": "229ea6ae22f084aec8c0a27fd1136c5b4aeca31416b3adc2b8efdfb1e8dbeadb"
+        },
+        "R_heltec_t114_bootloader.hex": {
+          "size": 112246,
+          "sha256": "e153532fde349b44f2fec1c92a7ea8a7d3f61cd4c0925173cb73bead261a62e6"
+        },
+        "R_heltec_t114_bootloader_mbr.hex": {
+          "size": 119986,
+          "sha256": "20ff6f83ac02d0288bc86c7e3d39ca81f63f491b5c6ce741baa37d17a2bc78bb"
+        },
+        "R_heltec_t114_bootloader_mbr.uf2": {
+          "size": 88064,
+          "sha256": "2a6b73ed83bd6cb6a621bfdea61ead361e99054802f8907cc0d03a421b58178e"
+        }
+      }
+    }
+  }
+}

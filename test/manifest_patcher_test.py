@@ -79,6 +79,22 @@ class ManifestPatcherTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 MODULE.verify_manifest(str(path))
 
+    def test_patch_canonicalizes_crlf_input_and_is_byte_idempotent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "bootloader.hex"
+            image = envelope()
+            image.start_addr = {"EIP": IMAGE_START}
+            image.write_hex_file(path, eolstyle="CRLF")
+            self.assertIn(b"\r\n", path.read_bytes())
+            MODULE.patch_manifest(str(path))
+            first = path.read_bytes()
+            self.assertNotIn(b"\r", first)
+            self.assertTrue(first.endswith(b":00000001FF\n"))
+            self.assertEqual(IntelHex(str(path)).start_addr, image.start_addr)
+            MODULE.verify_manifest(str(path))
+            MODULE.patch_manifest(str(path))
+            self.assertEqual(path.read_bytes(), first)
+
     def test_cmake_flash_targets_use_only_the_patched_hex(self):
         cmake = (MODULE_PATH.parents[1] / "CMakeLists.txt").read_text(encoding="utf-8")
         self.assertIn("COMMAND ${BOOTLOADER_VERIFY_COMMAND}", cmake)
@@ -138,6 +154,8 @@ class ManifestPatcherTest(unittest.TestCase):
             ]
             result = subprocess.run(command, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn(b"\r", merged_path.read_bytes())
+            self.assertTrue(merged_path.read_bytes().endswith(b":00000001FF\n"))
             self.assertEqual(IntelHex(str(merged_path))[0], 0x42)
             MODULE.verify_manifest(str(merged_path))
 

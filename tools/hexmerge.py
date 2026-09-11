@@ -169,8 +169,11 @@ def main(args=None):
     if (start, end) != (None, None):
         res = res[start:end_addr_inclusive(end)]
     if output is None:
-        output = sys.stdout
-    res.write_hex_file(output, write_start_addr)
+        res.write_hex_file(sys.stdout, write_start_addr)
+    else:
+        # Match the patched bootloader HEX on every build host.
+        with open(output, 'w', encoding='ascii', newline='\n') as stream:
+            res.write_hex_file(stream, write_start_addr)
     return 0
 
 

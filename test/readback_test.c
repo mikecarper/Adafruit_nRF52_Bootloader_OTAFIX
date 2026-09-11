@@ -178,7 +178,7 @@ static bool run_case(int stale, int* committed, int* matches) {
 }
 
 #if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
-// Inflate the approved vector without changing its detools stream: the decoder
+// Inflate the approved vector to at least payload_size without changing its detools stream: the decoder
 // accepts trailing padding, while the larger payload moves the bottom-aligned
 // container lower in the shared ED000 window. Merkle/signature verification belongs to the
 // approving application; this harness exercises the bootloader after APRV.
@@ -192,8 +192,10 @@ static uint8_t *make_large_internal_mota(const uint8_t *source, size_t source_le
     const uint32_t block_size = 1u << block_size_log2;
     const uint32_t old_blocks = (old_payload_size + block_size - 1u) / block_size;
     const uint32_t old_payload_offset = fixed_len + old_blocks * 4u;
-    if (old_payload_size > payload_size ||
-        (uint64_t)old_payload_offset + old_payload_size + sizeof(TRAILER) != source_len) return NULL;
+    if ((uint64_t)old_payload_offset + old_payload_size + sizeof(TRAILER) != source_len) return NULL;
+    // Real qualification deltas can already exceed the small regression fixture's
+    // requested floor. Keep their complete stream instead of treating them as malformed.
+    if (old_payload_size > payload_size) payload_size = old_payload_size;
 
     const uint32_t blocks = (payload_size + block_size - 1u) / block_size;
     const uint32_t new_payload_offset = fixed_len + blocks * 4u;
@@ -612,10 +614,19 @@ int main(int argc, char** argv) {
         mota_hybrid_handoff_t zero_handoff = {0};
         int hybrid_ok = hybrid_mota != NULL;
         if (hybrid_ok) {
+            // Asking to inflate an already-large vector must never shrink or reject it.
+            long retained_len = 0;
+            uint32_t retained_offset = 0;
+            uint8_t *retained = make_large_internal_mota(
+                hybrid_mota, (size_t)hybrid_mota_n, 1u, &retained_len, &retained_offset);
+            hybrid_ok = retained != NULL && retained_len == hybrid_mota_n &&
+                        retained_offset == hybrid_payload_offset &&
+                        memcmp(retained, hybrid_mota, (size_t)hybrid_mota_n) == 0;
+            free(retained);
             int c_hybrid, m_hybrid;
             const bool hybrid_applied = run_hybrid_case(
                 hybrid_mota, (uint32_t)hybrid_mota_n, &c_hybrid, &m_hybrid);
-            hybrid_ok = hybrid_applied && c_hybrid && m_hybrid &&
+            hybrid_ok = hybrid_ok && hybrid_applied && c_hybrid && m_hybrid &&
                         g_settings_writes == 2 && !g_app_write_while_valid &&
                         !g_app_write_past_source && g_gpregret == 0u &&
                         g_gpregret2 == 0xB8u && g_hybrid_consume_count == 1 &&

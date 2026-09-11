@@ -38,6 +38,28 @@ class SeederAttachmentTests(unittest.TestCase):
             with self.assertRaisesRegex(updater.UpdateError, "could not attach"):
                 updater.wait_for_seeder_attachment(FakeProcess(), path, timeout=0)
 
+    def test_empty_catalog_is_not_ready(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_log(directory, "  [dev] COUNT -> 0\n")
+            with self.assertRaisesRegex(updater.UpdateError, "empty catalog"):
+                updater.wait_for_seeder_attachment(FakeProcess(), path, timeout=0)
+
+    def test_latest_count_overrides_stale_nonempty_catalog(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_log(directory, "[dev] COUNT -> 1\n[dev] COUNT -> 0\n")
+            with self.assertRaisesRegex(updater.UpdateError, "empty catalog"):
+                updater.wait_for_seeder_attachment(FakeProcess(), path, timeout=0)
+
+    def test_count_does_not_mask_device_error_or_process_exit(self) -> None:
+        for code, suffix, error in (
+            (None, "[dev] ERR folder already owned\n", "could not attach"),
+            (7, "", "status 7"),
+        ):
+            with self.subTest(code=code), tempfile.TemporaryDirectory() as directory:
+                path = self.write_log(directory, "[dev] COUNT -> 1\n" + suffix)
+                with self.assertRaisesRegex(updater.UpdateError, error):
+                    updater.wait_for_seeder_attachment(FakeProcess(code), path, timeout=0)
+
     def test_live_process_without_count_times_out(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = self.write_log(directory, "serving on tty\n")

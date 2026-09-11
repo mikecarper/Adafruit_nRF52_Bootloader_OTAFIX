@@ -93,7 +93,10 @@ def patch_manifest(hex_path, bin_path=None):
         image[manifest_address + CRC_OFFSET + offset] = value
         binary[checksum_offset + offset] = value
 
-    image.write_hex_file(hex_path)
+    # IntelHex's native text mode otherwise emits CRLF on Windows. Keep the
+    # release artifact byte-identical across hosts, not just its flash contents.
+    with open(hex_path, "w", encoding="ascii", newline="\n") as output:
+        image.write_hex_file(output)
     if bin_path:
         with open(bin_path, "wb") as output:
             output.write(binary)
