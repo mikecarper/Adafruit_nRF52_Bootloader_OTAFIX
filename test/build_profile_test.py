@@ -277,6 +277,19 @@ class BuildProfileTest(unittest.TestCase):
             screen,
         )
 
+    def test_qualification_text_is_bounded_but_filenames_keep_provenance(self) -> None:
+        label = f"TEST_{QUALIFICATION_VERSION}"
+        self.assertEqual(label, self.make_variable("FIRMWARE_VERSION"))
+        self.assertEqual(label, self.make_variable("FIRMWARE_VERSION_BASE"))
+        self.assertEqual(f"{label} s140 6.1.1", self.make_variable("BLE_FIRMWARE_VERSION"))
+        self.assertIn(f"-test-version-{QUALIFICATION_VERSION}", self.make_variable("OUT_NAME"))
+        self.assertNotIn("TEST_", self.make_variable("OUT_NAME"))
+        cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertIn(
+            'if(DEFINED MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE)\n'
+            '  set(FIRMWARE_VERSION "TEST_${MOTA_BOOTLOADER_VERSION}")', cmake
+        )
+
     def test_recovery_is_labelled_and_release_workflows_are_separate(self) -> None:
         flag = "RECOVERY_ALLOW_ALL_BOARDS=1"
         self.assertNotIn("-DRECOVERY_ALLOW_ALL_BOARDS=1", self.make_variable("CFLAGS"))

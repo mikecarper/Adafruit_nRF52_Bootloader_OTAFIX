@@ -16,6 +16,10 @@ requests, and manual runs, build with packed test version `0x02040703`
 (post-preview.2). This is not a release tag or a production version override.
 The board matrix checks Make and CMake for every curated board; host tests,
 sanitizers, and signed/dual-bank/recovery T096 and T114 profiles remain required.
+Explicit qualification overrides display `TEST_0x02040703` on-device, with
+the full Git/test description retained in filenames. This keeps growing Git
+descriptions from overflowing the signed display builds; production version
+text, signature checks, and the fixed linker envelope are unchanged.
 
 The field-kit XIAO and GAT562 Full Companion sources and GAT562 30S receiver
 prerequisite now share immutable MeshCore commit

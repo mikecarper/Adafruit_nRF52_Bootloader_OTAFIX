@@ -505,6 +505,12 @@ cmake_print_variables(GIT_VERSION MK_BOOTLOADER_VERSION)
 
 set(FIRMWARE_VERSION "${GIT_VERSION}")
 set(FIRMWARE_VERSION_BASE "${GIT_VERSION_BASE}")
+# Match Make: long dirty/test descriptions stay in artifact filenames, not
+# in the fixed flash envelope. Production text still comes from the exact tag.
+if(DEFINED MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE)
+  set(FIRMWARE_VERSION "TEST_${MOTA_BOOTLOADER_VERSION}")
+  set(FIRMWARE_VERSION_BASE "${FIRMWARE_VERSION}")
+endif()
 set(BLE_FIRMWARE_VERSION "${FIRMWARE_VERSION} ${SD_NAME} ${SD_VERSION}")
 if(RECOVERY_ALLOW_ALL_BOARDS)
   set(FIRMWARE_VERSION "R_${MOTA_BOOTLOADER_VERSION}")

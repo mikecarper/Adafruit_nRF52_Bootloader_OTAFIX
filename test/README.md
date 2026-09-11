@@ -339,6 +339,8 @@ content-hashed stamp and force both recompilation and relinking. The persisted
 stamp contains only a SHA-256 digest. The same regression pins nonrelease CI to
 the documented `0x02040703` post-preview.2 qualification lineage and rejects
 reuse of failed candidate ID `0x02040401` as an active override. It also pins
+bounded `TEST_<packed-version>` on-device qualification text while requiring
+full Git/test provenance in filenames (recovery retains its `R_` label), and
 both CI toolchain installs to Arm GNU Toolchain 14.2.Rel1, requires Make and
 CMake to build the signed-plus-dual-bank `heltec_t096` and `heltec_t114`
 profiles, keeps

@@ -120,11 +120,15 @@ endif
 GIT_SUBMODULE_VERSIONS := $(shell git submodule status | cut -d" " -f3,4 | paste -s -d" " -)
 GIT_VERSION_BASE := $(shell echo "$(GIT_VERSION)" | sed -E 's/-[0-9]+-g[0-9a-f]+(-dirty)?$$//')
 
-# Keep full provenance in filenames, but bound on-device recovery text so
+# Keep full provenance in filenames, but bound on-device qualification/recovery text so
 # dirty/test git descriptions do not crowd out code in the fixed 40 KiB region.
 FIRMWARE_VERSION = $(GIT_VERSION)
 FIRMWARE_VERSION_BASE = $(GIT_VERSION_BASE)
 BLE_FIRMWARE_VERSION = $(FIRMWARE_VERSION) $(SD_NAME) $(SD_VERSION)
+ifneq ($(MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE),)
+  FIRMWARE_VERSION = TEST_$(MOTA_BOOTLOADER_VERSION)
+  FIRMWARE_VERSION_BASE = $(FIRMWARE_VERSION)
+endif
 ifeq ($(RECOVERY_ALLOW_ALL_BOARDS),1)
   FIRMWARE_VERSION = R_$(MOTA_BOOTLOADER_VERSION)
   FIRMWARE_VERSION_BASE = $(FIRMWARE_VERSION)
