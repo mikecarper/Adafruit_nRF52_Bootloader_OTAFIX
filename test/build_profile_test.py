@@ -304,10 +304,11 @@ class BuildProfileTest(unittest.TestCase):
             self.make("print-OUT_NAME", "RECOVERY_ALLOW_ALL_BOARDS=2")
 
         workflow = WORKFLOW.read_text(encoding="utf-8")
+        jobs = workflow.split("\njobs:\n", 1)[1]
         for job in ("set-matrix", "feature-builds", "field-firmware",
                     "bootloader-mota", "recovery-bundle", "release"):
             block = re.search(
-                rf"(?ms)^  {re.escape(job)}:\n(.*?)(?=^  [\w-]+:\n|\Z)", workflow
+                rf"(?ms)^  {re.escape(job)}:\n(.*?)(?=^  [\w-]+:\n|\Z)", jobs
             )
             self.assertIsNotNone(block, job)
             self.assertIn("!startsWith(github.ref_name, 'R_')", block.group(1), job)
