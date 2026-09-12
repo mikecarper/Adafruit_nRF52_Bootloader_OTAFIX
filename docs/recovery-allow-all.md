@@ -92,3 +92,9 @@ skips recovery tags, and no recovery `.mota` bundles are published.
 Creating a tag/release is a separate maintainer action. Building or committing
 these changes does not publish anything. Qualify the two-step process on actual
 hardware before distributing it as a tested recovery procedure.
+
+The [RAK3401 hardware qualification](recovery-rak3401-hardware-20260912.md)
+passed the two-step UF2 procedure, both GAT562/RAK3401 recovery bridges,
+corruption rejection, and restoration of normal identity guards. Its transport,
+board, and test-build limits are recorded in that report; it is not an all-board
+or BLE/serial hardware qualification.
