@@ -304,7 +304,15 @@ class BuildProfileTest(unittest.TestCase):
             self.make("print-OUT_NAME", "RECOVERY_ALLOW_ALL_BOARDS=2")
 
         workflow = WORKFLOW.read_text(encoding="utf-8")
-        self.assertEqual(5, workflow.count("!startsWith(github.ref_name, 'R_')"))
+        for job in ("set-matrix", "feature-builds", "field-firmware",
+                    "bootloader-mota", "recovery-bundle", "release"):
+            block = re.search(
+                rf"(?ms)^  {re.escape(job)}:\n(.*?)(?=^  [\w-]+:\n|\Z)", workflow
+            )
+            self.assertIsNotNone(block, job)
+            self.assertIn("!startsWith(github.ref_name, 'R_')", block.group(1), job)
+        self.assertIn("name: bootloader-recovery-release", workflow)
+        self.assertIn("tools/build_recovery_release.py", workflow)
         recovery = (ROOT / ".github/workflows/recovery.yml").read_text(encoding="utf-8")
         self.assertIn("RECOVERY_ALLOW_ALL_BOARDS=1", recovery)
         self.assertIn("_bin/recovery-allow-all/", recovery)
