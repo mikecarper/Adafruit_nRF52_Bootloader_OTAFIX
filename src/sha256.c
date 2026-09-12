@@ -1,6 +1,7 @@
 // Minimal FIPS-180 SHA-256. Public domain (derived from Brad Conte's crypto-algorithms,
 // https://github.com/B-Con/crypto-algorithms - released to the public domain). Standalone.
 #include "sha256.h"
+#include <string.h>
 
 #define ROTR(a,b) (((a) >> (b)) | ((a) << (32 - (b))))
 #define CH(x,y,z)  (((x) & (y)) ^ (~(x) & (z)))
@@ -38,10 +39,14 @@ static void sha256_transform(sha256_ctx_t* c, const uint8_t* d) {
   c->state[4]+=e; c->state[5]+=f; c->state[6]+=g; c->state[7]+=h;
 }
 
-void sha256_init(sha256_ctx_t* c) {
+// Keep the initial-state constants shared across DFU and mOTA hash callers.
+__attribute__((noinline)) void sha256_init(sha256_ctx_t* c) {
+  static const uint32_t initial_state[8] = {
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+    0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+  };
   c->datalen = 0; c->bitlen = 0;
-  c->state[0]=0x6a09e667; c->state[1]=0xbb67ae85; c->state[2]=0x3c6ef372; c->state[3]=0xa54ff53a;
-  c->state[4]=0x510e527f; c->state[5]=0x9b05688c; c->state[6]=0x1f83d9ab; c->state[7]=0x5be0cd19;
+  memcpy(c->state, initial_state, sizeof(initial_state));
 }
 
 void sha256_update(sha256_ctx_t* c, const uint8_t* data, size_t len) {
@@ -54,10 +59,18 @@ void sha256_update(sha256_ctx_t* c, const uint8_t* data, size_t len) {
 void sha256_final(sha256_ctx_t* c, uint8_t out[32]) {
   uint32_t i = c->datalen;
   c->data[i++] = 0x80;
-  if (c->datalen < 56) { while (i < 56) c->data[i++] = 0; }
-  else { while (i < 64) c->data[i++] = 0; sha256_transform(c, c->data); for (i = 0; i < 56; i++) c->data[i] = 0; }
+  if (i > 56) {
+    memset(c->data + i, 0, 64 - i);
+    sha256_transform(c, c->data);
+    i = 0;
+  }
+  memset(c->data + i, 0, 56 - i);
   c->bitlen += (uint64_t)c->datalen * 8;
-  for (int k = 0; k < 8; k++) c->data[63 - k] = (uint8_t)(c->bitlen >> (8 * k));
+  uint64_t bitlen = c->bitlen;
+  for (int k = 0; k < 8; k++) {
+    c->data[63 - k] = (uint8_t)bitlen;
+    bitlen >>= 8;
+  }
   sha256_transform(c, c->data);
   for (i = 0; i < 4; i++)
     for (int k = 0; k < 8; k++) out[i + 4*k] = (uint8_t)(c->state[k] >> (24 - i*8));

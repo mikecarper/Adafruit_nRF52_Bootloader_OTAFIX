@@ -183,7 +183,7 @@ uint32_t secure_dfu_ble_init(ble_dfu_t *service) {
   return err;
 }
 
-void secure_dfu_ble_event(ble_dfu_t *service, ble_evt_t *event) {
+__attribute__((noinline)) void secure_dfu_ble_event(ble_dfu_t *service, ble_evt_t *event) {
   switch (event->header.evt_id) {
     case BLE_GAP_EVT_CONNECTED:
       service->conn_handle = event->evt.gap_evt.conn_handle;

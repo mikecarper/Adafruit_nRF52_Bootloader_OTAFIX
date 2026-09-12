@@ -10,6 +10,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include "crc32.h"
 
 #define MOTA_HYBRID_HANDOFF_ADDRESS     0x20006008u
 #define MOTA_HYBRID_HANDOFF_VERSION     1u
@@ -58,14 +59,7 @@ MOTA_HYBRID_HANDOFF_OFFSET_ASSERT(crc32_inv, 68u);
 #undef MOTA_HYBRID_HANDOFF_OFFSET_ASSERT
 
 static inline uint32_t mota_hybrid_handoff_crc32(const uint8_t *data, size_t len) {
-  uint32_t crc = UINT32_MAX;
-  for (size_t i = 0; i < len; i++) {
-    crc ^= data[i];
-    for (uint8_t bit = 0; bit < 8u; bit++) {
-      crc = (crc >> 1) ^ (0xEDB88320u & (uint32_t)-(int32_t)(crc & 1u));
-    }
-  }
-  return ~crc;
+  return otafix_crc32_update(0, data, len);
 }
 
 static inline void mota_hybrid_handoff_encode(mota_hybrid_handoff_t *out, uint32_t container_total,

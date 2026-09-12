@@ -5,6 +5,7 @@
 #include "nrf.h"
 #include "nrf_gpio.h"
 #include "nrf_wdt.h"
+#include "watchdog.h"
 #include "boards.h"
 #include <string.h>
 
@@ -25,14 +26,7 @@ static bool g_io_ok;
 
 static void feed_watchdogs(void) {
   static uint16_t external_feed_divider;
-  if (nrf_wdt_started(NRF_WDT)) {
-    const uint32_t enabled = NRF_WDT->RREN & 0xFFu;
-    for (uint8_t channel = 0; channel < 8; channel++) {
-      if ((enabled & (1u << channel)) != 0) {
-        nrf_wdt_reload_request_set(NRF_WDT, channel);
-      }
-    }
-  }
+  otafix_watchdog_feed();
   if ((external_feed_divider++ & 0x0FFFu) == 0) {
     board_watchdog_feed();
   }

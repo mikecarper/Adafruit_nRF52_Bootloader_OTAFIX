@@ -180,12 +180,14 @@ check: apply_sim readback_test readback_test_v7 readback_internal_test bootloade
 	python3 ble_connection_policy_test.py
 	python3 serial_dfu_erase_test.py
 	python3 sd_spi_guard_test.py
+	python3 shared_helpers_test.py
 	python3 lfclk_source_test.py
 	python3 svc_ipa_guard_test.py
 	python3 legacy_dfu_bounds_test.py
 	python3 secure_dfu_test.py
 	python3 secure_dfu_ble_test.py
 	python3 secure_dfu_uploader_test.py
+	python3 secure_dfu_target_test.py
 	python3 legacy_ble_dfu_host_test.py
 	python3 signed_legacy_package_test.py
 	python3 usb_descriptor_test.py
@@ -258,5 +260,12 @@ clean:
 	rm -f apply_sim readback_test readback_test_v7 readback_internal_test bootloader_image_test sd_apply_test qspi_apply_test bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test softdevice_fwid_test dfu_init_bounds_test dfu_init_signed_bounds_test qspi_alignment_test qspi_wake_test usb_wait_test dfu_timeout_test uf2_write_state_test bootloader_settings_guard_test dfu_image_policy_test dfu_entry_test peer_data_layout_test peer_data_layout_nrf52_test peer_data_layout_nrf52833_test pstorage_busy_test
 
 .PHONY: check sanitize clean
+
+# These executables include the retained handoff headers and/or image validator.
+# Rebuild them when the shared CRC implementation changes, not only its callers.
+apply_sim readback_test readback_test_v7 readback_internal_test \
+bootloader_image_test bootloader_image_recovery_test sd_apply_test qspi_apply_test \
+bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test \
+bootloader_mota_recovery_test dfu_image_policy_test dfu_image_policy_recovery_test: $(SRC)/crc32.h
 
 check: bootloader_image_recovery_test dfu_image_policy_recovery_test bootloader_mota_recovery_test

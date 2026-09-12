@@ -272,21 +272,32 @@ C_SRC += \
   src/usb/uf2/bootloader_image.c \
   src/detools/detools.c \
 
-# if using a signed firmware
 ifeq ($(SECURE_DFU_RAK3401_TEST),1)
+ifneq ($(BOARD),wiscore_rak3401)
+$(error Use SECURE_DFU_TEST for boards other than wiscore_rak3401)
+endif
+SECURE_DFU_TEST := 1
+endif
+
+# Secure-only BLE qualification (CDC/UF2 retain their existing protocols).
+ifeq ($(SECURE_DFU_TEST),1)
 ifneq ($(MOTA_BOOTLOADER_TEST_BUILD),1)
-$(error SECURE_DFU_RAK3401_TEST requires MOTA_BOOTLOADER_TEST_BUILD=1)
+$(error SECURE_DFU_TEST requires MOTA_BOOTLOADER_TEST_BUILD=1)
 endif
 ifeq ($(strip $(MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE)),)
-$(error SECURE_DFU_RAK3401_TEST requires an explicit test version)
+$(error SECURE_DFU_TEST requires an explicit test version)
 endif
-ifneq ($(BOARD),wiscore_rak3401)
-$(error SECURE_DFU_RAK3401_TEST requires wiscore_rak3401)
+ifneq ($(MCU_SUB_VARIANT),nrf52840)
+$(error SECURE_DFU_TEST requires nrf52840)
 endif
 ifneq ($(filter 1,$(SIGNED_FW) $(DUALBANK_FW) $(RECOVERY_ALLOW_ALL_BOARDS)),)
-$(error SECURE_DFU_RAK3401_TEST requires unsigned single-bank firmware)
+$(error SECURE_DFU_TEST requires unsigned single-bank firmware)
 endif
-CFLAGS += -DSECURE_DFU_RAK3401_TEST=1
+SECURE_DFU_HW_VERSION := $(shell $(PYTHON) tools/secure_dfu_target.py $(BOARD) --hw-version)
+ifeq ($(strip $(SECURE_DFU_HW_VERSION)),)
+$(error Cannot derive Secure DFU target identity)
+endif
+CFLAGS += -DSECURE_DFU_TEST=1 -DSECURE_DFU_HW_VERSION=$(SECURE_DFU_HW_VERSION)
 C_SRC += src/secure_dfu.c src/secure_dfu_ble.c
 endif
 
@@ -610,7 +621,7 @@ MOTA_SOFTDEVICE_FWID=$(MOTA_SOFTDEVICE_FWID)
 MOTA_APP_BASE=$(MOTA_APP_BASE)
 MOTA_RAM_ARENA_SIZE=$(MOTA_RAM_ARENA_SIZE)
 SIGNED_FW=$(SIGNED_FW)
-SECURE_DFU_RAK3401_TEST=$(SECURE_DFU_RAK3401_TEST)
+SECURE_DFU_TEST=$(SECURE_DFU_TEST)
 SIGNED_FW_QX=$(SIGNED_FW_QX)
 SIGNED_FW_QY=$(SIGNED_FW_QY)
 DUALBANK_FW=$(DUALBANK_FW)

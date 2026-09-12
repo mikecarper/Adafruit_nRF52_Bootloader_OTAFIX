@@ -1,20 +1,21 @@
 #include "bootloader_image.h"
+#include "crc32.h"
 
 #include <stddef.h>
 #include <string.h>
 
 uint32_t bootloader_image_crc32(uint8_t const* image, size_t image_size, size_t crc_offset) {
-  uint32_t crc = UINT32_MAX;
-
-  for (size_t i = 0; i < image_size; i++) {
-    uint8_t const value = (i >= crc_offset && i < crc_offset + sizeof(uint32_t)) ? 0 : image[i];
-    crc ^= value;
-    for (uint8_t bit = 0; bit < 8; bit++) {
-      crc = (crc >> 1) ^ (0xEDB88320UL & (uint32_t)-(int32_t)(crc & 1U));
-    }
+  // Stream through the shared CRC loop, replacing only the manifest's CRC
+  // field with zeros. Out-of-range (including wrapped) fields mask no bytes.
+  if (crc_offset >= image_size || crc_offset > SIZE_MAX - sizeof(uint32_t)) {
+    return otafix_crc32_update(0, image, image_size);
   }
-
-  return ~crc;
+  static const uint8_t zero[sizeof(uint32_t)] = {0};
+  const size_t tail = image_size - crc_offset;
+  const size_t masked = tail < sizeof(zero) ? tail : sizeof(zero);
+  uint32_t crc = otafix_crc32_update(0, image, crc_offset);
+  crc = otafix_crc32_update(crc, zero, masked);
+  return otafix_crc32_update(crc, image + crc_offset + masked, tail - masked);
 }
 
 static uint32_t read_le32(uint8_t const* data) {

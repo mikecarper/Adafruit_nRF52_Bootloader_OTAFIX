@@ -179,6 +179,7 @@ static int hybrid_ram_read(uint32_t offset, void *dst, uint32_t len) {
 #endif
 #else
   #include "nrf.h"
+  #include "watchdog.h"
   #include "nrfx_nvmc.h"
   #include "crc16.h"
   #include "boards.h"
@@ -337,14 +338,7 @@ static void inherited_watchdog_feed(void) {
 #ifndef OTA_DELTA_HOST_TEST
   static uint8_t external_feed_divider;
 
-  if (NRF_WDT->RUNSTATUS != 0) {
-    const uint32_t enabled_channels = NRF_WDT->RREN & 0xFFu;
-    for (uint8_t channel = 0; channel < 8; channel++) {
-      if ((enabled_channels & (1u << channel)) != 0) {
-        NRF_WDT->RR[channel] = WDT_RR_RR_Reload;
-      }
-    }
-  }
+  otafix_watchdog_feed();
 
   // The external watchdog pulse is deliberately less frequent than the cheap
   // internal reload. Hashing calls this checkpoint every 256 bytes; pulsing on
@@ -508,19 +502,44 @@ static int staged_read(uint32_t address_or_offset, void *dst, uint32_t len) {
 }
 #endif
 
-static void sha256_region(uint32_t addr, uint32_t len, uint8_t out[32]) {
+// Share the streaming hash loop, but keep live-flash reads separate from the
+// selected staging backend. In particular, hybrid/SD mode must never redirect
+// the post-write hash of the application into retained RAM or removable media.
+__attribute__((noinline, noclone)) static int sha256_read_region(
+    uint32_t addr, uint32_t len, uint8_t out[32], bool staged,
+    uint32_t normalize_approval_at) {
   sha256_ctx_t c;
   sha256_init(&c);
   uint8_t buf[256];
   while (len) {
     inherited_watchdog_feed();
     uint32_t n = len < sizeof(buf) ? len : sizeof(buf);
-    fl_read(addr, buf, n);
+    if (staged) {
+      if (!staged_read(addr, buf, n)) {
+        return 0;
+      }
+    } else {
+      fl_read(addr, buf, n);
+    }
+    if (normalize_approval_at != UINT32_MAX) {
+      const uint32_t approval_end = normalize_approval_at + 4u;
+      const uint32_t chunk_end = addr + n;
+      const uint32_t overlap_start = addr > normalize_approval_at ? addr : normalize_approval_at;
+      const uint32_t overlap_end = chunk_end < approval_end ? chunk_end : approval_end;
+      if (overlap_start < overlap_end) {
+        memset(buf + overlap_start - addr, 0, overlap_end - overlap_start);
+      }
+    }
     sha256_update(&c, buf, n);
     addr += n;
     len -= n;
   }
   sha256_final(&c, out);
+  return 1;
+}
+
+static void sha256_region(uint32_t addr, uint32_t len, uint8_t out[32]) {
+  (void)sha256_read_region(addr, len, out, false, UINT32_MAX);
 }
 
 // ---- coherent single-page write-back cache (in-place reads back shifted data it just wrote) -------
@@ -1010,37 +1029,10 @@ static int clear_approval(const struct mota_min *o) {
 static bool finish_apply(bool result);
 
 #if defined(MOTA_SD_CARD) || defined(MOTA_QSPI_FLASH) || defined(MOTA_BOOTLOADER_UPDATE_ENABLED)
-__attribute__((noinline, noclone)) static int sha256_staged_region_impl(
+static int sha256_staged_region_impl(
     uint32_t offset, uint32_t len, uint8_t out[32],
     uint32_t normalize_approval_at) {
-  sha256_ctx_t c;
-  sha256_init(&c);
-  uint8_t buf[256];
-  while (len) {
-    inherited_watchdog_feed();
-    uint32_t n = len < sizeof(buf) ? len : sizeof(buf);
-    if (!staged_read(offset, buf, n)) {
-      return 0;
-    }
-    if (normalize_approval_at != UINT32_MAX) {
-      const uint32_t approval_end = normalize_approval_at + 4u;
-      const uint32_t chunk_end     = offset + n;
-      const uint32_t overlap_start = offset > normalize_approval_at
-                                       ? offset
-                                       : normalize_approval_at;
-      const uint32_t overlap_end = chunk_end < approval_end
-                                     ? chunk_end
-                                     : approval_end;
-      if (overlap_start < overlap_end) {
-        memset(buf + overlap_start - offset, 0, overlap_end - overlap_start);
-      }
-    }
-    sha256_update(&c, buf, n);
-    offset += n;
-    len -= n;
-  }
-  sha256_final(&c, out);
-  return 1;
+  return sha256_read_region(offset, len, out, true, normalize_approval_at);
 }
 
 static int sha256_staged_region(uint32_t offset, uint32_t len,

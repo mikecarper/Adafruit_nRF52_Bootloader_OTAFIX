@@ -189,7 +189,7 @@ static void wait_for_events(void)
       // When update has completed or a timeout/reset occurred we will return.
       return;
     }
-#ifdef SECURE_DFU_RAK3401_TEST
+#ifdef SECURE_DFU_TEST
     // Retry blocked receipts only after scheduler/transport work, and never
     // after the DFU timeout or completion exit above.
     dfu_transport_ble_poll();

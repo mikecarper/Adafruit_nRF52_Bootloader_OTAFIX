@@ -102,7 +102,8 @@ bool button_pressed(uint32_t pin) {
 // This is declared so that a board specific init can be called from here.
 void __attribute__((weak)) board_init2(void) {}
 
-void board_init(void) {
+// Keep GPIO startup setup out of main's DFU decision frame under LTO.
+__attribute__((noinline)) void board_init(void) {
   // stop LF clock just in case we jump from application without reset
   NRF_CLOCK->TASKS_LFCLKSTOP = 1UL;
 

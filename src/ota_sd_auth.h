@@ -11,6 +11,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include "crc32.h"
 
 #define MOTA_SD_AUTH_ADDRESS             0x20006008u
 #define MOTA_SD_AUTH_VERSION             2u
@@ -47,14 +48,7 @@ typedef char mota_sd_auth_must_fit_reserved_retained_ram
   [((MOTA_SD_AUTH_ADDRESS + MOTA_SD_AUTH_LEN) == 0x20006050u) ? 1 : -1];
 
 static inline uint32_t mota_sd_auth_crc32(const uint8_t *data, size_t len) {
-  uint32_t crc = UINT32_MAX;
-  for (size_t i = 0; i < len; i++) {
-    crc ^= data[i];
-    for (uint8_t bit = 0; bit < 8u; bit++) {
-      crc = (crc >> 1) ^ (0xEDB88320u & (uint32_t)-(int32_t)(crc & 1u));
-    }
-  }
-  return ~crc;
+  return otafix_crc32_update(0, data, len);
 }
 
 static inline void mota_sd_auth_encode(mota_sd_auth_t *out, uint8_t purpose,

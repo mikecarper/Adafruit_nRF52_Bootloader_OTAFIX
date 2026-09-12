@@ -39,7 +39,7 @@ uint32_t dfu_transport_serial_close(void);
 uint32_t dfu_transport_ble_update_start(void);
 uint32_t dfu_transport_ble_close();
 
-#ifdef SECURE_DFU_RAK3401_TEST
+#ifdef SECURE_DFU_TEST
 void dfu_transport_ble_poll(void);
 #endif
 

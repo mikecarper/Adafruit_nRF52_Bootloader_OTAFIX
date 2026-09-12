@@ -33,7 +33,7 @@
 #include "dfu_ble_svc_internal.h"
 #include "nrf_delay.h"
 #include "sdk_common.h"
-#ifdef SECURE_DFU_RAK3401_TEST
+#ifdef SECURE_DFU_TEST
 #include "secure_dfu_ble.h"
 #endif
 
@@ -857,7 +857,7 @@ static void advertising_add(ble_data_t* adv_data, uint8_t type, const void* fiel
  */
 static void advertising_init(ble_data_t* adv_data, uint8_t adv_flags)
 {
-#ifdef SECURE_DFU_RAK3401_TEST
+#ifdef SECURE_DFU_TEST
   uint8_t const uuid16[2] = {0x59, 0xFE};
   advertising_add(adv_data, BLE_GAP_AD_TYPE_FLAGS, &adv_flags, 1);
   advertising_add(adv_data, BLE_GAP_AD_TYPE_16BIT_SERVICE_UUID_COMPLETE, uuid16, sizeof(uuid16));
@@ -1056,7 +1056,7 @@ static void on_ble_evt(ble_evt_t * p_ble_evt)
             {
                 err_code = sd_ble_gap_disconnect(m_conn_handle,
                                                  BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
-#ifdef SECURE_DFU_RAK3401_TEST
+#ifdef SECURE_DFU_TEST
                 // The queued timeout may follow an already terminated link.
                 // Preserve the resumable session until DISCONNECTED is handled.
                 if (err_code == BLE_ERROR_INVALID_CONN_HANDLE || err_code == NRF_ERROR_INVALID_STATE)
@@ -1201,7 +1201,7 @@ static void on_ble_evt(ble_evt_t * p_ble_evt)
  */
 /*static*/ void ble_evt_dispatch(ble_evt_t * p_ble_evt)
 {
-#ifdef SECURE_DFU_RAK3401_TEST
+#ifdef SECURE_DFU_TEST
     secure_dfu_ble_event(&m_dfu, p_ble_evt);
 #else
     ble_dfu_on_ble_evt(&m_dfu, p_ble_evt);
@@ -1209,7 +1209,7 @@ static void on_ble_evt(ble_evt_t * p_ble_evt)
     on_ble_evt(p_ble_evt);
 }
 
-#ifdef SECURE_DFU_RAK3401_TEST
+#ifdef SECURE_DFU_TEST
 void dfu_transport_ble_poll(void) {
     if (IS_CONNECTED() && !m_tear_down_in_progress) secure_dfu_ble_poll(&m_dfu);
 }
@@ -1315,7 +1315,7 @@ static void device_information_init(void)
  */
 static void services_init(void)
 {
-#ifdef SECURE_DFU_RAK3401_TEST
+#ifdef SECURE_DFU_TEST
     APP_ERROR_CHECK(secure_dfu_ble_init(&m_dfu));
 #else
     uint32_t       err_code;
@@ -1369,7 +1369,7 @@ uint32_t dfu_transport_ble_update_start(void)
     m_service_change_pending = false;
     m_service_attrs_initialized = false;
 
-#ifndef SECURE_DFU_RAK3401_TEST
+#ifndef SECURE_DFU_TEST
     dfu_register_callback(dfu_cb_handler);
 #endif
 
@@ -1389,7 +1389,7 @@ uint32_t dfu_transport_ble_update_start(void)
         APP_ERROR_CHECK(err_code);
 
         // Increase the BLE address by one when advertising openly.
-#ifdef SECURE_DFU_RAK3401_TEST
+#ifdef SECURE_DFU_TEST
         // A different GATT protocol must not reuse a phone's cached Legacy
         // bootloader database. Application is +0, Legacy +1, this lab profile +2.
         addr.addr[0] += 2;
@@ -1424,7 +1424,7 @@ uint32_t dfu_transport_ble_close()
     {
         // Disconnect from peer.
         err_code = sd_ble_gap_disconnect(m_conn_handle, BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
-#ifdef SECURE_DFU_RAK3401_TEST
+#ifdef SECURE_DFU_TEST
         // A final receipt can complete just before the peer disconnects. Do
         // not reset before saving the validated image's activation settings.
         if (err_code == BLE_ERROR_INVALID_CONN_HANDLE || err_code == NRF_ERROR_INVALID_STATE)

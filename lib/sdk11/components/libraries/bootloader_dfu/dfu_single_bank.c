@@ -27,7 +27,7 @@
 #include "sdk_common.h"
 
 #include "boards.h"
-#ifdef SECURE_DFU_RAK3401_TEST
+#ifdef SECURE_DFU_TEST
 #include "secure_dfu_ble.h"
 #include "sha256.h"
 #include "crc16.h"
@@ -96,7 +96,7 @@ static void pstorage_callback_handler(pstorage_handle_t * p_handle,
 #else
                 {
                     m_dfu_state = DFU_STATE_RDY;
-#ifdef SECURE_DFU_RAK3401_TEST
+#ifdef SECURE_DFU_TEST
                     if (m_secure_transfer) m_dfu_state = DFU_STATE_RX_DATA_PKT;
 #endif
                     if (m_data_pkt_cb != NULL)
@@ -311,7 +311,7 @@ uint32_t dfu_init(void)
 
     m_init_packet_length = 0;
     m_image_crc          = 0;
-#ifdef SECURE_DFU_RAK3401_TEST
+#ifdef SECURE_DFU_TEST
     m_secure_transfer = false;
 #endif
 
@@ -351,7 +351,7 @@ void dfu_register_callback(dfu_callback_t callback_handler)
     m_data_pkt_cb = callback_handler;
 }
 
-#ifdef SECURE_DFU_RAK3401_TEST
+#ifdef SECURE_DFU_TEST
 void dfu_secure_activity(void) { (void)dfu_timer_restart(); }
 
 uint32_t dfu_secure_start(uint32_t size, const uint8_t digest[32]) {
@@ -625,7 +625,7 @@ uint32_t dfu_image_validate()
                 err_code = dfu_timer_restart();
                 if (err_code == NRF_SUCCESS)
                 {
-#ifdef SECURE_DFU_RAK3401_TEST
+#ifdef SECURE_DFU_TEST
                     if (m_secure_transfer) {
                         sha256_ctx_t sha;
                         uint8_t digest[32];

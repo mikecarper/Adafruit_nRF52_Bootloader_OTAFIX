@@ -33,11 +33,18 @@ option(SIGNED_FW "Enable signed firmware verification" OFF)
 option(DUALBANK_FW "Enable dual bank DFU support" OFF)
 option(FORCE_UF2 "Force UF2 support even with SIGNED_FW" OFF)
 option(RECOVERY_ALLOW_ALL_BOARDS "Recovery-only manual cross-board bootloader updates" OFF)
-option(SECURE_DFU_RAK3401_TEST "Experimental RAK3401 application-only resumable BLE protocol" OFF)
-if (SECURE_DFU_RAK3401_TEST AND
-    (NOT BOARD STREQUAL "wiscore_rak3401" OR SIGNED_FW OR DUALBANK_FW OR RECOVERY_ALLOW_ALL_BOARDS OR
+option(SECURE_DFU_TEST "Secure-only resumable BLE DFU qualification profile" OFF)
+# Keep existing RAK lab invocations working, without silently ignoring the old flag.
+if (SECURE_DFU_RAK3401_TEST)
+  if (NOT BOARD STREQUAL "wiscore_rak3401")
+    message(FATAL_ERROR "Use SECURE_DFU_TEST for boards other than wiscore_rak3401")
+  endif ()
+  set(SECURE_DFU_TEST ON)
+endif ()
+if (SECURE_DFU_TEST AND
+    (NOT MCU_VARIANT STREQUAL "nrf52840" OR SIGNED_FW OR DUALBANK_FW OR RECOVERY_ALLOW_ALL_BOARDS OR
      NOT MOTA_BOOTLOADER_TEST_BUILD OR NOT DEFINED MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE))
-  message(FATAL_ERROR "SECURE_DFU_RAK3401_TEST requires unsigned single-bank wiscore_rak3401 and an explicit test version")
+  message(FATAL_ERROR "SECURE_DFU_TEST requires unsigned single-bank nrf52840 and an explicit test version")
 endif ()
 set(DFU_USB_ENUMERATION_TIMEOUT_MS "30000" CACHE STRING
     "USB grace period for no-valid-image and explicit buttonless recovery, in milliseconds")
@@ -129,9 +136,17 @@ add_executable(bootloader
   ${NRFX_DIR}/mdk/gcc_startup_${MCU_VARIANT}.S
   )
 
-if (SECURE_DFU_RAK3401_TEST)
+if (SECURE_DFU_TEST)
+  execute_process(COMMAND ${Python_EXECUTABLE}
+    ${CMAKE_CURRENT_LIST_DIR}/tools/secure_dfu_target.py ${BOARD} --hw-version
+    RESULT_VARIABLE SECURE_DFU_TARGET_RESULT OUTPUT_VARIABLE SECURE_DFU_HW_VERSION
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+  if (NOT SECURE_DFU_TARGET_RESULT EQUAL 0)
+    message(FATAL_ERROR "Cannot derive Secure DFU target identity")
+  endif ()
   target_sources(bootloader PRIVATE src/secure_dfu.c src/secure_dfu_ble.c)
-  target_compile_definitions(bootloader PRIVATE SECURE_DFU_RAK3401_TEST=1)
+  target_compile_definitions(bootloader PRIVATE SECURE_DFU_TEST=1
+    SECURE_DFU_HW_VERSION=${SECURE_DFU_HW_VERSION})
 endif ()
 
 if (MOTA_SD_CARD)

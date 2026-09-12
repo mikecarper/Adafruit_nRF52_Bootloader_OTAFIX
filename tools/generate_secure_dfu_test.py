@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build an unsigned, application-only Nordic Secure DFU ZIP for the RAK3401 lab profile.
+"""Build an unsigned, application-only Nordic Secure DFU ZIP for a test board.
 
 No signing bypass: this profile explicitly does not implement a signature trust
 policy. The mandatory SHA-256 binds resume metadata to the complete application.
@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 import struct
 import zipfile
+from secure_dfu_target import target
 
 APP_BASE = 0x26000
 APP_END = 0xEA000
@@ -37,18 +38,18 @@ def message(field, data):
     return varint((field << 3) | 2) + varint(len(data)) + data
 
 
-def init_packet(image):
+def init_packet(image, *, hw_version=HW_VERSION, fwid=SOFTDEVICE_FWID, app_base=APP_BASE):
     size = len(image)
-    if size < 8 or size & 3 or size > APP_END - APP_BASE:
-        raise ValueError('application length is outside the RAK3401 layout')
+    if size < 8 or size & 3 or size > APP_END - app_base:
+        raise ValueError('application length is outside the target layout')
     stack, reset = struct.unpack_from('<II', image)
     if not 0x20000000 < stack <= 0x20040000 or stack & 7:
         raise ValueError('invalid application stack vector')
-    if not reset & 1 or not APP_BASE <= (reset & ~1) < APP_BASE + size:
+    if not reset & 1 or not app_base <= (reset & ~1) < app_base + size:
         raise ValueError('invalid application reset vector')
     digest = hashlib.sha256(image).digest()
     hash_message = scalar(1, 3) + message(2, digest[::-1])
-    init = (scalar(1, 1) + scalar(2, HW_VERSION) + message(3, varint(SOFTDEVICE_FWID))
+    init = (scalar(1, 1) + scalar(2, hw_version) + message(3, varint(fwid))
             + scalar(4, 0) + scalar(7, size) + message(8, hash_message))
     return message(1, scalar(1, 1) + message(2, init))
 
@@ -66,6 +67,8 @@ def application_from(path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--board', default='wiscore_rak3401',
+                        help='canonical board directory (default: original RAK3401 lab target)')
     parser.add_argument('--application', type=Path, required=True,
                         help='application BIN or application-only Legacy DFU ZIP')
     parser.add_argument('--output', type=Path, required=True)
@@ -73,17 +76,19 @@ def main():
     if args.output.exists():
         parser.error('output already exists; choose a new filename')
     image = application_from(args.application)
-    dat = init_packet(image)
+    profile = target(args.board)
+    dat = init_packet(image, **profile)
     manifest = {'manifest': {'application': {'bin_file': 'application.bin',
                                              'dat_file': 'application.dat'}}}
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(args.output, 'x', compression=zipfile.ZIP_DEFLATED) as z:
+    with zipfile.ZipFile(args.output, 'x', compression=zipfile.ZIP_STORED) as z:
         for name, content in (('application.bin', image), ('application.dat', dat),
                               ('manifest.json', json.dumps(manifest).encode())):
             entry = zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0))
-            entry.compress_type = zipfile.ZIP_DEFLATED
+            entry.compress_type = zipfile.ZIP_STORED
             z.writestr(entry, content)
-    print(json.dumps({'zip': str(args.output), 'application_size': len(image),
+    print(json.dumps({'zip': str(args.output), 'board': args.board, **profile,
+                      'application_size': len(image),
                       'application_sha256': hashlib.sha256(image).hexdigest(),
                       'init_size': len(dat),
                       'zip_sha256': hashlib.sha256(args.output.read_bytes()).hexdigest()}, indent=2))

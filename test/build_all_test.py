@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 from pathlib import Path
 import subprocess
 import sys
@@ -23,6 +24,35 @@ SPEC.loader.exec_module(BUILD_ALL)
 
 
 class BuildAllTest(unittest.TestCase):
+    def test_secure_profile_is_isolated_and_requires_a_test_version(self) -> None:
+        with mock.patch.object(sys, "argv", ["build_all.py", "--secure-dfu-test", "--test-version", "0x02040709"]):
+            args = BUILD_ALL.parse_args()
+        self.assertTrue(args.secure_dfu_test)
+        self.assertEqual(args.build_root, Path("_build-secure-dfu"))
+        for flags in (["--secure-dfu-test"],
+                      ["--secure-dfu-test", "--test-version", "0x02040709", "--recovery-allow-all-boards"]):
+            with mock.patch.object(sys, "argv", ["build_all.py", *flags]), \
+                 mock.patch.object(sys, "stderr", io.StringIO()), self.assertRaises(SystemExit):
+                BUILD_ALL.parse_args()
+
+    def test_secure_flag_is_passed_to_build_and_output_lookup(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            build = root / "build-heltec_t096"
+            build.mkdir()
+            (build / "secure.out").write_bytes(b"test")
+            def fake_run(command, **kwargs):
+                self.assertIn("SECURE_DFU_TEST=1", command)
+                self.assertIn("RECOVERY_ALLOW_ALL_BOARDS=0", command)
+                self.assertIn("MOTA_BOOTLOADER_TEST_BUILD=1", command)
+                output = "OUT_NAME = secure\n" if command[-1] == "print-OUT_NAME" else "built\n"
+                return subprocess.CompletedProcess(command, 0, stdout=output)
+            with mock.patch.object(BUILD_ALL.subprocess, "run", side_effect=fake_run), \
+                 mock.patch.object(BUILD_ALL, "image_sizes", return_value=(40000, 35000)):
+                result = BUILD_ALL.build_board("heltec_t096", 1, "0x02040709", "size", root,
+                                               secure_dfu_test=True)
+            self.assertTrue(result[1], result[-1])
+
     def test_recovery_defaults_are_isolated_and_opt_in(self) -> None:
         with mock.patch.object(sys, "argv", ["build_all.py"]):
             normal = BUILD_ALL.parse_args()

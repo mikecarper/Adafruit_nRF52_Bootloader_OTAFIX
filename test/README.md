@@ -16,6 +16,12 @@ different board IDs, CRC/vector rejection, unchanged SoftDevice/layout policy,
 and strict remote identity checks while the manual recovery bridge is enabled.
 Build helper/version tests verify separate recovery labels and release routing.
 
+`shared_helpers_test.py` compiles the production shared CRC, SHA-256 and watchdog
+helpers. It compares CRCs and chunked/unaligned hashes against Python's zlib and
+hashlib, covers partial/out-of-range/wrapped manifest CRC masks and SHA padding
+boundaries, and exercises every watchdog channel mask with a register stub.
+The existing apply/readback suites separately check live flash versus staging.
+
 ```bash
 make check        # apply the committed vector (apply_sim) + the LTO-readback regression (readback_test)
 make sanitize     # rebuild and run the complete host suite with ASan and UBSan

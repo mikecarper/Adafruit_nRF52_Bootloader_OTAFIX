@@ -55,6 +55,8 @@ def parse_args():
         action="store_true",
         help="build and collect separate manual cross-board recovery packages for every board",
     )
+    parser.add_argument("--secure-dfu-test", action="store_true",
+                        help="replace Legacy BLE with resumable Secure BLE in test builds")
     parser.add_argument(
         "--keep-build",
         action="store_true",
@@ -69,8 +71,11 @@ def parse_args():
     args = parser.parse_args()
     if args.jobs < 1 or args.make_jobs < 1:
         parser.error("--jobs and --make-jobs must be positive")
+    if args.secure_dfu_test and (args.test_version is None or args.recovery_allow_all_boards):
+        parser.error("--secure-dfu-test requires --test-version and cannot be a recovery build")
     if args.build_root is None:
-        args.build_root = Path("_build-recovery-allow-all" if args.recovery_allow_all_boards else "_build")
+        args.build_root = Path("_build-recovery-allow-all" if args.recovery_allow_all_boards else
+                               "_build-secure-dfu" if args.secure_dfu_test else "_build")
     return args
 
 
@@ -108,12 +113,14 @@ def image_sizes(size_tool, image):
     return text_size + data_size, data_size + bss_size
 
 
-def build_board(board, make_jobs, test_version, size_tool, build_root, recovery_allow_all_boards=False):
+def build_board(board, make_jobs, test_version, size_tool, build_root, recovery_allow_all_boards=False,
+                secure_dfu_test=False):
     board_build = build_root / f"build-{board}"
     make_args = [f"BOARD={board}", f"BUILD={board_build}", f"PYTHON={sys.executable}"]
     # Explicit zero prevents a local Makefile.user/environment setting from
     # turning an ordinary all-board build into an unlabelled recovery run.
     make_args.append(f"RECOVERY_ALLOW_ALL_BOARDS={int(recovery_allow_all_boards)}")
+    make_args.append(f"SECURE_DFU_TEST={int(secure_dfu_test)}")
     if recovery_allow_all_boards:
         make_args.append(f"BIN={REPO_ROOT / '_bin' / 'recovery-allow-all' / board}")
     if test_version is not None:
@@ -227,6 +234,7 @@ def main():
                 size_tool,
                 build_root,
                 args.recovery_allow_all_boards,
+                args.secure_dfu_test,
             ): board
             for board in boards
         }

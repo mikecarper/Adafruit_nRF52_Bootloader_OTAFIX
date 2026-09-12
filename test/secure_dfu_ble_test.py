@@ -33,6 +33,7 @@ class SecureDfuBleTest(unittest.TestCase):
         subprocess.run([os.environ.get('CC', 'gcc'), '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
                         '-Wno-pointer-to-int-cast', '-Wno-unused-variable',
                         '-DNRF52840_XXAA', '-DS140', '-DSVCALL_AS_NORMAL_FUNCTION',
+                        '-DSECURE_DFU_HW_VERSION=0x3401',
                         '-DDFU_APP_DATA_RESERVED=0xA000', *sanitizers, '-shared', '-fPIC',
                         *['-I' + str(ROOT / path) for path in includes],
                         str(ROOT / 'test/secure_dfu_ble_host.c'), str(ROOT / 'src/secure_dfu.c'),
@@ -389,7 +390,7 @@ class SecureDfuDisconnectTest(unittest.TestCase):
         loop = loop[:loop.index('bool bootloader_app_is_valid')]
         self.assertLess(loop.index('app_sched_execute();'), loop.index('dfu_transport_ble_poll();'))
         self.assertLess(loop.index('return;'), loop.index('dfu_transport_ble_poll();'))
-        self.assertIn('#ifdef SECURE_DFU_RAK3401_TEST', loop)
+        self.assertIn('#ifdef SECURE_DFU_TEST', loop)
         transport = (ROOT / 'lib/sdk11/components/libraries/bootloader_dfu/dfu_transport_ble.c').read_text()
         poll = transport[transport.index('void dfu_transport_ble_poll(void)'):]
         poll = poll[:poll.index('void dfu_secure_connection_policy')]
@@ -439,7 +440,7 @@ int main(void) {
   for (unsigned i = 0; i < 4; ++i) {
     injected = errors[i];
     uint32_t expected = injected;
-#ifdef SECURE_DFU_RAK3401_TEST
+#ifdef SECURE_DFU_TEST
     if (injected == BLE_ERROR_INVALID_CONN_HANDLE || injected == NRF_ERROR_INVALID_STATE)
       expected = NRF_SUCCESS;
 #endif
@@ -459,7 +460,7 @@ int main(void) {
             for secure in (False, True):
                 with self.subTest(secure=secure):
                     binary = Path(directory) / ('disconnect.exe' if os.name == 'nt' else 'disconnect')
-                    flags = ['-DSECURE_DFU_RAK3401_TEST'] if secure else []
+                    flags = ['-DSECURE_DFU_TEST'] if secure else []
                     subprocess.run([os.environ.get('CC', 'gcc'), '-std=c11', '-Wall', '-Wextra', '-Werror',
                                     *flags, '-I' + str(sdk), '-x', 'c', '-', '-o', str(binary)],
                                    input=code, text=True, check=True)

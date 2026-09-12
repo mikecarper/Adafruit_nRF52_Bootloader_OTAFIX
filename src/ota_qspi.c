@@ -8,6 +8,7 @@
   #include "boards.h"
   #include "hal/nrf_qspi.h"
   #include "nrf_delay.h"
+  #include "watchdog.h"
 
   #define QSPI_APPROVAL_LEN 4u
   #define QSPI_DPD_ENTER            0xB9u
@@ -80,14 +81,7 @@ _Static_assert(MOTA_QSPI_AUX_CSN_PIN != NRF_QSPI_PIN_NOT_CONNECTED &&
 #endif
 
 static void feed_watchdogs(void) {
-  if (NRF_WDT->RUNSTATUS != 0) {
-    const uint32_t enabled = NRF_WDT->RREN & 0xFFu;
-    for (uint8_t channel = 0; channel < 8; channel++) {
-      if ((enabled & (1u << channel)) != 0) {
-        NRF_WDT->RR[channel] = WDT_RR_RR_Reload;
-      }
-    }
-  }
+  otafix_watchdog_feed();
   board_watchdog_feed();
 }
 

@@ -267,7 +267,7 @@ sdk = ROOT / "lib/softdevice/s140_nrf52_6.1.1/s140_nrf52_6.1.1_API/include"
 with tempfile.TemporaryDirectory(prefix="otafix-gatt-cache-") as directory:
     for secure in (False, True):
         binary = Path(directory) / ("cache.exe" if os.name == "nt" else "cache")
-        flags = ["-DSECURE_DFU_RAK3401_TEST"] if secure else []
+        flags = ["-DSECURE_DFU_TEST"] if secure else []
         if os.environ.get("SECURE_DFU_TEST_SANITIZE") == "1":
             flags += ["-fsanitize=address,undefined", "-fno-omit-frame-pointer", "-O1", "-g"]
         subprocess.run([os.environ.get("CC", "gcc"), "-std=c11", "-Wall", "-Wextra", "-Werror",

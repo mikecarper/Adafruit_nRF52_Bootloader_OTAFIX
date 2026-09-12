@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include "crc32.h"
 
 #define MOTA_SD_BOOT_TOKEN_VERSION     1u
 #define MOTA_SD_BOOT_TOKEN_LEN         64u
@@ -29,14 +30,7 @@ static inline void mota_sd_boot_token_wr32(uint8_t *p, uint32_t value) {
 }
 
 static inline uint32_t mota_sd_boot_token_crc32(const uint8_t *data, size_t len) {
-  uint32_t crc = 0xFFFFFFFFu;
-  for (size_t i = 0; i < len; i++) {
-    crc ^= data[i];
-    for (uint8_t bit = 0; bit < 8; bit++) {
-      crc = (crc >> 1) ^ (0xEDB88320u & (uint32_t)-(int32_t)(crc & 1u));
-    }
-  }
-  return ~crc;
+  return otafix_crc32_update(0, data, len);
 }
 
 // image_hash is copied from the exact signed manifest buffer authenticated by

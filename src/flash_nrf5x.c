@@ -25,6 +25,7 @@
 #include <string.h>
 #include "nrf_sdm.h"
 #include "nrf_wdt.h"
+#include "watchdog.h"
 #include "flash_nrf5x.h"
 #include "boards.h"
 #include "dfu_types.h"
@@ -35,17 +36,7 @@ static uint8_t _fl_buf[CODE_PAGE_SIZE] __attribute__((aligned(4)));
 
 static void inherited_watchdog_feed(void)
 {
-    if (nrf_wdt_started(NRF_WDT))
-    {
-        uint32_t const enabled_channels = NRF_WDT->RREN & 0xffU;
-        for (uint8_t channel = 0; channel < 8; channel++)
-        {
-            if (enabled_channels & (1U << channel))
-            {
-                nrf_wdt_reload_request_set(NRF_WDT, channel);
-            }
-        }
-    }
+    otafix_watchdog_feed();
 }
 
 void flash_nrf5x_discard(void)

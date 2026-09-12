@@ -10,7 +10,9 @@
 
 #define SECURE_DFU_COMMAND_MAX 256u
 #define SECURE_DFU_OBJECT_MAX  4096u
-#define SECURE_DFU_HW_VERSION  0x3401u
+#ifndef SECURE_DFU_HW_VERSION
+#error "Build must supply the Secure DFU target hardware version"
+#endif
 
 typedef struct {
   uint32_t size;

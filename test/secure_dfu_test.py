@@ -29,7 +29,7 @@ class SecureDfuTest(unittest.TestCase):
         sanitizers = ['-fsanitize=address,undefined', '-fno-omit-frame-pointer', '-O1', '-g'] \
             if os.environ.get('SECURE_DFU_TEST_SANITIZE') == '1' else []
         subprocess.run([os.environ.get('CC', 'gcc'), '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
-                        *sanitizers,
+                        *sanitizers, '-DSECURE_DFU_HW_VERSION=0x3401',
                         '-shared', '-fPIC', '-I' + str(ROOT / 'src'),
                         str(ROOT / 'src/secure_dfu.c'), str(ROOT / 'src/sha256.c'),
                         str(ROOT / 'test/secure_dfu_host.c'), '-o', str(library)], check=True)

@@ -1,4 +1,5 @@
 #include "secure_dfu.h"
+#include "crc32.h"
 #include <string.h>
 
 enum {
@@ -27,21 +28,10 @@ static uint32_t get32(const uint8_t *p) {
 }
 
 static void put32(uint8_t *p, uint32_t n) {
-  for (unsigned i = 0; i < 4; ++i) {
-    p[i] = (uint8_t)n;
-    n >>= 8;
-  }
-}
-
-static uint32_t crc32(uint32_t crc, const uint8_t *p, size_t n) {
-  crc = ~crc;
-  while (n--) {
-    crc ^= *p++;
-    for (unsigned i = 0; i < 8; ++i) {
-      crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
-    }
-  }
-  return ~crc;
+  p[0] = (uint8_t)n;
+  p[1] = (uint8_t)(n >> 8);
+  p[2] = (uint8_t)(n >> 16);
+  p[3] = (uint8_t)(n >> 24);
 }
 
 typedef struct {
@@ -74,21 +64,28 @@ static bool bytes(pb_t *b, pb_t *child) {
   return true;
 }
 
+// All supported protobuf tags (and fixed enum values) fit in one byte.
+// Checking them directly also rejects noncanonical overlong encodings.
+static bool byte(pb_t *b, uint8_t expected) {
+  return b->p < b->end && *b->p++ == expected;
+}
+
 static bool hash(pb_t b, uint8_t digest[32]) {
-  uint32_t key, type;
-  pb_t     value;
   // Strict canonical metadata is deliberate: reject unsupported algorithms,
   // duplicate fields and ambiguous protobuf encodings before touching flash.
-  if (!varint(&b, &key) || key != 8 || !varint(&b, &type) || type != 3 || !varint(&b, &key) || key != 18 ||
-      !bytes(&b, &value) || b.p != b.end || value.end - value.p != 32) {
+  // Hash{hash_type:SHA256, hash:bytes[32]} has a fixed four-byte prefix.
+  if (b.end - b.p != 36 || memcmp(b.p, "\x08\x03\x12\x20", 4) != 0) {
     return false;
   }
   for (unsigned i = 0; i < 32; ++i) {
-    digest[i] = value.p[31 - i];
+    digest[i] = b.p[35 - i];
   }
   return true;
 }
 
+// Bound LTO inlining into the BLE dispatcher; these protocol boundaries reduce
+// register spills/code size without changing object or receipt semantics.
+__attribute__((noinline))
 bool secure_dfu_parse_command(const uint8_t *data, size_t len, uint32_t max_image, uint16_t fwid,
                               secure_dfu_image_t *image) {
   if (!data || !image || len == 0 || len > SECURE_DFU_COMMAND_MAX) {
@@ -98,9 +95,9 @@ bool secure_dfu_parse_command(const uint8_t *data, size_t len, uint32_t max_imag
   uint32_t key, value, seen = 0;
   // Packet.command -> Command{op_code:INIT, init:InitCommand}. SignedCommand
   // is explicitly rejected, never accepted without verifying its signature.
-  if (!varint(&packet, &key) || key != 10 || !bytes(&packet, &command) || packet.p != packet.end ||
-      !varint(&command, &key) || key != 8 || !varint(&command, &value) || value != 1 || !varint(&command, &key) ||
-      key != 18 || !bytes(&command, &init) || command.p != command.end) {
+  if (!byte(&packet, 10) || !bytes(&packet, &command) || packet.p != packet.end ||
+      !byte(&command, 8) || !byte(&command, 1) || !byte(&command, 18) ||
+      !bytes(&command, &init) || command.p != command.end) {
     return false;
   }
   secure_dfu_image_t candidate = {0};
@@ -182,7 +179,8 @@ static size_t checksum(secure_dfu_t *s, uint8_t *out) {
   return 8;
 }
 
-static uint8_t create(secure_dfu_t *s, uint8_t type, uint32_t n) {
+// Outline object transitions to keep the control dispatcher compact under LTO.
+__attribute__((noinline)) static uint8_t create(secure_dfu_t *s, uint8_t type, uint32_t n) {
   // A flash error/timeout may still own a pointer into the object buffer.
   // Do not reuse that storage for a new transfer before a hardware reset.
   if (s->failed || s->completed) {
@@ -217,7 +215,7 @@ static uint8_t create(secure_dfu_t *s, uint8_t type, uint32_t n) {
   return OK;
 }
 
-static uint8_t execute(secure_dfu_t *s) {
+__attribute__((noinline)) static uint8_t execute(secure_dfu_t *s) {
   if (s->failed) {
     return FAILED;
   }
@@ -264,7 +262,7 @@ static uint8_t execute(secure_dfu_t *s) {
   return OK;
 }
 
-size_t secure_dfu_control(secure_dfu_t *s, const uint8_t *in, size_t len, uint8_t out[15]) {
+__attribute__((noinline)) size_t secure_dfu_control(secure_dfu_t *s, const uint8_t *in, size_t len, uint8_t out[15]) {
   if (!in || !len) {
     return 0;
   }
@@ -319,7 +317,7 @@ size_t secure_dfu_control(secure_dfu_t *s, const uint8_t *in, size_t len, uint8_
   return 3 + extra;
 }
 
-size_t secure_dfu_packet(secure_dfu_t *s, const uint8_t *in, size_t len, uint8_t out[15]) {
+__attribute__((noinline)) size_t secure_dfu_packet(secure_dfu_t *s, const uint8_t *in, size_t len, uint8_t out[15]) {
   bool     command = s->selected == COMMAND;
   uint32_t offset  = command ? s->command_offset : s->object_offset;
   uint32_t size    = command ? s->command_size : s->object_size;
@@ -336,10 +334,10 @@ size_t secure_dfu_packet(secure_dfu_t *s, const uint8_t *in, size_t len, uint8_t
   memcpy((command ? s->command : (uint8_t *)s->data) + offset, in, len);
   if (command) {
     s->command_offset += len;
-    s->command_crc = crc32(s->command_crc, in, len);
+    s->command_crc = otafix_crc32_update(s->command_crc, in, len);
   } else {
     s->object_offset += len;
-    s->data_crc = crc32(s->data_crc, in, len);
+    s->data_crc = otafix_crc32_update(s->data_crc, in, len);
   }
   secure_dfu_activity();
   if (s->prn && ++s->prn_count >= s->prn) {

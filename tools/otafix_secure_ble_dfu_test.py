@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lab-only application upload/resume test for SECURE_DFU_RAK3401_TEST.
+"""Lab-only application upload/resume test for SECURE_DFU_TEST.
 
 Requires an exact ZIP digest and BLE address. Does not enter DFU, reset a
 device, modify bonds, or accept bootloader/SoftDevice packages. A prior physical
@@ -17,6 +17,7 @@ import zipfile
 import zlib
 
 from generate_secure_dfu_test import init_packet
+from secure_dfu_target import target
 
 SERVICE = '0000fe59-0000-1000-8000-00805f9b34fb'
 CONTROL = '8ec90001-f315-4f60-9fb8-838830daea50'
@@ -35,7 +36,7 @@ def unconfirmed(reason, **fields):
                        'resume the same package if still in DFU, otherwise verify the application')
 
 
-def package(path, expected):
+def package(path, expected, board='wiscore_rak3401'):
     blob = path.read_bytes()
     if len(blob) > 1100000 or hashlib.sha256(blob).hexdigest() != expected.lower():
         raise ValueError('ZIP length or SHA-256 mismatch')
@@ -48,10 +49,10 @@ def package(path, expected):
         expected_manifest = {'manifest': {'application': {'bin_file': 'application.bin',
                                                          'dat_file': 'application.dat'}}}
         if json.loads(z.read('manifest.json')) != expected_manifest:
-            raise ValueError('only the RAK3401 test application manifest is accepted')
+            raise ValueError('only the test application manifest is accepted')
         image, dat = z.read('application.bin'), z.read('application.dat')
-        if dat != init_packet(image):
-            raise ValueError('metadata is not bound to this exact RAK3401 application')
+        if dat != init_packet(image, **target(board)):
+            raise ValueError('metadata is not bound to this exact target/application')
     return image, dat
 
 
@@ -158,7 +159,8 @@ class Sender:
 
 async def run(args):
     from bleak import BleakClient, BleakScanner
-    image, dat = package(args.package, args.sha256)
+    board = getattr(args, 'board', 'wiscore_rak3401')
+    image, dat = package(args.package, args.sha256, board)
     if args.disconnect_at is not None and not 0 < args.disconnect_at < len(image):
         raise ValueError('disconnect offset must be inside the image')
     log('PACKAGE_VERIFIED', image_size=len(image), image_sha256=hashlib.sha256(image).hexdigest(),
@@ -172,8 +174,9 @@ async def run(args):
         if len(matches) != 1:
             raise RuntimeError('exact target is not advertising')
         device, adv = matches[0]
-        if (adv.local_name or device.name) != '3401_DFU' or SERVICE not in [u.lower() for u in adv.service_uuids]:
-            raise RuntimeError('target is not the RAK3401 Secure DFU test profile')
+        expected_name = getattr(args, 'name', '3401_DFU')
+        if (adv.local_name or device.name) != expected_name or SERVICE not in [u.lower() for u in adv.service_uuids]:
+            raise RuntimeError('target is not the specified Secure DFU test profile')
         disconnected = asyncio.Event()
         async with BleakClient(device, disconnected_callback=lambda _: disconnected.set(), timeout=25) as client:
             sender = Sender(client)
@@ -249,6 +252,8 @@ def main():
     parser.add_argument('--package', type=Path, required=True)
     parser.add_argument('--sha256', required=True)
     parser.add_argument('--address', required=True)
+    parser.add_argument('--board', default='wiscore_rak3401')
+    parser.add_argument('--name', default='3401_DFU', help='exact expected DFU advertisement name')
     parser.add_argument('--disconnect-at', type=int)
     parser.add_argument('--packet-size', type=int, choices=(20, 244), default=244)
     args = parser.parse_args()

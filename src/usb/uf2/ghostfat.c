@@ -295,7 +295,8 @@ void padded_memcpy (char *dst, char const *src, int len)
   }
 }
 
-void read_block(uint32_t block_no, uint8_t *data) {
+// Bound LTO expansion into TinyUSB's read-command dispatcher.
+__attribute__((noinline)) void read_block(uint32_t block_no, uint8_t *data) {
     memset(data, 0, BPB_SECTOR_SIZE);
     uint32_t sectionIdx = block_no;
 
@@ -470,7 +471,8 @@ static bool prepare_app_block(UF2_Block const* block, WriteState* state) {
   return false;
 }
 
-int write_block(uint32_t block_no, uint8_t* data, WriteState* state) {
+// Keep the UF2 state machine outside TinyUSB's transfer-event stack frame.
+__attribute__((noinline)) int write_block(uint32_t block_no, uint8_t* data, WriteState* state) {
   UF2_Block* block = (void*)data;
 
   if (state->aborted) {
