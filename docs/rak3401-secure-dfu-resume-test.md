@@ -41,6 +41,13 @@ attributes once per connection. Retrying the Service Changed indication does
 not reset DFU notification subscriptions established by the peer. Failed
 attribute initialization remains retryable until both setup calls succeed.
 
+Receipt-queue overflow requests a link disconnect without closing the DFU
+transport or clearing resumable data. Until reconnect, all writes (including
+CCCD re-subscription), receipt retries and transmit-complete activation are
+blocked. Outstanding notification counters are retained until DISCONNECTED;
+an old completion cannot be mistaken for a new final EXECUTE receipt. The
+ordinary disconnect handler restarts advertising for resume.
+
 Receiving all data bytes is not activation. If final DATA EXECUTE is missed,
 the last object remains in RAM and the application is not activated. Reconnect
 with the same package before the DFU timeout and repeat EXECUTE to finish;
@@ -550,6 +557,28 @@ check does not prove removal of a signer from a different role's configuration.
 The XIAO was independently checked again after the power cycle: IDLE and
 `auto_flash=0`. Both `mctomqtt` and `ModemManager` were restored to active, and
 the memory-soak logger was active. No commit or PR was made.
+
+## Post-commit receipt-overflow hardening (host-verified)
+
+Review of `c3f51cd` reproduced a same-link re-subscription race: queue overflow
+cleared counters while older notifications still existed in the SoftDevice.
+Re-enabling notifications and repeating final EXECUTE could then activate on
+an older CHECKSUM notification's completion. The fix quarantines that link and
+requests only its disconnect, preserving the session for a real reconnect.
+
+The expanded compiled-adapter regressions failed before the fix and pass after
+it. They cover a final receipt already queued or still blocked, 12 outstanding
+notifications, late completions, same-link writes/re-subscription, partial-object
+resume, idempotent final completion after reconnect, and benign versus unexpected
+disconnect errors. All 56 Secure protocol/adapter/sender host tests and the
+compiled Legacy/Secure GATT-cache checks pass on Windows.
+
+A separate RAK3401 candidate built with Arm GCC 14.2.Rel1 and explicit test
+version `0x02040708` uses 40,186 of 40,784 executable flash bytes (598 free) and
+35,564 static RAM bytes, plus the unchanged 64 KiB retained arena. T096 and T114
+CMake checks also pass. This candidate has not been flashed or physically
+re-qualified; the Secure07 hardware and cross-platform records above describe
+the preceding image, not this overflow fix.
 
 ## Protocol references
 

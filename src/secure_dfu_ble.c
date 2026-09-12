@@ -15,6 +15,7 @@ static uint8_t           notifications[8][15], lengths[8], queue_head, queue_cou
 static bool              final_response_sent;
 static bool              final_notifications[8];
 static bool              notifications_enabled;
+static bool              connection_blocked;
 static uint16_t          tx_pending;
 static uint32_t          last_notification_attempt;
 
@@ -89,7 +90,7 @@ static void clear_receipts(void) {
 }
 
 static void flush_notifications(ble_dfu_t *service) {
-  while (queue_count && notifications_enabled && service->conn_handle != BLE_CONN_HANDLE_INVALID) {
+  while (!connection_blocked && queue_count && notifications_enabled && service->conn_handle != BLE_CONN_HANDLE_INVALID) {
     uint16_t               len    = lengths[queue_head];
     ble_gatts_hvx_params_t params = {0};
     params.handle                 = service->dfu_ctrl_pt_handles.value_handle;
@@ -126,7 +127,7 @@ void secure_dfu_ble_poll(ble_dfu_t *service) {
   // Called after scheduled BLE events (including MTU/sys-attribute setup),
   // never from flash_wait. A blocked first receipt has no HVN_TX_COMPLETE to
   // wake it, so retry from the existing main loop at most every 100 ms.
-  if (queue_count && notifications_enabled && service->conn_handle != BLE_CONN_HANDLE_INVALID &&
+  if (!connection_blocked && queue_count && notifications_enabled && service->conn_handle != BLE_CONN_HANDLE_INVALID &&
       app_timer_cnt_diff_compute(app_timer_cnt_get(), last_notification_attempt) >= APP_TIMER_TICKS(100)) {
     flush_notifications(service);
   }
@@ -158,6 +159,7 @@ static uint32_t characteristic(ble_dfu_t *service, uint16_t uuid, bool control) 
 
 uint32_t secure_dfu_ble_init(ble_dfu_t *service) {
   secure_dfu_init(&session);
+  connection_blocked = true;
   dfu_register_callback(flash_callback);
   service->conn_handle     = BLE_CONN_HANDLE_INVALID;
   const ble_uuid128_t base = {
@@ -186,14 +188,19 @@ void secure_dfu_ble_event(ble_dfu_t *service, ble_evt_t *event) {
     case BLE_GAP_EVT_CONNECTED:
       service->conn_handle = event->evt.gap_evt.conn_handle;
       clear_receipts();
-      session.prn_count = 0;
+      connection_blocked = false;
+      session.prn_count  = 0;
       break;
     case BLE_GAP_EVT_DISCONNECTED:
       service->conn_handle = BLE_CONN_HANDLE_INVALID;
+      connection_blocked   = true;
       clear_receipts();
       // Session metadata, CRCs, and the partial object remain in RAM.
       break;
     case BLE_GATTS_EVT_HVN_TX_COMPLETE:
+      if (connection_blocked) {
+        break;
+      }
       if (event->evt.gatts_evt.params.hvn_tx_complete.count <= tx_pending) {
         tx_pending -= event->evt.gatts_evt.params.hvn_tx_complete.count;
       }
@@ -206,6 +213,9 @@ void secure_dfu_ble_event(ble_dfu_t *service, ble_evt_t *event) {
       }
       break;
     case BLE_GATTS_EVT_WRITE: {
+      if (connection_blocked || service->conn_handle == BLE_CONN_HANDLE_INVALID) {
+        break;
+      }
       const ble_gatts_evt_write_t *w = &event->evt.gatts_evt.params.write;
       if (w->handle == service->dfu_ctrl_pt_handles.cccd_handle) {
         notifications_enabled = w->offset == 0 && w->len == 2 && w->data[0] == 1 && w->data[1] == 0;
@@ -225,9 +235,16 @@ void secure_dfu_ble_event(ble_dfu_t *service, ble_evt_t *event) {
       if (queue_count == 8) {
         // Never consume bytes or erase flash when their required receipt cannot
         // be queued. A compliant PRN-limited sender cannot fill this queue.
-        // Stop this connection's traffic without poisoning untouched flash
-        // buffers. A reconnect may query the last accepted offset and retry.
-        clear_receipts();
+        // Quarantine this link until DISCONNECTED. Clearing counters while old
+        // notifications remain in the SoftDevice would let re-subscription
+        // mistake an old TX completion for a new final EXECUTE receipt.
+        connection_blocked = true;
+        uint32_t err = sd_ble_gap_disconnect(service->conn_handle, BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
+        if (err != BLE_ERROR_INVALID_CONN_HANDLE && err != NRF_ERROR_INVALID_STATE) {
+          APP_ERROR_CHECK(err);
+        }
+        // Do not close the DFU transport: its ordinary disconnect handler must
+        // restart advertising so the retained session can resume on a new link.
         break;
       }
       uint8_t slot  = (queue_head + queue_count) % 8;

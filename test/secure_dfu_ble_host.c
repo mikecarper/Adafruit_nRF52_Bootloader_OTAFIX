@@ -16,6 +16,7 @@ static ble_dfu_t      service;
 static jmp_buf        fault_return;
 static uint32_t       fault_code, hvx_error, flash_error, clock_ticks, watchdog_feeds;
 static uint32_t       hvx_calls;
+static uint32_t       disconnect_requests, disconnect_result;
 static uint32_t       begins, writes, finishes, activations, closes;
 static uint32_t       image_size, flash_offset, pending_size;
 static uint32_t       disconnect_on_flash;
@@ -130,6 +131,13 @@ uint32_t sd_ble_gatts_hvx(uint16_t handle, const ble_gatts_hvx_params_t *params)
   receipt_size = *params->p_len;
   return NRF_SUCCESS;
 }
+uint32_t sd_ble_gap_disconnect(uint16_t handle, uint8_t reason) {
+  assert(handle == service.conn_handle);
+  assert(reason == BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
+  ++disconnect_requests;
+  // Completion is asynchronous: tests dispatch DISCONNECTED independently.
+  return disconnect_result;
+}
 
 static void dispatch(ble_evt_t *event) {
   if (!setjmp(fault_return)) {
@@ -140,6 +148,7 @@ void test_ble_reset(void) {
   clear_receipts();
   fault_code = hvx_error = flash_error = clock_ticks = watchdog_feeds = 0;
   hvx_calls                                                           = 0;
+  disconnect_requests = disconnect_result                             = 0;
   begins = writes = finishes = activations = closes = 0;
   image_size = flash_offset = pending_size = disconnect_on_flash = 0;
   pending = stall_flash = false;
@@ -199,6 +208,15 @@ uint32_t test_ble_hvx_calls(void) {
 }
 void test_ble_hvx_error(uint32_t error) {
   hvx_error = error;
+}
+void test_ble_disconnect_result(uint32_t result) {
+  disconnect_result = result;
+}
+uint32_t test_ble_disconnect_requests(void) {
+  return disconnect_requests;
+}
+uint32_t test_ble_transport_closes(void) {
+  return closes;
 }
 void test_ble_flash_error(uint32_t error) {
   flash_error = error;

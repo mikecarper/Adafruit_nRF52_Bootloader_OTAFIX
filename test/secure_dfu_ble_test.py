@@ -247,10 +247,104 @@ class SecureDfuBleTest(unittest.TestCase):
         self.lib.test_ble_hvx_error(19)
         for _ in range(9):
             self.assertEqual(self.write(2, b'\x03'), b'')
+        self.assertEqual(self.lib.test_ble_disconnect_requests(), 1)
+        self.assertEqual(self.lib.test_ble_transport_closes(), 0)
         self.assertFalse(self.lib.test_ble_failed())
         self.resume(123)
-        self.create(2, 4096)
-        self.finish(0)
+        for offset in range(123, 4096, 244):
+            self.write(4, self.image[offset:min(offset + 244, 4096)])
+        self.control(b'\x04')
+        self.finish(4096)
+        self.assertEqual(self.lib.test_ble_begins(), 1)
+
+    def test_overflow_blocks_same_link_resubscription_and_stale_completion(self):
+        for final_already_queued in (False, True):
+            with self.subTest(final_already_queued=final_already_queued):
+                self.setUp()
+                self.begin()
+                for start in (0, 4096):
+                    self.stage(start, start + 4096)
+                    self.control(b'\x04')
+                self.stage(8192, len(self.image))
+                # Match the production SoftDevice's 12-notification queue.
+                for _ in range(11 if final_already_queued else 12):
+                    self.control(b'\x03', deliver=False)
+                if final_already_queued:
+                    self.control(b'\x04', deliver=False)
+                self.lib.test_ble_hvx_error(19)
+                if not final_already_queued:
+                    self.write(2, b'\x04')
+                for _ in range(9 if final_already_queued else 8):
+                    self.write(2, b'\x03')
+                self.assertEqual(self.lib.test_ble_disconnect_requests(), 1)
+                self.assertEqual(self.lib.test_ble_transport_closes(), 0)
+                self.assertEqual(self.lib.test_ble_tx_pending(), 12)
+                self.assertTrue(self.lib.test_ble_completed())
+                writes = self.lib.test_ble_writes()
+                hvx_calls = self.lib.test_ble_hvx_calls()
+                self.lib.test_ble_hvx_error(0)
+                # These writes were queued before the asynchronous disconnect.
+                # Re-subscribing must not revive this connection or its receipts.
+                for handle, data in ((3, b'\x00\x00'), (3, b'\x01\x00'),
+                                     (2, b'\x04'), (2, b'\x06\x01'),
+                                     (2, b'\x01\x01' + struct.pack('<I', len(self.dat))),
+                                     (4, b'X')):
+                    self.assertEqual(self.write(handle, data), b'')
+                self.lib.test_ble_poll(100)
+                self.lib.test_ble_tx_complete(1)
+                self.lib.test_ble_tx_complete(11)
+                self.assertEqual(self.lib.test_ble_activations(), 0)
+                self.assertEqual(self.lib.test_ble_hvx_calls(), hvx_calls)
+                self.assertEqual(self.lib.test_ble_disconnect_requests(), 1)
+                self.assertEqual(self.lib.test_ble_writes(), writes)
+                self.assertEqual(self.lib.test_ble_begins(), 1)
+                self.assertFalse(self.lib.test_ble_failed())
+                self.lib.test_ble_connection(False)
+                self.assertEqual(self.lib.test_ble_tx_pending(), 0)
+                self.assertEqual(self.lib.test_ble_queued(), 0)
+                self.assertEqual(self.write(3, b'\x01\x00'), b'')
+                self.assertEqual(self.write(2, b'\x04'), b'')
+                self.connect()
+                self.assertEqual(self.select(1), (256, len(self.dat), zlib.crc32(self.dat)))
+                self.control(b'\x04')
+                self.assertEqual(self.lib.test_ble_activations(), 0)
+                self.assertEqual(self.select(2), (4096, len(self.image), zlib.crc32(self.image)))
+                self.control(b'\x04', deliver=False)
+                self.assertEqual(self.lib.test_ble_activations(), 0)
+                self.lib.test_ble_tx_complete(1)
+                self.assertEqual(self.lib.test_ble_activations(), 1)
+                self.assertEqual(self.lib.test_ble_finishes(), 1)
+                self.assertEqual(self.lib.test_ble_writes(), writes)
+
+    def test_overflow_tolerates_already_disconnecting_link(self):
+        for error in (0, 8, 0x3002):
+            with self.subTest(error=error):
+                self.setUp()
+                self.lib.test_ble_disconnect_result(error)
+                self.lib.test_ble_hvx_error(19)
+                for _ in range(9):
+                    self.write(2, b'\x06\x01')
+                self.assertEqual(self.lib.test_ble_disconnect_requests(), 1)
+                self.assertEqual(self.lib.test_ble_transport_closes(), 0)
+                self.lib.test_ble_hvx_error(0)
+                self.assertEqual(self.write(3, b'\x01\x00'), b'')
+                self.assertEqual(self.write(2, b'\x06\x01'), b'')
+                self.lib.test_ble_poll(100)
+                self.assertEqual(self.lib.test_ble_tx_pending(), 0)
+                self.lib.test_ble_connection(False)
+                self.connect()
+                self.assertEqual(self.select(1), (256, 0, 0))
+                self.begin()
+                self.finish(0)
+
+    def test_overflow_unexpected_disconnect_error_still_faults(self):
+        self.lib.test_ble_disconnect_result(7)  # NRF_ERROR_INVALID_PARAM
+        self.lib.test_ble_hvx_error(19)
+        for _ in range(8):
+            self.write(2, b'\x06\x01')
+        self.lib.test_ble_write(2, b'\x06\x01', 2)
+        self.assertEqual(self.lib.test_ble_disconnect_requests(), 1)
+        self.assertEqual(self.lib.test_ble_fault(), 7)
 
     def test_flash_failure_remains_latched(self):
         self.begin()
