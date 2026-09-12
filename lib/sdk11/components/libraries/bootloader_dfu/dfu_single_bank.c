@@ -27,6 +27,13 @@
 #include "sdk_common.h"
 
 #include "boards.h"
+#ifdef SECURE_DFU_RAK3401_TEST
+#include "secure_dfu_ble.h"
+#include "sha256.h"
+#include "crc16.h"
+static bool m_secure_transfer;
+static uint8_t m_secure_digest[32];
+#endif
 
 static dfu_state_t                  m_dfu_state;                /**< Current DFU state. */
 static uint32_t                     m_image_size;               /**< Size of the image that will be transmitted. */
@@ -89,6 +96,9 @@ static void pstorage_callback_handler(pstorage_handle_t * p_handle,
 #else
                 {
                     m_dfu_state = DFU_STATE_RDY;
+#ifdef SECURE_DFU_RAK3401_TEST
+                    if (m_secure_transfer) m_dfu_state = DFU_STATE_RX_DATA_PKT;
+#endif
                     if (m_data_pkt_cb != NULL)
                     {
                         m_data_pkt_cb(START_PACKET, result, p_data);
@@ -301,6 +311,9 @@ uint32_t dfu_init(void)
 
     m_init_packet_length = 0;
     m_image_crc          = 0;
+#ifdef SECURE_DFU_RAK3401_TEST
+    m_secure_transfer = false;
+#endif
 
     // Reset lazy erase state
     dfu_page_erased = NULL;
@@ -337,6 +350,21 @@ void dfu_register_callback(dfu_callback_t callback_handler)
 {
     m_data_pkt_cb = callback_handler;
 }
+
+#ifdef SECURE_DFU_RAK3401_TEST
+void dfu_secure_activity(void) { (void)dfu_timer_restart(); }
+
+uint32_t dfu_secure_start(uint32_t size, const uint8_t digest[32]) {
+    if (!is_ota()) return NRF_ERROR_FORBIDDEN;
+    m_dfu_state = DFU_STATE_IDLE;
+    m_data_received = 0;
+    m_secure_transfer = true;
+    memcpy(m_secure_digest, digest, sizeof(m_secure_digest));
+    dfu_start_packet_t start = {.dfu_update_mode = DFU_UPDATE_APP, .app_image_size = size};
+    dfu_update_packet_t packet = {.packet_type = START_PACKET, .params.start_packet = &start};
+    return dfu_start_pkt_handle(&packet);
+}
+#endif
 
 
 uint32_t dfu_start_pkt_handle(dfu_update_packet_t * p_packet)
@@ -597,6 +625,19 @@ uint32_t dfu_image_validate()
                 err_code = dfu_timer_restart();
                 if (err_code == NRF_SUCCESS)
                 {
+#ifdef SECURE_DFU_RAK3401_TEST
+                    if (m_secure_transfer) {
+                        sha256_ctx_t sha;
+                        uint8_t digest[32];
+                        const uint8_t *image = (const uint8_t *)mp_storage_handle_active->block_id;
+                        sha256_init(&sha);
+                        sha256_update(&sha, image, m_image_size);
+                        sha256_final(&sha, digest);
+                        err_code = memcmp(digest, m_secure_digest, sizeof(digest)) == 0 ?
+                                   NRF_SUCCESS : NRF_ERROR_INVALID_DATA;
+                        m_image_crc = crc16_compute(image, m_image_size, NULL);
+                    } else
+#endif
                     err_code = dfu_init_postvalidate((uint8_t *)mp_storage_handle_active->block_id,
                                                      m_image_size,
                                                      &m_image_crc);

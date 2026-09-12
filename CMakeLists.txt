@@ -33,6 +33,12 @@ option(SIGNED_FW "Enable signed firmware verification" OFF)
 option(DUALBANK_FW "Enable dual bank DFU support" OFF)
 option(FORCE_UF2 "Force UF2 support even with SIGNED_FW" OFF)
 option(RECOVERY_ALLOW_ALL_BOARDS "Recovery-only manual cross-board bootloader updates" OFF)
+option(SECURE_DFU_RAK3401_TEST "Experimental RAK3401 application-only resumable BLE protocol" OFF)
+if (SECURE_DFU_RAK3401_TEST AND
+    (NOT BOARD STREQUAL "wiscore_rak3401" OR SIGNED_FW OR DUALBANK_FW OR RECOVERY_ALLOW_ALL_BOARDS OR
+     NOT MOTA_BOOTLOADER_TEST_BUILD OR NOT DEFINED MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE))
+  message(FATAL_ERROR "SECURE_DFU_RAK3401_TEST requires unsigned single-bank wiscore_rak3401 and an explicit test version")
+endif ()
 set(DFU_USB_ENUMERATION_TIMEOUT_MS "30000" CACHE STRING
     "USB grace period for no-valid-image and explicit buttonless recovery, in milliseconds")
 set(SIGNED_FW_QX "" CACHE STRING "Public key Qx (comma-separated bytes)")
@@ -122,6 +128,11 @@ add_executable(bootloader
   # startup
   ${NRFX_DIR}/mdk/gcc_startup_${MCU_VARIANT}.S
   )
+
+if (SECURE_DFU_RAK3401_TEST)
+  target_sources(bootloader PRIVATE src/secure_dfu.c src/secure_dfu_ble.c)
+  target_compile_definitions(bootloader PRIVATE SECURE_DFU_RAK3401_TEST=1)
+endif ()
 
 if (MOTA_SD_CARD)
   target_sources(bootloader PUBLIC src/ota_sd_spi.c)

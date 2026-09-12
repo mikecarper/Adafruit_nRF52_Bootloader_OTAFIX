@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Guard bonded application-to-bootloader GATT cache invalidation."""
 
+import os
 from pathlib import Path
+import subprocess
+import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -84,6 +87,11 @@ require(
     "bonded system and user attributes must be restored before indicating",
 )
 require(
+    "if (!m_service_attrs_initialized)" in service_change
+    and "m_service_attrs_initialized = true;" in service_change,
+    "indication retries must not reinitialize the peer's DFU CCCDs",
+)
+require(
     "sd_ble_gatts_service_changed(m_conn_handle," in service_change
     and "m_dfu.service_handle," in service_change
     and "m_dfu.dfu_rev_handles.value_handle + 7U);" in service_change,
@@ -113,6 +121,11 @@ require(
     "each bonded reconnect must arm cache invalidation",
 )
 require(
+    "m_service_attrs_initialized = false;" in connected
+    and connected.index("m_service_attrs_initialized = false;") < connected.index("service_change_try();"),
+    "each connection must initialize its own system attributes before indicating",
+)
+require(
     "sd_ble_gap_data_length_update" not in connected,
     "CONNECTED must not start an optional procedure before cache invalidation",
 )
@@ -122,6 +135,10 @@ disconnected = on_ble_evt[disconnected_at:conn_update_at]
 require(
     "m_service_change_pending = false;" in disconnected,
     "pending state must not survive a disconnected handle",
+)
+require(
+    "m_service_attrs_initialized = false;" in disconnected,
+    "attribute initialization state must not survive a disconnected handle",
 )
 require(
     "sd_ble_gatts_sys_attr_get" not in disconnected,
@@ -147,7 +164,115 @@ require(
     "procedure-completion, and MTU-unblock points",
 )
 
-print(
-    "BLE GATT cache regression reproduced and fixed: bonded reconnects use a "
-    "populated range and retry Service Changed until queued"
-)
+# Execute the actual shared helper and link-event cases, not just a Python
+# model. Simulate SoftDevice's NULL user-attribute reset clearing DFU CCCDs.
+prefix = r'''
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stddef.h>
+#include "nrf_error.h"
+#define BLE_GATTS_SYS_ATTR_FLAG_SYS_SRVCS 1
+#define BLE_GATTS_SYS_ATTR_FLAG_USR_SRVCS 2
+#define BLE_GAP_EVT_CONNECTED 1
+#define BLE_GAP_EVT_DISCONNECTED 2
+#define BLE_CONN_HANDLE_INVALID 0xffff
+#define APP_DIRECTED_ADV_TIMEOUT 3
+static bool m_service_change_pending, m_service_attrs_initialized;
+static bool m_ble_peer_data_valid, m_is_advertising, m_ble_data_policy_active;
+static bool m_tear_down_in_progress, m_accum_active;
+static uint16_t m_conn_handle, m_accum_len;
+static unsigned m_direct_adv_cnt;
+static void *mp_final_packet;
+static struct { uint8_t sys_serv_attr[8]; } m_ble_peer_data;
+static struct { uint16_t service_handle; struct { uint16_t value_handle; } dfu_rev_handles; } m_dfu;
+static bool dfu_cccd;
+static unsigned sys_calls, usr_calls, indication_calls, attr_fail_flag;
+static uint32_t indication_result;
+static void advertising_start(void) { m_is_advertising = true; }
+static uint32_t sd_ble_gatts_sys_attr_set(uint16_t conn, const uint8_t *data, uint16_t len, uint32_t flags) {
+    (void)conn; (void)len;
+    if (flags == BLE_GATTS_SYS_ATTR_FLAG_SYS_SRVCS) ++sys_calls;
+    else { assert(data == NULL); ++usr_calls; }
+    if (flags == attr_fail_flag) return NRF_ERROR_BUSY;
+    if (flags == BLE_GATTS_SYS_ATTR_FLAG_USR_SRVCS) dfu_cccd = false;
+    return NRF_SUCCESS;
+}
+static uint32_t sd_ble_gatts_service_changed(uint16_t conn, uint16_t first, uint16_t last) {
+    (void)conn; (void)first; (void)last;
+    assert(m_service_attrs_initialized);
+    ++indication_calls;
+    return indication_result;
+}
+static void service_change_try(void)
+'''
+link_wrapper = r'''
+static void link_event(unsigned type) {
+    struct { struct { struct { uint16_t conn_handle; } gap_evt; } evt; } event = {{{42}}};
+    const __typeof__(event) *p_ble_evt = &event;
+    switch (type) {
+'''
+main = r'''
+int main(void) {
+    m_ble_peer_data_valid = true;
+    indication_result = NRF_ERROR_BUSY;
+    link_event(BLE_GAP_EVT_CONNECTED);
+    assert(m_service_attrs_initialized && m_service_change_pending);
+    assert(sys_calls == 1 && usr_calls == 1 && indication_calls == 1);
+    dfu_cccd = true; /* Peer subscribes between the initial attempt and retry. */
+    for (unsigned i = 0; i < 4; ++i) service_change_try();
+    assert(dfu_cccd && sys_calls == 1 && usr_calls == 1 && m_service_change_pending);
+    indication_result = NRF_SUCCESS;
+    service_change_try();
+    assert(dfu_cccd && !m_service_change_pending && indication_calls == 6);
+    service_change_try();
+    assert(indication_calls == 6);
+
+    link_event(BLE_GAP_EVT_DISCONNECTED);
+    assert(!m_service_attrs_initialized && !m_service_change_pending);
+    link_event(BLE_GAP_EVT_CONNECTED);
+    assert(m_service_attrs_initialized && !dfu_cccd && sys_calls == 2 && usr_calls == 2);
+
+    /* Failure in either initialization step must not mark setup complete or
+       indicate prematurely. Retry setup until both calls succeed. */
+    for (unsigned failed_flag = 1; failed_flag <= 2; ++failed_flag) {
+        link_event(BLE_GAP_EVT_DISCONNECTED);
+        sys_calls = usr_calls = indication_calls = 0;
+        attr_fail_flag = failed_flag;
+        link_event(BLE_GAP_EVT_CONNECTED);
+        assert(!m_service_attrs_initialized && m_service_change_pending && indication_calls == 0);
+        assert(sys_calls == 1 && usr_calls == (failed_flag == 2));
+        attr_fail_flag = 0;
+        indication_result = NRF_ERROR_INVALID_STATE;
+        service_change_try();
+        assert(m_service_attrs_initialized && m_service_change_pending && indication_calls == 1);
+        const unsigned saved_sys = sys_calls, saved_usr = usr_calls;
+        dfu_cccd = true;
+        service_change_try();
+        assert(dfu_cccd && sys_calls == saved_sys && usr_calls == saved_usr);
+    }
+
+    link_event(BLE_GAP_EVT_DISCONNECTED);
+    unsigned saved_calls = indication_calls;
+    service_change_try();
+    assert(indication_calls == saved_calls);
+    m_ble_peer_data_valid = false;
+    link_event(BLE_GAP_EVT_CONNECTED);
+    assert(!m_service_change_pending && !m_service_attrs_initialized && indication_calls == saved_calls);
+    return 0;
+}
+'''
+code = prefix + service_change + link_wrapper + connected + disconnected + "\n}}\n" + main
+sdk = ROOT / "lib/softdevice/s140_nrf52_6.1.1/s140_nrf52_6.1.1_API/include"
+with tempfile.TemporaryDirectory(prefix="otafix-gatt-cache-") as directory:
+    for secure in (False, True):
+        binary = Path(directory) / ("cache.exe" if os.name == "nt" else "cache")
+        flags = ["-DSECURE_DFU_RAK3401_TEST"] if secure else []
+        if os.environ.get("SECURE_DFU_TEST_SANITIZE") == "1":
+            flags += ["-fsanitize=address,undefined", "-fno-omit-frame-pointer", "-O1", "-g"]
+        subprocess.run([os.environ.get("CC", "gcc"), "-std=c11", "-Wall", "-Wextra", "-Werror",
+                        *flags, "-I" + str(sdk), "-x", "c", "-", "-o", str(binary)],
+                       input=code, text=True, check=True)
+        subprocess.run([str(binary)], check=True)
+
+print("BLE GATT cache guards and compiled Legacy/Secure retry tests passed: DFU subscriptions survive retries")

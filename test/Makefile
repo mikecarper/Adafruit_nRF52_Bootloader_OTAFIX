@@ -183,6 +183,9 @@ check: apply_sim readback_test readback_test_v7 readback_internal_test bootloade
 	python3 lfclk_source_test.py
 	python3 svc_ipa_guard_test.py
 	python3 legacy_dfu_bounds_test.py
+	python3 secure_dfu_test.py
+	python3 secure_dfu_ble_test.py
+	python3 secure_dfu_uploader_test.py
 	python3 legacy_ble_dfu_host_test.py
 	python3 signed_legacy_package_test.py
 	python3 usb_descriptor_test.py

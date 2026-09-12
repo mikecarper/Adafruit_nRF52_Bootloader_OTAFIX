@@ -302,7 +302,7 @@ class CopyAndKernelTests(unittest.TestCase):
 
     def test_kernel_capture_uses_pi_compatible_raw_option(self) -> None:
         with (
-            mock.patch.object(hil.os, "geteuid", return_value=0),
+            mock.patch.object(hil.os, "geteuid", return_value=0, create=True),
             mock.patch.object(hil, "run_command", return_value=hil.CommandResult(
                 0, "<6>[ 1.000000] boot\n", 0.1
             )) as run,
@@ -316,6 +316,20 @@ class CopyAndKernelTests(unittest.TestCase):
             b"+++MESHCORE-TERM-STOP\r\n+++MESHCORE-TERM-START\r\n",
         )
 
+    def test_text_query_does_not_select_binary_on_exit(self) -> None:
+        stream = mock.MagicMock()
+        stream.__enter__.return_value = stream
+        stream.read.return_value = b"  -> > test\r\n"
+        serial_module = SimpleNamespace(Serial=mock.Mock(return_value=stream),
+                                        SerialException=OSError)
+        with (mock.patch.dict(sys.modules, {"serial": serial_module}),
+              mock.patch.object(hil.time, "sleep"),
+              mock.patch.object(hil.time, "monotonic", side_effect=range(20))):
+            result = hil.serial_text_command("test-port", "get name", companion=True)
+        self.assertIn("-> > test", result.output)
+        self.assertEqual(stream.write.call_args_list, [
+            mock.call(hil.COMPANION_TERMINAL_RESET), mock.call(b"get name\r\n")])
+
     def test_copy_is_followed_by_mount_scoped_sync(self) -> None:
         commands: list[list[str]] = []
 
@@ -323,12 +337,12 @@ class CopyAndKernelTests(unittest.TestCase):
             commands.append(command)
             return hil.CommandResult(0, "", 0.1)
 
-        with mock.patch.object(hil.os, "geteuid", return_value=0):
+        with mock.patch.object(hil.os, "geteuid", return_value=0, create=True):
             hil.copy_and_sync(Path("/tmp/application.uf2"), "/mnt/uf2", 30, execute)
         self.assertEqual(
             commands,
             [
-                ["cp", "--", "/tmp/application.uf2", "/mnt/uf2/application.uf2"],
+                ["cp", "--", str(Path("/tmp/application.uf2")), "/mnt/uf2/application.uf2"],
                 ["sync", "-f", "--", "/mnt/uf2"],
             ],
         )

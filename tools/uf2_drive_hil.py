@@ -43,7 +43,6 @@ APPLICATION_LIMITS = {
 COMPANION_TERMINAL_RESET = (
     b"+++MESHCORE-TERM-STOP\r\n+++MESHCORE-TERM-START\r\n"
 )
-COMPANION_TERMINAL_STOP = b"+++MESHCORE-TERM-STOP\r\n"
 KERNEL_ERROR_RE = re.compile(
     r"offline device|lost async page write|buffer i/o error|"
     r"fat-fs.*(?:error|unable|failed)|blk_update_request.*i/o error|"
@@ -645,10 +644,8 @@ def serial_text_command(
         raise HilError("pyserial is required for Companion terminal mode") from error
 
     start = b""
-    stop = b""
     if companion:
         start = COMPANION_TERMINAL_RESET
-        stop = COMPANION_TERMINAL_STOP
     started = time.monotonic()
     output = bytearray()
     try:
@@ -668,9 +665,9 @@ def serial_text_command(
                 if chunk:
                     output.extend(chunk)
                     deadline = min(deadline + 0.1, time.monotonic() + 0.6)
-            if stop:
-                stream.write(stop)
-                stream.flush()
+            # Leave the CLI selected. TERM-STOP explicitly selects Binary;
+            # doing that after a text query breaks the next plain-ASCII host.
+            # Firmware owns session cleanup when this serial port closes.
     except (OSError, serial.SerialException) as error:
         if not disconnect_expected:
             raise HilError(f"serial terminal command failed: {error}") from error

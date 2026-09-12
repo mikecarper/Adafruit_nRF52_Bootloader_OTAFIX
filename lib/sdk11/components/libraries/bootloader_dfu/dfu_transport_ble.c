@@ -33,6 +33,9 @@
 #include "dfu_ble_svc_internal.h"
 #include "nrf_delay.h"
 #include "sdk_common.h"
+#ifdef SECURE_DFU_RAK3401_TEST
+#include "secure_dfu_ble.h"
+#endif
 
 #define DFU_REV_MAJOR                        0x00                                                    /** DFU Major revision number to be exposed. */
 #define DFU_REV_MINOR                        0x08                                                    /** DFU Minor revision number to be exposed. */
@@ -114,6 +117,7 @@ static uint32_t             m_direct_adv_cnt         = APP_DIRECTED_ADV_TIMEOUT;
 static uint8_t            * mp_final_packet;                                                         /**< Pointer to final data packet received. When callback for succesful packet handling is received from dfu bank handling a transfer complete response can be sent to peer. */
 static bool                 m_ble_data_policy_active = false;                                        /**< True only while firmware DATA packets are expected. */
 static bool                 m_service_change_pending = false;                                        /**< Retry a bonded GATT cache invalidation until the SoftDevice accepts it. */
+static bool                 m_service_attrs_initialized = false;                                     /**< Restore attributes only once per connection, before retrying the indication. */
 
 
 static ble_gap_addr_t      const * m_whitelist[1];                                                  /**< List of peers in whitelist (only one) */
@@ -129,44 +133,37 @@ static uint8_t _adv_handle = BLE_GAP_ADV_SET_HANDLE_NOT_SET;
  *            pending; otherwise Android can reuse the application's DFU Version handle and get
  *            GATT INVALID HANDLE from the bootloader.
  */
-static void service_change_try(void)
-{
-    uint32_t err_code;
+static void service_change_try(void) {
+  uint32_t err_code;
 
-    if (!m_service_change_pending)
-    {
-        return;
+  if (!m_service_change_pending) {
+    return;
+  }
+
+  if (!m_service_attrs_initialized) {
+    err_code = sd_ble_gatts_sys_attr_set(m_conn_handle, m_ble_peer_data.sys_serv_attr,
+                                         sizeof(m_ble_peer_data.sys_serv_attr), BLE_GATTS_SYS_ATTR_FLAG_SYS_SRVCS);
+    if (err_code != NRF_SUCCESS) {
+      return;
     }
 
-    err_code = sd_ble_gatts_sys_attr_set(m_conn_handle,
-                                         m_ble_peer_data.sys_serv_attr,
-                                         sizeof(m_ble_peer_data.sys_serv_attr),
-                                         BLE_GATTS_SYS_ATTR_FLAG_SYS_SRVCS);
-    if (err_code != NRF_SUCCESS)
-    {
-        return;
+    err_code = sd_ble_gatts_sys_attr_set(m_conn_handle, NULL, 0, BLE_GATTS_SYS_ATTR_FLAG_USR_SRVCS);
+    if (err_code != NRF_SUCCESS) {
+      return;
     }
+    // Reinitializing user attributes on an indication retry would erase
+    // DFU CCCDs that the peer enabled since the first attempt.
+    m_service_attrs_initialized = true;
+  }
 
-    err_code = sd_ble_gatts_sys_attr_set(m_conn_handle,
-                                         NULL,
-                                         0,
-                                         BLE_GATTS_SYS_ATTR_FLAG_USR_SRVCS);
-    if (err_code != NRF_SUCCESS)
-    {
-        return;
-    }
-
-    // Both ends must be application-populated handles. The old hard-coded
-    // start and 0xFFFF end made newer SoftDevices reject the indication, and
-    // that error used to be discarded. DIS follows DFU with one service plus
-    // three declaration/value pairs, so its final value is seven handles on.
-    err_code = sd_ble_gatts_service_changed(m_conn_handle,
-                                             m_dfu.service_handle,
-                                             m_dfu.dfu_rev_handles.value_handle + 7U);
-    if (err_code == NRF_SUCCESS)
-    {
-        m_service_change_pending = false;
-    }
+  // Both ends must be application-populated handles. The old hard-coded
+  // start and 0xFFFF end made newer SoftDevices reject the indication, and
+  // that error used to be discarded. DIS follows DFU with one service plus
+  // three declaration/value pairs, so its final value is seven handles on.
+  err_code = sd_ble_gatts_service_changed(m_conn_handle, m_dfu.service_handle, m_dfu.dfu_rev_handles.value_handle + 7U);
+  if (err_code == NRF_SUCCESS) {
+    m_service_change_pending = false;
+  }
 }
 
 
@@ -288,6 +285,7 @@ static void prioritize_flash_writes_over_ble(void)
  * @param[in] result    Operation result code. NRF_SUCCESS when a queued operation was successful.
  * @param[in] p_data    Pointer to the data to which the operation is related.
  */
+__attribute__((unused))
 static void dfu_cb_handler(uint32_t packet, uint32_t result, uint8_t * p_data)
 {
     switch (packet)
@@ -732,6 +730,7 @@ static void on_dfu_pkt_write(ble_dfu_t * p_dfu, ble_dfu_evt_t * p_evt)
  * @param[in] p_dfu     Device Firmware Update Service structure.
  * @param[in] p_evt     Event received from the Device Firmware Update Service.
  */
+__attribute__((unused))
 static void on_dfu_evt(ble_dfu_t * p_dfu, ble_dfu_evt_t * p_evt)
 {
     uint32_t           err_code;
@@ -858,6 +857,11 @@ static void advertising_add(ble_data_t* adv_data, uint8_t type, const void* fiel
  */
 static void advertising_init(ble_data_t* adv_data, uint8_t adv_flags)
 {
+#ifdef SECURE_DFU_RAK3401_TEST
+  uint8_t const uuid16[2] = {0x59, 0xFE};
+  advertising_add(adv_data, BLE_GAP_AD_TYPE_FLAGS, &adv_flags, 1);
+  advertising_add(adv_data, BLE_GAP_AD_TYPE_16BIT_SERVICE_UUID_COMPLETE, uuid16, sizeof(uuid16));
+#else
   uint8_t len;
   uint8_t uuid128[16];
   ble_uuid_t    service_uuid = { .uuid = BLE_DFU_SERVICE_UUID, .type = m_dfu.uuid_type };
@@ -865,6 +869,7 @@ static void advertising_init(ble_data_t* adv_data, uint8_t adv_flags)
 
   advertising_add(adv_data, BLE_GAP_AD_TYPE_FLAGS, &adv_flags, 1);
   advertising_add(adv_data, BLE_GAP_AD_TYPE_128BIT_SERVICE_UUID_MORE_AVAILABLE, uuid128, 16);
+#endif
 
   uint8_t const name_len = (uint8_t)strlen(DEVICE_NAME);
   uint8_t const name_max = (uint8_t)(BLE_GAP_ADV_SET_DATA_SIZE_MAX - adv_data->len - 2);
@@ -982,6 +987,7 @@ static void on_ble_evt(ble_evt_t * p_ble_evt)
                 // A reconnect must receive an explicit DATA control-point
                 // event before the low-latency policy is enabled again.
                 m_ble_data_policy_active = false;
+                m_service_attrs_initialized = false;
                 m_service_change_pending = m_ble_peer_data_valid;
                 service_change_try();
             }
@@ -994,6 +1000,7 @@ static void on_ble_evt(ble_evt_t * p_ble_evt)
             // stale handle.
             m_ble_data_policy_active = false;
             m_service_change_pending = false;
+            m_service_attrs_initialized = false;
             // Only word-aligned bytes submitted to the DFU core are resumable.
             // Never carry an uncommitted suffix into a new connection.
             m_accum_len = 0;
@@ -1049,6 +1056,14 @@ static void on_ble_evt(ble_evt_t * p_ble_evt)
             {
                 err_code = sd_ble_gap_disconnect(m_conn_handle,
                                                  BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
+#ifdef SECURE_DFU_RAK3401_TEST
+                // The queued timeout may follow an already terminated link.
+                // Preserve the resumable session until DISCONNECTED is handled.
+                if (err_code == BLE_ERROR_INVALID_CONN_HANDLE || err_code == NRF_ERROR_INVALID_STATE)
+                {
+                    err_code = NRF_SUCCESS;
+                }
+#endif
                 APP_ERROR_CHECK(err_code);
             }
             break;
@@ -1186,9 +1201,24 @@ static void on_ble_evt(ble_evt_t * p_ble_evt)
  */
 /*static*/ void ble_evt_dispatch(ble_evt_t * p_ble_evt)
 {
+#ifdef SECURE_DFU_RAK3401_TEST
+    secure_dfu_ble_event(&m_dfu, p_ble_evt);
+#else
     ble_dfu_on_ble_evt(&m_dfu, p_ble_evt);
+#endif
     on_ble_evt(p_ble_evt);
 }
+
+#ifdef SECURE_DFU_RAK3401_TEST
+void dfu_transport_ble_poll(void) {
+    if (IS_CONNECTED() && !m_tear_down_in_progress) secure_dfu_ble_poll(&m_dfu);
+}
+
+void dfu_secure_connection_policy(bool writing) {
+    if (writing) prioritize_flash_writes_over_ble();
+    else prioritize_ble_over_flash_writes();
+}
+#endif
 
 /**@brief     Function for the GAP initialization.
  *
@@ -1224,6 +1254,7 @@ static void gap_params_init(void)
  *
  * @param[in] nrf_error Error code containing information about what went wrong.
  */
+__attribute__((unused))
 static void service_error_handler(uint32_t nrf_error)
 {
     APP_ERROR_HANDLER(nrf_error);
@@ -1284,6 +1315,9 @@ static void device_information_init(void)
  */
 static void services_init(void)
 {
+#ifdef SECURE_DFU_RAK3401_TEST
+    APP_ERROR_CHECK(secure_dfu_ble_init(&m_dfu));
+#else
     uint32_t       err_code;
     ble_dfu_init_t dfu_init_obj;
 
@@ -1297,6 +1331,7 @@ static void services_init(void)
     err_code = ble_dfu_init(&m_dfu, &dfu_init_obj);
     APP_ERROR_CHECK(err_code);
 
+#endif
     // Keep the legacy DIS attribute layout stable for bonded/cacheing clients.
     device_information_init();
 
@@ -1332,8 +1367,11 @@ uint32_t dfu_transport_ble_update_start(void)
     m_pkt_type              = PKT_TYPE_INVALID;
     m_ble_data_policy_active = false;
     m_service_change_pending = false;
+    m_service_attrs_initialized = false;
 
+#ifndef SECURE_DFU_RAK3401_TEST
     dfu_register_callback(dfu_cb_handler);
+#endif
 
     err_code = hci_mem_pool_open();
     VERIFY_SUCCESS(err_code);
@@ -1351,7 +1389,13 @@ uint32_t dfu_transport_ble_update_start(void)
         APP_ERROR_CHECK(err_code);
 
         // Increase the BLE address by one when advertising openly.
+#ifdef SECURE_DFU_RAK3401_TEST
+        // A different GATT protocol must not reuse a phone's cached Legacy
+        // bootloader database. Application is +0, Legacy +1, this lab profile +2.
+        addr.addr[0] += 2;
+#else
         addr.addr[0] += 1;
+#endif
 
         err_code = sd_ble_gap_addr_set(&addr);
         APP_ERROR_CHECK(err_code);
@@ -1380,6 +1424,14 @@ uint32_t dfu_transport_ble_close()
     {
         // Disconnect from peer.
         err_code = sd_ble_gap_disconnect(m_conn_handle, BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
+#ifdef SECURE_DFU_RAK3401_TEST
+        // A final receipt can complete just before the peer disconnects. Do
+        // not reset before saving the validated image's activation settings.
+        if (err_code == BLE_ERROR_INVALID_CONN_HANDLE || err_code == NRF_ERROR_INVALID_STATE)
+        {
+            err_code = NRF_SUCCESS;
+        }
+#endif
         APP_ERROR_CHECK(err_code);
     }
     else
