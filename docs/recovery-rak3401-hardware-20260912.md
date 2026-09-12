@@ -98,5 +98,5 @@ settings or keys are excluded from that export and from this report.
 This run qualifies the documented **UF2 recovery sequence on RAK3401** and the
 two named recovery bridge binaries. It does not establish a new BLE/CDC DFU,
 power-loss, incompatible-SoftDevice migration, physical display, or all-board
-hardware result. R_ remains a temporary recovery-only, separate-prerelease
-distribution; this test did not create a tag, release, commit, or push.
+hardware result. R_ remains a temporary recovery-only distribution, separately
+packaged from normal images; the hardware test itself did not publish a release.

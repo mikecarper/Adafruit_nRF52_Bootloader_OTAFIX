@@ -75,7 +75,21 @@ CMake also supports `-DRECOVERY_ALLOW_ALL_BOARDS=ON`, with the same test-version
 options as a normal qualification build. Use a separate build directory.
 Its image filenames use `R_<board>_bootloader`.
 
-## Separate release
+## Separate recovery ZIP or release
+
+Normal releases can attach `OTAFIX-<version>-R_recovery.zip` alongside the
+separate signed bootloader mOTA ZIP. The recovery archive contains all board
+profiles under `boards/<board>/`, this guide, the hardware qualification report,
+an inventory, and checksums. These remain temporary recovery-only images even
+when attached to a stable normal release. They are never included in the normal
+bootloader mOTA bundle. Build them from the same clean normal tag with the
+recovery flag; their filenames and on-device versions retain the `R_` prefix.
+
+The Build workflow's `release_build` manual input produces production artifacts
+from an exact tag without publishing, including both ZIPs. Verify those artifacts
+before publishing the release. Untagged manual runs retain the test-only path.
+
+For a standalone recovery prerelease instead:
 
 Use a **new, clean, exact tag** prefixed with `R_`, for example
 `R_0.11.0-OTAFIX2.4.6`. Build that tag with the recovery flag and

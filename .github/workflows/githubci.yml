@@ -2,6 +2,11 @@ name: Build
 
 on:
   workflow_dispatch:
+    inputs:
+      release_build:
+        description: Build signed production artifacts from an exact tag without publishing
+        type: boolean
+        default: false
   pull_request:
   push:
     branches: [ master, feature/ota-delta-apply ]
@@ -16,6 +21,7 @@ env:
   # 0x02040401 identifies the failed global TinyUSB-budget candidate.
   # 0x02040703 identifies post-preview.2 USB/field-kit qualification, not a release.
   OTAFIX_QUALIFICATION_VERSION: '0x02040703'
+  OTAFIX_RELEASE_BUILD: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.release_build) }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -30,6 +36,15 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Require an exact clean production tag
+        if: ${{ env.OTAFIX_RELEASE_BUILD == 'true' }}
+        run: |
+          test "$GITHUB_REF_TYPE" = tag
+          test "$(git describe --dirty --always --tags)" = "$GITHUB_REF_NAME"
+          python3 tools/derive_otafix_version.py "$GITHUB_REF_NAME" --hex
 
       - name: Set matrix
         id: set-matrix
@@ -58,6 +73,9 @@ jobs:
       with:
         release: '14.2.Rel1'
 
+    - name: Set reproducible build timestamp
+      run: echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)" >> "$GITHUB_ENV"
+
     - name: Install Tools
       run: |
         pip3 install adafruit-nrfutil cryptography uritemplate requests intelhex setuptools
@@ -67,7 +85,7 @@ jobs:
       run: |
         mota_make_args=()
         mota_cmake_args=()
-        if [[ "$GITHUB_EVENT_NAME" != "release" ]]; then
+        if [[ "$OTAFIX_RELEASE_BUILD" != "true" ]]; then
           if [[ ! "$OTAFIX_QUALIFICATION_VERSION" =~ ^0x[0-9A-Fa-f]{8}$ || "$OTAFIX_QUALIFICATION_VERSION" == "0x02040401" ]]; then
             echo "invalid OTAFIX qualification version: $OTAFIX_QUALIFICATION_VERSION" >&2
             exit 1
@@ -88,6 +106,18 @@ jobs:
         path: _bin/${{ matrix.board }}
         if-no-files-found: error
 
+    - name: Build separately labelled recovery bridge
+      if: ${{ env.OTAFIX_RELEASE_BUILD == 'true' }}
+      run: |
+        make BOARD=${{ matrix.board }} RECOVERY_ALLOW_ALL_BOARDS=1 SECURE_DFU_TEST=0 all copy-artifact
+
+    - uses: actions/upload-artifact@v7
+      if: ${{ env.OTAFIX_RELEASE_BUILD == 'true' }}
+      with:
+        name: recovery-${{ matrix.board }}
+        path: _bin/recovery-allow-all/${{ matrix.board }}/
+        if-no-files-found: error
+
   feature-builds:
     if: ${{ !startsWith(github.ref_name, 'R_') }}
     runs-on: ubuntu-latest
@@ -102,6 +132,9 @@ jobs:
         uses: carlosperate/arm-none-eabi-gcc-action@v1
         with:
           release: '14.2.Rel1'
+
+      - name: Set reproducible build timestamp
+        run: echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)" >> "$GITHUB_ENV"
 
       - name: Install Tools
         run: |
@@ -118,7 +151,7 @@ jobs:
         run: |
           mota_make_args=()
           mota_cmake_args=()
-          if [[ "$GITHUB_EVENT_NAME" != "release" ]]; then
+          if [[ "$OTAFIX_RELEASE_BUILD" != "true" ]]; then
             if [[ ! "$OTAFIX_QUALIFICATION_VERSION" =~ ^0x[0-9A-Fa-f]{8}$ || "$OTAFIX_QUALIFICATION_VERSION" == "0x02040401" ]]; then
               echo "invalid OTAFIX qualification version: $OTAFIX_QUALIFICATION_VERSION" >&2
               exit 1
@@ -211,7 +244,7 @@ jobs:
           if-no-files-found: error
 
   bootloader-mota:
-    if: ${{ github.event_name == 'release' && !startsWith(github.ref_name, 'R_') }}
+    if: ${{ (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.release_build)) && !startsWith(github.ref_name, 'R_') }}
     needs: [build, field-firmware]
     runs-on: ubuntu-22.04
     steps:
@@ -378,9 +411,33 @@ jobs:
             _mota-release/*.sha256
             _mota-release/*.py
 
+  recovery-bundle:
+    if: ${{ (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.release_build)) && !startsWith(github.ref_name, 'R_') }}
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: recovery-*
+          path: _recovery-input
+          merge-multiple: true
+      - run: pip3 install intelhex
+      - name: Verify and ZIP every recovery profile
+        run: |
+          python3 tools/build_recovery_release.py --artifacts-dir _recovery-input \
+            --output-dir _recovery-release --tag "$GITHUB_REF_NAME"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bootloader-recovery-release
+          path: |
+            _recovery-release/*.zip
+            _recovery-release/*.sha256
+          if-no-files-found: error
+
   release:
     if: ${{ github.event_name == 'release' && !startsWith(github.ref_name, 'R_') }}
-    needs: [build, feature-builds, field-firmware, bootloader-mota]
+    needs: [build, feature-builds, field-firmware, bootloader-mota, recovery-bundle]
     runs-on: ubuntu-latest
     permissions:
       contents: write
