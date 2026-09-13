@@ -28,7 +28,8 @@ extern "C" {
 // Returns false if there was nothing to do, or it failed (caller continues the normal boot/DFU path).
 bool ota_delta_check_and_apply(void);
 
-#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_BOOTLOADER_UPDATE)
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_BOOTLOADER_UPDATE) || \
+    defined(MOTA_QSPI_BOOTLOADER_UPDATE)
 // Recompute the live application's EndF body hash and require the inclusive
 // image end at or below limit. Used by LoRa/SD scratch safety and the
 // legacy/manual UF2 staging guard.

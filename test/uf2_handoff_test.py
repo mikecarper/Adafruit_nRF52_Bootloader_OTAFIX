@@ -108,13 +108,18 @@ def source_guards() -> None:
         raise AssertionError("every self-update backend must use the compact recovery volume")
     for required in (
         "#define UF2_COMPACT_RECOVERY_VOLUME 1",
-        "#define NUM_FILES 0U",
+        '#include "uf2_current_echo.h"',
+        '{.name = "CURRENT UF2", .content = NULL}',
+        "#define NUM_INFO_SECTORS 0u",
+        "static const DirEntry compactFiles[]",
+        '.name = "INFO_UF2", .ext = "TXT"',
+        '.name = "INDEX   ", .ext = "HTM"',
         "SoftDevice expected: S",
         "#if defined(UF2_HAS_CURRENT_FILE)",
     ):
         if required not in GHOSTFAT_SOURCE:
             raise AssertionError(f"missing compact-volume guard: {required}")
-    for obsolete in ("utoa(", "strcat("):
+    for obsolete in ("utoa(", "strcat(", "#define NUM_FILES 0U"):
         if obsolete in GHOSTFAT_SOURCE:
             raise AssertionError(f"runtime INFO_UF2 formatter survived: {obsolete}")
 

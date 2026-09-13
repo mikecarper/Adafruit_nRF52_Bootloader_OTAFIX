@@ -22,6 +22,13 @@ hashlib, covers partial/out-of-range/wrapped manifest CRC masks and SHA padding
 boundaries, and exercises every watchdog channel mask with a register stub.
 The existing apply/readback suites separately check live flash versus staging.
 
+`uf2_volume_test` compiles production `ghostfat.c` with T-Echo Lite's board
+identity and host flash shims. It verifies the zero-byte INFO/INDEX entries,
+both FAT copies, every CURRENT.UF2 block, cached-write suppression, and a new
+application UF2 transfer. `bootloader_mota_techo_lite_test` exercises the exact
+T-Echo Lite identity through the bootloader-update failure-mode suite. These
+are host tests, not a replacement for the physical USB gate below.
+
 ```bash
 make check        # apply the committed vector (apply_sim) + the LTO-readback regression (readback_test)
 make sanitize     # rebuild and run the complete host suite with ASan and UBSan

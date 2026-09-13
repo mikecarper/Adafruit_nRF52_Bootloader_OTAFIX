@@ -133,7 +133,7 @@ extern int      otah_hybrid_ram_read(uint32_t offset, void *dst, uint32_t len);
 extern void     otah_sd_auth_read(void *dst, uint32_t len);
 extern void     otah_sd_auth_consume(void);
 #endif
-#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_BOOTLOADER_UPDATE)
+#if defined(MOTA_BOOTLOADER_UPDATE_ENABLED)
 extern int      otah_crc_bound_app_size(uint32_t *size);
 #endif
 #if defined(MOTA_BOOTLOADER_UPDATE_ENABLED)
@@ -282,6 +282,12 @@ static void otah_settings_commit(uint16_t bank0, uint16_t crc, uint32_t size) {
   #define BANK_INVALID_APP_V 0xFFu
 #endif
 
+#if defined(MOTA_QSPI_XIAO_IDENTITY) && \
+    (!defined(MOTA_QSPI_BOOTLOADER_UPDATE) || USB_DESC_VID != 0x2886 || \
+     (USB_DESC_UF2_PID != 0x0044 && USB_DESC_UF2_PID != 0x0045))
+  #error "XIAO compatibility identity requires an exact XIAO QSPI profile"
+#endif
+
 #if (defined(MOTA_SD_BOOTLOADER_UPDATE) && defined(MOTA_QSPI_BOOTLOADER_UPDATE)) || \
   (defined(MOTA_SD_BOOTLOADER_UPDATE) && defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)) || \
   (defined(MOTA_QSPI_BOOTLOADER_UPDATE) && defined(MOTA_INTERNAL_BOOTLOADER_UPDATE))
@@ -296,7 +302,7 @@ static void otah_settings_commit(uint16_t bank0, uint16_t crc, uint32_t size) {
     #error "App-preserving bootloader update requires the nRF52840 1 MiB flash layout"
   #endif
   #define BOOT_UPDATE_BOARD_ID (((uint32_t)USB_DESC_VID << 16) | USB_DESC_UF2_PID)
-  #if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_BOOTLOADER_UPDATE)
+  #if !defined(MOTA_QSPI_XIAO_IDENTITY)
     #define APP_APPLY_END MOTA_NRF52_APP_END
   #else
     #define APP_APPLY_END MOTA_NRF52_BL_SCRATCH_START
@@ -310,10 +316,6 @@ static void otah_settings_commit(uint16_t bank0, uint16_t crc, uint32_t size) {
 #elif defined(MOTA_QSPI_BOOTLOADER_UPDATE)
   #if !defined(MOTA_QSPI_FLASH)
     #error "MOTA_QSPI_BOOTLOADER_UPDATE requires MOTA_QSPI_FLASH"
-  #endif
-  #if !defined(USB_DESC_VID) || USB_DESC_VID != 0x2886 || \
-    (!defined(USB_DESC_UF2_PID) || (USB_DESC_UF2_PID != 0x0044 && USB_DESC_UF2_PID != 0x0045))
-    #error "MOTA_QSPI_BOOTLOADER_UPDATE is supported only on XIAO nRF52840 / Sense"
   #endif
 #elif defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
   #if defined(MOTA_QSPI_FLASH) || defined(MOTA_SD_CARD)
@@ -482,7 +484,8 @@ static int      g_qspi_source;
 
 static int staged_read(uint32_t address_or_offset, void *dst, uint32_t len) {
   if (g_qspi_source) {
-    if ((uint64_t)address_or_offset + len > g_qspi_total_size) {
+    if (address_or_offset > g_qspi_total_size ||
+        len > g_qspi_total_size - address_or_offset) {
       return 0;
     }
     return ota_qspi_read(address_or_offset, dst, len) ? 1 : 0;
@@ -961,7 +964,7 @@ static int find_body_len(uint32_t app_limit, uint32_t *body_len_out) {
   return 0;
 }
 
-#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_BOOTLOADER_UPDATE)
+#if defined(MOTA_BOOTLOADER_UPDATE_ENABLED)
 // An internal destination is safe only when the live application ends before
 // it. Do not trust a marker-shaped byte sequence alone: bind the first EndF to
 // the body by recomputing its truncated SHA-256 before any staged page is
@@ -1072,9 +1075,9 @@ static int hybrid_authorized_container_valid(void) {
 #endif
 
 #if defined(MOTA_BOOTLOADER_UPDATE_ENABLED)
-#if defined(MOTA_QSPI_BOOTLOADER_UPDATE) && USB_DESC_UF2_PID == 0x0044
+#if defined(MOTA_QSPI_XIAO_IDENTITY) && USB_DESC_UF2_PID == 0x0044
 static const uint8_t BOOT_UPDATE_HW_ID[32] = "XIAO_BL_28860044";
-#elif defined(MOTA_QSPI_BOOTLOADER_UPDATE)
+#elif defined(MOTA_QSPI_XIAO_IDENTITY)
 static const uint8_t BOOT_UPDATE_HW_ID[32] = "XIAO_BL_28860045";
 #endif
 
@@ -1133,30 +1136,40 @@ typedef char boot_update_scratch_must_match_dfu
 #endif
 
 static int boot_update_expected_identity(uint8_t hw_id[32], uint32_t *target_id) {
-#if defined(MOTA_QSPI_BOOTLOADER_UPDATE)
+#if defined(MOTA_QSPI_XIAO_IDENTITY)
   memcpy(hw_id, BOOT_UPDATE_HW_ID, sizeof(BOOT_UPDATE_HW_ID));
   *target_id = BOOT_UPDATE_BOARD_ID;
   return 1;
 #else
-  static const uint8_t prefix[7] = {'N', 'R', 'F', '_', 'B', 'L', '_'};
-  static const char    hex[16]   = "0123456789ABCDEF";
-  static const char    name[]    = DEVICE_NAME;
-  const uint32_t       name_len  = sizeof(name) - 1u;
+  // Board identity is a build constant. Emit its hexadecimal prefix directly
+  // instead of carrying a formatter and digit table in the bootloader.
+  #define BOOT_ID_NIBBLE(shift) ((BOOT_UPDATE_BOARD_ID >> (shift)) & 0x0Fu)
+  #define BOOT_ID_DIGIT(shift) \
+    (BOOT_ID_NIBBLE(shift) < 10u ? '0' + BOOT_ID_NIBBLE(shift) : 'A' + BOOT_ID_NIBBLE(shift) - 10u)
+  static const struct {
+    uint8_t prefix[16];
+    char name[16];
+  } identity = {
+    .prefix = {
+      'N', 'R', 'F', '_', 'B', 'L', '_',
+      BOOT_ID_DIGIT(28), BOOT_ID_DIGIT(24), BOOT_ID_DIGIT(20), BOOT_ID_DIGIT(16),
+      BOOT_ID_DIGIT(12), BOOT_ID_DIGIT(8), BOOT_ID_DIGIT(4), BOOT_ID_DIGIT(0), '_'
+    },
+    .name = DEVICE_NAME
+  };
+  #undef BOOT_ID_DIGIT
+  #undef BOOT_ID_NIBBLE
+  const uint32_t name_len = sizeof(DEVICE_NAME) - 1u;
   if (BOOT_UPDATE_BOARD_ID == 0 || BOOT_UPDATE_BOARD_ID == UINT32_MAX || name_len == 0 || name_len > 15u) {
     return 0;
   }
-  memset(hw_id, 0, 32);
-  memcpy(hw_id, prefix, sizeof(prefix));
-  for (uint32_t i = 0; i < 8u; i++) {
-    hw_id[7u + i] = (uint8_t)hex[(BOOT_UPDATE_BOARD_ID >> (28u - 4u * i)) & 0x0Fu];
-  }
-  hw_id[15] = '_';
+  _Static_assert(sizeof(identity) == 32u, "Bootloader hardware identity must be exactly 32 bytes");
+  memcpy(hw_id, &identity, sizeof(identity));
   for (uint32_t i = 0; i < name_len; i++) {
-    const uint8_t ch = (uint8_t)name[i];
+    const uint8_t ch = (uint8_t)identity.name[i];
     if (ch < 0x21u || ch > 0x7Eu) {
       return 0;
     }
-    hw_id[16u + i] = ch;
   }
   uint8_t hash[32];
   sha256_ctx_t ctx;
@@ -1169,18 +1182,17 @@ static int boot_update_expected_identity(uint8_t hw_id[32], uint32_t *target_id)
 }
 
 static int boot_vectors_valid(const uint8_t vectors[8]) {
-  const uint32_t initial_sp = rd_u32(vectors);
-  const uint32_t reset      = rd_u32(vectors + 4);
-  const uint32_t reset_addr = reset & ~1u;
-  const uint32_t ram_end =
+  if (!bootloader_image_vectors_valid(vectors, 8u, MOTA_NRF52_BL_START,
+                                      MOTA_NRF52_BL_SIZE)) {
+    return 0;
+  }
 #if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
-    MOTA_HYBRID_ARENA_START;
+  // The shared validator permits the MCU's full RAM. Internal-only builds
+  // additionally keep the stack below their retained staging arena.
+  return rd_u32(vectors) <= MOTA_HYBRID_ARENA_START;
 #else
-    0x20040000u;
+  return 1;
 #endif
-  return (initial_sp & 7u) == 0 && initial_sp >= 0x20000000u && initial_sp <= ram_end &&
-         (reset & 1u) != 0 && reset_addr >= MOTA_NRF52_BL_START &&
-         reset_addr < MOTA_NRF52_BL_START + MOTA_NRF52_BL_SIZE;
 }
 
 static int staged_vectors_valid(uint32_t payload_addr) {
@@ -1233,14 +1245,7 @@ static int boot_image_ram_caps_valid(const uint8_t *image) {
   for (uint32_t off = 0; off + sizeof(mota_ram_info_t) <= MOTA_NRF52_BL_SIZE;
        off += sizeof(uint32_t)) {
     const uint8_t *candidate = image + off;
-    int magic_equal = 1;
-    for (uint32_t i = 0; i < sizeof(g_mota_ram_info.magic); ++i) {
-      if (candidate[i] != g_mota_ram_info.magic[i]) {
-        magic_equal = 0;
-        break;
-      }
-    }
-    if (magic_equal &&
+    if (memcmp(candidate, g_mota_ram_info.magic, sizeof(g_mota_ram_info.magic)) == 0 &&
         rd_u16(candidate + offsetof(mota_ram_info_t, abi)) == MOTA_RAM_INFO_ABI &&
         rd_u16(candidate + offsetof(mota_ram_info_t, handoff_len)) ==
           MOTA_HYBRID_HANDOFF_LEN &&
@@ -1270,17 +1275,11 @@ static int boot_image_caps_valid(const uint8_t *image) {
     // raw image are 4-byte aligned. Read every field as bytes: even an enabled
     // Cortex-M UNALIGN_TRP cannot fault this validation path.
     const uint8_t *candidate = image + off;
-    int magic_equal = 1;
-    for (uint32_t i = 0; i < sizeof(magic); i++) {
-      if (candidate[i] != magic[i]) {
-        magic_equal = 0;
-        break;
-      }
-    }
     const uint16_t apply_abi  = rd_u16(candidate + offsetof(mota_bl_info_t, apply_abi));
     const uint16_t codec_mask = rd_u16(candidate + offsetof(mota_bl_info_t, codec_mask));
     const uint8_t *storage    = candidate + offsetof(mota_bl_info_t, storage_flags);
-    if (magic_equal && apply_abi >= 3u && apply_abi != UINT16_MAX &&
+    if (memcmp(candidate, magic, sizeof(magic)) == 0 &&
+        apply_abi >= 3u && apply_abi != UINT16_MAX &&
         (codec_mask & MOTA_BOOT_UPDATE_CODEC_MASK) == MOTA_BOOT_UPDATE_CODEC_MASK &&
         (storage[0] & MOTA_BL_STORAGE_BOOT_UPDATE) != 0u &&
         (storage[0] & (uint8_t)~MOTA_BL_STORAGE_KNOWN) == 0u &&
@@ -1470,19 +1469,21 @@ static bool apply_bootloader_update(void) {
   if (!boot_image_metadata_valid_at(m.payload_addr, &m)) {
     return boot_update_reject(&m, GPREGRET2_BL_MANIFEST);
   }
-#elif defined(MOTA_SD_BOOTLOADER_UPDATE)
-  // SD-backed application builds do not reserve the fixed MBR scratch range
+#else
+  // External application builds need not reserve the fixed MBR scratch range
   // at link time. Prove the live EndF-inclusive image ends below 0xE0000
   // before erasing any scratch page.
   if (!ota_delta_live_app_fits_below(MOTA_NRF52_BL_SCRATCH_START)) {
     return boot_update_reject(&m, GPREGRET2_BL_POLICY);
   }
+#if defined(MOTA_SD_BOOTLOADER_UPDATE)
   // APRV is removable-media metadata. Bind the candidate bytes to the signed
   // manifest image_hash captured by the app in internal scratch before the
   // first erase. Copying page zero consumes the token.
   if (!sd_boot_authorization_valid(&m)) {
     return boot_update_reject(&m, GPREGRET2_BL_APPROVAL);
   }
+#endif
 #endif
   if (!clear_approval(&m)) {
     gpregret2_set(GPREGRET2_BL_APPROVAL);

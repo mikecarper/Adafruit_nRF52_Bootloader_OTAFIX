@@ -347,7 +347,7 @@ static bool read_aligned(uint32_t offset, uint8_t *dst, uint32_t len) {
   if ((offset & (OTA_QSPI_DMA_ALIGNMENT - 1u)) != 0 ||
       ((uintptr_t)dst & (OTA_QSPI_DMA_ALIGNMENT - 1u)) != 0 ||
       (len & (OTA_QSPI_DMA_ALIGNMENT - 1u)) != 0 || len == 0 ||
-      (uint64_t)offset + len > g_capacity) {
+      offset > g_capacity || len > g_capacity - offset) {
     return false;
   }
   nrf_qspi_read_buffer_set(NRF_QSPI, dst, len, offset);
@@ -360,7 +360,7 @@ static bool write_aligned(uint32_t offset, const uint8_t *src, uint32_t len) {
   if ((offset & (OTA_QSPI_DMA_ALIGNMENT - 1u)) != 0 ||
       ((uintptr_t)src & (OTA_QSPI_DMA_ALIGNMENT - 1u)) != 0 ||
       (len & (OTA_QSPI_DMA_ALIGNMENT - 1u)) != 0 || len == 0 ||
-      (offset & 255u) + len > 256u || (uint64_t)offset + len > g_capacity) {
+      len > 256u - (offset & 255u) || offset > g_capacity || len > g_capacity - offset) {
     return false;
   }
   nrf_qspi_write_buffer_set(NRF_QSPI, src, len, offset);
@@ -370,7 +370,7 @@ static bool write_aligned(uint32_t offset, const uint8_t *src, uint32_t len) {
 }
 
 bool ota_qspi_read(uint32_t offset, void *dst, uint32_t len) {
-  if (g_capacity == 0 || dst == NULL || (uint64_t)offset + len > g_capacity) {
+  if (g_capacity == 0 || dst == NULL || offset > g_capacity || len > g_capacity - offset) {
     return false;
   }
   uint8_t *out = (uint8_t *)dst;
@@ -392,7 +392,7 @@ bool ota_qspi_write(uint32_t offset, const void *src, uint32_t len) {
   // The bootloader only clears the four-byte approval word. Keep this helper
   // purpose-specific instead of carrying a general NOR writer.
   if (g_capacity == 0 || src == NULL || len != QSPI_APPROVAL_LEN || (offset & 255u) + len > 256u ||
-      (uint64_t)offset + len > g_capacity) {
+      offset > g_capacity || len > g_capacity - offset) {
     return false;
   }
 

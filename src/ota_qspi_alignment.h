@@ -23,7 +23,7 @@ static inline bool ota_qspi_dma_window(uint32_t offset, uint32_t requested_lengt
   if (window == NULL || requested_length == 0 || bounce_size < OTA_QSPI_DMA_ALIGNMENT ||
       (bounce_size & (OTA_QSPI_DMA_ALIGNMENT - 1u)) != 0 ||
       (capacity & (OTA_QSPI_DMA_ALIGNMENT - 1u)) != 0 ||
-      (uint64_t)offset + requested_length > capacity) {
+      offset > capacity || requested_length > capacity - offset) {
     return false;
   }
 
@@ -35,7 +35,7 @@ static inline bool ota_qspi_dma_window(uint32_t offset, uint32_t requested_lengt
   const uint32_t dma_length =
     (covered + OTA_QSPI_DMA_ALIGNMENT - 1u) & ~(OTA_QSPI_DMA_ALIGNMENT - 1u);
 
-  if ((uint64_t)aligned_offset + dma_length > capacity) {
+  if (aligned_offset > capacity || dma_length > capacity - aligned_offset) {
     return false;
   }
 

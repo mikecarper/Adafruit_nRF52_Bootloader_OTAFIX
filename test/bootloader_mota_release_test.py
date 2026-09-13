@@ -61,9 +61,20 @@ def define_hex(text: str, key: str) -> int:
 
 
 class QualifiedReleaseInventoryTest(unittest.TestCase):
-    def test_inventory_has_seventeen_unique_profiles(self) -> None:
-        self.assertEqual(len(release.QUALIFIED_BOARDS), 17)
-        self.assertEqual(len(set(release.QUALIFIED_BOARDS)), 17)
+    def test_inventory_covers_every_release_board(self) -> None:
+        boards = {path.name for path in (ROOT / "src" / "boards").iterdir() if path.is_dir()}
+        self.assertEqual(set(release.QUALIFIED_BOARDS), boards)
+        self.assertEqual(len(release.QUALIFIED_BOARDS), len(boards))
+
+    def test_unconfigured_new_board_blocks_release(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            board = root / "new_board"
+            board.mkdir()
+            (board / "board.cmake").write_text("set(MCU_VARIANT nrf52840)\n")
+            (board / "board.mk").write_text("")
+            with self.assertRaisesRegex(ValueError, "missing exact"):
+                release.release_boards(root)
 
     def test_gat562_exact_internal_profile_is_qualified(self) -> None:
         self.assertIn("gat562", release.QUALIFIED_BOARDS)

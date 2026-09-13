@@ -255,7 +255,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: mikecarper/motatool
-          ref: 9eef6e53173317f63d8cd6e61fb4f70b20129ab0
+          ref: 60d9174d531160722497f21cea8ab484291cd2d7
           path: _motatool
 
       - name: Checkout pinned MeshCore Open field app

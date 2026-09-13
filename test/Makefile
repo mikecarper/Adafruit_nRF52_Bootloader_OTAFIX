@@ -76,7 +76,7 @@ bootloader_mota_test bootloader_mota_recovery_test: bootloader_mota_test.c $(SRC
                       $(SRC)/sha256.c $(SRC)/usb/uf2/bootloader_image.c \
                       $(SRC)/usb/uf2/bootloader_image.h $(SRC)/ota_bl_info.h $(SRC)/ota_layout.h
 	$(CC) $(CFLAGS) -DOTA_DELTA_HOST_TEST -DMOTA_QSPI_FLASH -DMOTA_QSPI_BOOTLOADER_UPDATE \
-		-DUSB_DESC_VID=0x2886 -DUSB_DESC_UF2_PID=0x0044 -DDEVICE_NAME='"XIAO_DFU"' $(INC) \
+		-DMOTA_QSPI_XIAO_IDENTITY=1 -DUSB_DESC_VID=0x2886 -DUSB_DESC_UF2_PID=0x0044 -DDEVICE_NAME='"XIAO_DFU"' $(INC) \
 		bootloader_mota_test.c $(SRC)/detools/detools.c $(SRC)/sha256.c \
 		$(SRC)/usb/uf2/bootloader_image.c -o $@
 
@@ -89,6 +89,18 @@ bootloader_mota_internal_test: bootloader_mota_test.c $(SRC)/ota_delta.c $(SRC)/
 		-DUSB_DESC_VID=0x239A -DUSB_DESC_UF2_PID=0x0029 -DDEVICE_NAME='"3401_DFU"' $(INC) \
 		bootloader_mota_test.c $(SRC)/detools/detools.c $(SRC)/sha256.c \
 		$(SRC)/usb/uf2/bootloader_image.c -o $@
+
+bootloader_mota_qspi_generic_test: override CFLAGS += -DUSB_DESC_VID=0x239A -DUSB_DESC_UF2_PID=0x0029 \
+	-DDEVICE_NAME='"3401_W25Q16_DFU"' -DTEST_HW_ID='"NRF_BL_239A0029_3401_W25Q16_DFU"' -DTEST_TARGET_ID=0xFEF255E8u
+bootloader_mota_qspi_generic_v7_test: override CFLAGS += -DUSB_DESC_VID=0x2886 -DUSB_DESC_UF2_PID=0x0044 \
+	-DDEVICE_NAME='"SCAP_DFU"' -DTEST_HW_ID='"NRF_BL_28860044_SCAP_DFU"' -DTEST_TARGET_ID=0xD677B472u \
+	-DMOTA_NRF52_APP_BASE=0x27000u -DTEST_SOFTDEVICE_FWID=0x0123u
+bootloader_mota_techo_lite_test: override CFLAGS += -DUSB_DESC_VID=0x239A -DUSB_DESC_UF2_PID=0x00DA \
+	-DDEVICE_NAME='"LTEL_DFU"' -DTEST_HW_ID='"NRF_BL_239A00DA_LTEL_DFU"' -DTEST_TARGET_ID=0xDFF3CD4Eu
+bootloader_mota_qspi_generic_test bootloader_mota_qspi_generic_v7_test bootloader_mota_techo_lite_test: bootloader_mota_test.c $(SRC)/ota_delta.c \
+    $(SRC)/detools/detools.c $(SRC)/sha256.c $(SRC)/usb/uf2/bootloader_image.c
+	$(CC) $(CFLAGS) -DOTA_DELTA_HOST_TEST -DTEST_GENERIC_QSPI -DMOTA_QSPI_FLASH -DMOTA_QSPI_BOOTLOADER_UPDATE $(INC) \
+		bootloader_mota_test.c $(SRC)/detools/detools.c $(SRC)/sha256.c $(SRC)/usb/uf2/bootloader_image.c -o $@
 
 bootloader_mota_sd_test: bootloader_mota_test.c $(SRC)/ota_delta.c $(SRC)/detools/detools.c \
                          $(SRC)/sha256.c $(SRC)/usb/uf2/bootloader_image.c \
@@ -127,6 +139,11 @@ uf2_write_state_test: uf2_write_state_test.c $(SRC)/usb/uf2/uf2_app_flash.h \
                       $(SRC)/usb/uf2/uf2_transfer_state.h \
                       $(SRC)/usb/uf2/uf2_current_echo.h
 	$(CC) $(CFLAGS) -I $(SRC)/usb/uf2 uf2_write_state_test.c -o $@
+
+uf2_volume_test: uf2_volume_test.c $(SRC)/usb/uf2/ghostfat.c $(wildcard uf2_stubs/*.h) \
+                 $(wildcard $(SRC)/usb/uf2/*.h)
+	$(CC) $(CFLAGS) -Wno-int-to-pointer-cast -DNRF52840_XXAA -DMOTA_QSPI_BOOTLOADER_UPDATE \
+		-I uf2_stubs -I . -I $(SRC) -I $(SRC)/usb/uf2 uf2_volume_test.c -o $@
 
 bootloader_settings_guard_test: bootloader_settings_guard_test.c \
                                 $(SRC)/bootloader_settings_guard.c \
@@ -223,6 +240,9 @@ check: apply_sim readback_test readback_test_v7 readback_internal_test bootloade
 	./bootloader_mota_internal_test
 	@echo
 	./bootloader_mota_sd_test
+	./bootloader_mota_qspi_generic_test
+	./bootloader_mota_qspi_generic_v7_test
+	./bootloader_mota_techo_lite_test
 	@echo
 	./softdevice_fwid_test
 	@echo
@@ -238,6 +258,7 @@ check: apply_sim readback_test readback_test_v7 readback_internal_test bootloade
 	./dfu_timeout_test
 	@echo
 	./uf2_write_state_test
+	./uf2_volume_test
 	@echo
 	./bootloader_settings_guard_test
 	@echo
@@ -257,6 +278,9 @@ sanitize:
 	$(MAKE) CFLAGS="$(SANITIZER_CFLAGS)" check
 
 clean:
+	rm -f uf2_volume_test
+	rm -f bootloader_mota_techo_lite_test
+	rm -f bootloader_mota_qspi_generic_test bootloader_mota_qspi_generic_v7_test
 	rm -f bootloader_image_recovery_test dfu_image_policy_recovery_test bootloader_mota_recovery_test
 	rm -f apply_sim readback_test readback_test_v7 readback_internal_test bootloader_image_test sd_apply_test qspi_apply_test bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test softdevice_fwid_test dfu_init_bounds_test dfu_init_signed_bounds_test qspi_alignment_test qspi_wake_test usb_wait_test dfu_timeout_test uf2_write_state_test bootloader_settings_guard_test dfu_image_policy_test dfu_entry_test peer_data_layout_test peer_data_layout_nrf52_test peer_data_layout_nrf52833_test pstorage_busy_test
 
@@ -267,6 +291,9 @@ clean:
 apply_sim readback_test readback_test_v7 readback_internal_test \
 bootloader_image_test bootloader_image_recovery_test sd_apply_test qspi_apply_test \
 bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test \
+bootloader_mota_qspi_generic_test bootloader_mota_qspi_generic_v7_test bootloader_mota_techo_lite_test \
 bootloader_mota_recovery_test dfu_image_policy_test dfu_image_policy_recovery_test: $(SRC)/crc32.h
 
 check: bootloader_image_recovery_test dfu_image_policy_recovery_test bootloader_mota_recovery_test
+check: bootloader_mota_qspi_generic_test bootloader_mota_qspi_generic_v7_test bootloader_mota_techo_lite_test
+check: uf2_volume_test

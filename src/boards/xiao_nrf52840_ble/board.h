@@ -25,6 +25,9 @@
 #ifndef _XIAO_BLE
 #define _XIAO_BLE
 
+// Preserve the deployed XIAO wire identity and fixed application ceiling.
+#define MOTA_QSPI_XIAO_IDENTITY 1
+
 /*------------------------------------------------------------------*/
 /* LED
  *------------------------------------------------------------------*/

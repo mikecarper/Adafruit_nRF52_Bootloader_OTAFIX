@@ -28,7 +28,9 @@
 #define TEST_INSTALLED_BOOT_VERSION 0x0204010Bu
 #define TEST_CANDIDATE_BOOT_VERSION 0x0204010Cu
 #define TEST_SOFTDEVICE_FAMILY      140u
+#ifndef TEST_SOFTDEVICE_FWID
 #define TEST_SOFTDEVICE_FWID        0x00B6u
+#endif
 
 #if defined(MOTA_SD_BOOTLOADER_UPDATE)
   #define TEST_BOARD_ID       0x239A0071u
@@ -50,6 +52,16 @@
   #define TEST_PRESERVE_END   MOTA_NRF52_INTERNAL_BL_SLOT_START
   #define TEST_RAW_START      MOTA_NRF52_INTERNAL_BL_SLOT_START
   #define TEST_STORAGE_FLAGS  (MOTA_BL_STORAGE_STAGE_CEILING | MOTA_BL_STORAGE_BOOT_UPDATE)
+#elif defined(TEST_GENERIC_QSPI)
+  #define TEST_BOARD_ID       (((uint32_t)USB_DESC_VID << 16) | USB_DESC_UF2_PID)
+  #define TEST_OTHER_BOARD_ID 0x28860045u
+  #define TEST_DEVICE_NAME    DEVICE_NAME
+  // TEST_HW_ID and TEST_TARGET_ID come from the exact board test profile.
+  #define TEST_SOURCE         GPREGRET2_OTA_STAGE_QSPI
+  #define TEST_PRESERVE_END   MOTA_NRF52_BL_SCRATCH_START
+  #define TEST_RAW_START      MOTA_NRF52_BL_SCRATCH_START
+  #define TEST_STORAGE_FLAGS  (MOTA_BL_STORAGE_STAGE_CEILING | MOTA_BL_STORAGE_QSPI | \
+                              MOTA_BL_STORAGE_BOOT_UPDATE)
 #else
   #define TEST_BOARD_ID       0x28860044u
   #define TEST_OTHER_BOARD_ID 0x28860045u
@@ -86,7 +98,7 @@ static uint8_t               HYBRID_RAM[MOTA_HYBRID_ARENA_SIZE];
 static mota_hybrid_handoff_t HYBRID_HANDOFF;
 static uint32_t              g_resetreas;
 #endif
-#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_BOOTLOADER_UPDATE)
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_BOOTLOADER_UPDATE) || defined(MOTA_QSPI_BOOTLOADER_UPDATE)
 static jmp_buf  g_power_cut_env;
 static int      g_power_cut_armed, g_power_cut_after_page;
 static int      g_compaction_started, g_raw_pages_written;
@@ -106,7 +118,7 @@ void otah_write_words(uint32_t address, const uint32_t *src, uint32_t words) {
   if (address == g_corrupt_write_address) {
     FLASH[address] ^= 1u;
   }
-#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_BOOTLOADER_UPDATE)
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_BOOTLOADER_UPDATE) || defined(MOTA_QSPI_BOOTLOADER_UPDATE)
 #if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
   // The approval-clear rewrite of the first slot page still begins with mOTA.
   // The first compacted raw page does not; from there writes are sequential.
@@ -468,7 +480,7 @@ static void reset_device(void) {
   g_installed_boot_info.app_base = MOTA_NRF52_APP_BASE;
   g_installed_boot_info.layout_abi = BOOTLOADER_UPDATE_LAYOUT_ABI;
   g_runtime_fwid = TEST_SOFTDEVICE_FWID;
-#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_BOOTLOADER_UPDATE)
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_BOOTLOADER_UPDATE) || defined(MOTA_QSPI_BOOTLOADER_UPDATE)
   g_power_cut_armed       = 0;
   g_power_cut_after_page  = 0;
   g_compaction_started    = 0;
@@ -703,7 +715,7 @@ int main(void) {
   report("wrong bootloader staging backend is rejected", !applied && g_gpregret2 == GPREGRET2_BL_CONTAINER &&
            g_mbr_calls == 0 && app_unchanged(), &failures);
 
-#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_BOOTLOADER_UPDATE)
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_BOOTLOADER_UPDATE) || defined(MOTA_QSPI_BOOTLOADER_UPDATE)
   reset_device();
 #if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
   report("manual UF2 fixed scratch guard rejects an app extending past E0000",
@@ -719,7 +731,7 @@ int main(void) {
   report("shifted internal container is rejected", !applied && g_gpregret2 == GPREGRET2_BL_CONTAINER &&
            g_mbr_calls == 0 && app_unchanged(), &failures);
 #else
-  report("SD scratch guard accepts a hash-bound app ending below E0000",
+  report("external scratch guard accepts a hash-bound app ending below E0000",
          ota_delta_live_app_fits_below(MOTA_NRF52_BL_SCRATCH_START), &failures);
 
   reset_device();
@@ -727,7 +739,7 @@ int main(void) {
   g_bank0_size = MOTA_NRF52_BL_SCRATCH_START - MOTA_NRF52_APP_BASE +
                  MOTA_NRF52_FLASH_PAGE;
   stage(mota, total);
-  memset(FLASH + MOTA_NRF52_BL_SCRATCH_START, 0xFF, MOTA_SD_BOOT_TOKEN_LEN);
+  memset(FLASH + MOTA_NRF52_BL_SCRATCH_START, 0xFF, MOTA_NRF52_FLASH_PAGE);
   applied = ota_delta_check_and_apply();
   report("CRC-bound app bytes crossing scratch are rejected before erase",
          !applied && g_gpregret2 == GPREGRET2_BL_POLICY && g_raw_pages_written == 0 &&
@@ -737,6 +749,7 @@ int main(void) {
 
   reset_device();
   stage(mota, total);
+#if defined(MOTA_SD_BOOTLOADER_UPDATE)
   uint8_t *swap_image = make_boot_image(board_base, 3, required_caps);
   swap_image[0x2000u] ^= 1u;
   fix_image_crc(swap_image);
@@ -756,6 +769,7 @@ int main(void) {
          &failures);
   free(swap_mota);
   free(swap_image);
+#endif
 #endif
 
   // A marker whose inclusive EndF trailer crosses into the raw scratch is not
@@ -1184,7 +1198,7 @@ int main(void) {
            && app_unchanged()
          , &failures);
 
-#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+#if defined(MOTA_SD_BOOTLOADER_UPDATE) || defined(TEST_GENERIC_QSPI)
   uint32_t beyond_scratch_len = MOTA_NRF52_BL_SCRATCH_START - MOTA_NRF52_APP_BASE +
                                 MOTA_NRF52_FLASH_PAGE;
   uint8_t *beyond_scratch = malloc(beyond_scratch_len);
@@ -1193,11 +1207,13 @@ int main(void) {
                   "APP_TEST", &total);
   reset_device();
   stage(bad, total);
+#if defined(MOTA_SD_BOOTLOADER_UPDATE)
   authorize_sd(bad, total, MOTA_SD_AUTH_PURPOSE_APP, 2u);
+#endif
   g_gpregret  = GPREGRET_OTA_APPLY;
   g_gpregret2 = TEST_SOURCE;
   applied     = ota_delta_check_and_apply();
-  report("ordinary SD full app may extend past bootloader scratch to ED000",
+  report("ordinary external full app may extend past bootloader scratch to ED000",
          applied && g_gpregret2 == 0xB8u && g_settings_writes == 2 &&
            memcmp(FLASH + MOTA_NRF52_APP_BASE, beyond_scratch, beyond_scratch_len) == 0,
          &failures);

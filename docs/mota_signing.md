@@ -160,7 +160,7 @@ file mode:
 ```bash
 git clone https://github.com/mikecarper/motatool.git
 cd motatool
-git checkout 9eef6e53173317f63d8cd6e61fb4f70b20129ab0
+git checkout 60d9174d531160722497f21cea8ab484291cd2d7
 cargo build --release --locked
 umask 077
 ./target/release/motatool keygen --out custom-otafix.key

@@ -55,6 +55,12 @@ static void test_read_windows(void) {
   assert(!ota_qspi_dma_window(30, 3, TEST_CAPACITY, TEST_BOUNCE_SIZE, &window));
   assert(!ota_qspi_dma_window(0, 1, TEST_CAPACITY, 7, &window));
   assert(!ota_qspi_dma_window(0, 0, TEST_CAPACITY, TEST_BOUNCE_SIZE, &window));
+  // Range checks must reject wrapped addition as well as ordinary overrun.
+  assert(!ota_qspi_dma_window(UINT32_MAX, 2, TEST_CAPACITY, TEST_BOUNCE_SIZE, &window));
+  assert(!ota_qspi_dma_window(4, UINT32_MAX, TEST_CAPACITY, TEST_BOUNCE_SIZE, &window));
+  assert(!ota_qspi_dma_window(UINT32_MAX - 3u, 4, UINT32_MAX - 3u, 256, &window));
+  assert(ota_qspi_dma_window(UINT32_MAX - 7u, 4, UINT32_MAX - 3u, 256, &window));
+  assert(window.offset == UINT32_MAX - 7u && window.length == 4u);
 }
 
 static void test_unaligned_reads(void) {

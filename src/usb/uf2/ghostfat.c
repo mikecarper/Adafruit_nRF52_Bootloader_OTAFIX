@@ -33,14 +33,13 @@
     defined(MOTA_SD_BOOTLOADER_UPDATE)
   #define UF2_COMPACT_RECOVERY_VOLUME 1
 #endif
-#if !defined(UF2_COMPACT_RECOVERY_VOLUME)
-  #include "uf2_current_echo.h"
-  #define UF2_HAS_CURRENT_FILE 1
-#endif
+#include "uf2_current_echo.h"
+#define UF2_HAS_CURRENT_FILE 1
 #include "uf2_transfer_state.h"
 #include "bootloader_image.h"
 #include "dfu_image_policy.h"
-#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_BOOTLOADER_UPDATE)
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_BOOTLOADER_UPDATE) || \
+    defined(MOTA_QSPI_BOOTLOADER_UPDATE)
   #include "ota_delta.h"
   #include "ota_layout.h"
 #endif
@@ -87,8 +86,8 @@ typedef struct {
 } __attribute__((packed)) FAT_BootBlock;
 
 typedef struct {
-    char name[8];
-    char ext[3];
+    char name[8] ATTR_NONSTRING;
+    char ext[3] ATTR_NONSTRING;
     uint8_t attrs;
     uint8_t reserved;
     uint8_t createTimeFine;
@@ -175,11 +174,12 @@ static struct TextFile const info[] = {
 STATIC_ASSERT(ARRAY_SIZE(infoUf2File) < BPB_SECTOR_SIZE); // GhostFAT requires files to fit in one sector
 STATIC_ASSERT(ARRAY_SIZE(indexFile)   < BPB_SECTOR_SIZE); // GhostFAT requires files to fit in one sector
 #define NUM_FILES          ARRAY_SIZE(info)
+  #define NUM_INFO_SECTORS (NUM_FILES - 1u)
 #else
-  // Self-update builds use an empty recovery volume to keep the fail-closed
-  // updater inside the fixed bootloader envelope. Raw UF2 writes still work;
-  // build and board identity remain in USB descriptors and the manifest.
-  #define NUM_FILES 0U
+  // Empty INFO/INDEX directory entries cost no data clusters. CURRENT keeps
+  // working readback; all three names remain visible on the recovery drive.
+  #define NUM_FILES 3u
+  #define NUM_INFO_SECTORS 0u
 #endif
 #define NUM_DIRENTRIES     (NUM_FILES + 1) // Code adds volume label as first root directory entry
 #define REQUIRED_ROOT_DIRECTORY_SECTORS ( ((NUM_DIRENTRIES+1) / DIRENTRIES_PER_SECTOR) + \
@@ -211,7 +211,7 @@ STATIC_ASSERT(TRUE_USER_FLASH_SIZE % UF2_FIRMWARE_BYTES_PER_SECTOR == 0); // UF2
 
 STATIC_ASSERT(UF2_SECTORS == ((UF2_SIZE/2) / 256)); // Not a requirement ... ensuring replacement of literal value is not a change
 
-  #define UF2_FIRST_SECTOR   ((NUM_FILES + 1) * BPB_SECTORS_PER_CLUSTER) // WARNING -- code presumes each non-UF2 file content fits in single sector
+  #define UF2_FIRST_SECTOR   ((NUM_INFO_SECTORS + 2) * BPB_SECTORS_PER_CLUSTER)
   #define UF2_LAST_SECTOR    ((UF2_FIRST_SECTOR + UF2_SECTORS - 1) * BPB_SECTORS_PER_CLUSTER)
 #endif
 
@@ -220,7 +220,25 @@ STATIC_ASSERT(UF2_SECTORS == ((UF2_SIZE/2) / 256)); // Not a requirement ... ens
 #define FS_START_ROOTDIR_SECTOR   (FS_START_FAT1_SECTOR + BPB_SECTORS_PER_FAT)
 #define FS_START_CLUSTERS_SECTOR  (FS_START_ROOTDIR_SECTOR + ROOT_DIR_SECTOR_COUNT)
 #if defined(UF2_HAS_CURRENT_FILE)
-  #define CURRENT_UF2_FIRST_LBA     (FS_START_CLUSTERS_SECTOR + NUM_FILES - 1)
+  #define CURRENT_UF2_FIRST_LBA     (FS_START_CLUSTERS_SECTOR + NUM_INFO_SECTORS)
+#endif
+
+#if defined(UF2_COMPACT_RECOVERY_VOLUME)
+// Emit fixed FAT metadata as bytes instead of synthesizing many packed-field
+// stores at runtime. Zero-length placeholders have cluster zero (no allocation).
+static const DirEntry compactFiles[] = {
+  {.name = "INFO_UF2", .ext = "TXT"},
+  {.name = "INDEX   ", .ext = "HTM"},
+  {
+    .name = "CURRENT ", .ext = "UF2",
+    .createTimeFine = __SECONDS_INT__ % 2 * 100,
+    .createTime = __DOSTIME__, .createDate = __DOSDATE__,
+    .lastAccessDate = __DOSDATE__,
+    .updateTime = __DOSTIME__, .updateDate = __DOSDATE__,
+    .startCluster = UF2_FIRST_SECTOR, .size = UF2_SIZE
+  },
+};
+STATIC_ASSERT(ARRAY_SIZE(compactFiles) == NUM_FILES);
 #endif
 
 
@@ -317,7 +335,7 @@ __attribute__((noinline)) void read_block(uint32_t block_no, uint8_t *data) {
             // WARNING -- code presumes only one NULL .content for .UF2 file
             //            and all non-NULL .content fit in one sector
             //            and requires it be the last element of the array
-            uint32_t const end = (NUM_FILES * FAT_ENTRY_SIZE) + (2 * FAT_ENTRY_SIZE);
+            uint32_t const end = (NUM_INFO_SECTORS + 3u) * FAT_ENTRY_SIZE;
             for (uint32_t i = 1; i < end; ++i) {
                 data[i] = 0xff;
             }
@@ -334,13 +352,19 @@ __attribute__((noinline)) void read_block(uint32_t block_no, uint8_t *data) {
         sectionIdx -= FS_START_ROOTDIR_SECTOR;
 
         DirEntry *d = (void *)data;
+#if !defined(UF2_COMPACT_RECOVERY_VOLUME)
         int remainingEntries = DIRENTRIES_PER_SECTOR;
+#endif
         if (sectionIdx == 0) { // volume label first
             // volume label is first directory entry
             padded_memcpy(d->name, (char const *) BootBlock.VolumeLabel, 11);
             d->attrs = 0x28;
             d++;
+#if defined(UF2_COMPACT_RECOVERY_VOLUME)
+            memcpy(d, compactFiles, sizeof(compactFiles));
+#else
             remainingEntries--;
+#endif
         }
 
 #if !defined(UF2_COMPACT_RECOVERY_VOLUME)
@@ -374,10 +398,14 @@ __attribute__((noinline)) void read_block(uint32_t block_no, uint8_t *data) {
 
         sectionIdx -= FS_START_CLUSTERS_SECTOR;
 #if defined(UF2_HAS_CURRENT_FILE)
+#if !defined(UF2_COMPACT_RECOVERY_VOLUME)
         if (sectionIdx < NUM_FILES - 1) {
             memcpy(data, info[sectionIdx].content, strlen(info[sectionIdx].content));
         } else { // generate the UF2 file data on-the-fly
-            sectionIdx -= NUM_FILES - 1;
+#else
+        {
+#endif
+            sectionIdx -= NUM_INFO_SECTORS;
             uint32_t addr = USER_FLASH_START + (sectionIdx * UF2_FIRMWARE_BYTES_PER_SECTOR);
             if (addr < CFG_UF2_FLASH_SIZE) {
                 UF2_Block *bl = (void *)data;
@@ -416,9 +444,10 @@ static bool erase_bootloader_staging(WriteState* state) {
     return true;
   }
 
-#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_BOOTLOADER_UPDATE)
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_BOOTLOADER_UPDATE) || \
+    (defined(MOTA_QSPI_BOOTLOADER_UPDATE) && !defined(MOTA_QSPI_XIAO_IDENTITY))
   // Legacy/manual UF2 receives a bootloader at the fixed E0000 scratch range.
-  // Internal/SD application layouts do not reserve that range, so a valid
+  // Internal and generic external application layouts do not reserve that range, so a valid
   // application may extend into it. Refuse before the first erase unless its hash-bound
   // EndF proves the complete live image is below the fixed scratch start. A
   // recovery device with no valid app may still receive a bootloader UF2.

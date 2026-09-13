@@ -49,7 +49,8 @@ __attribute__((noinline)) void sha256_init(sha256_ctx_t* c) {
   memcpy(c->state, initial_state, sizeof(initial_state));
 }
 
-void sha256_update(sha256_ctx_t* c, const uint8_t* data, size_t len) {
+// Share this loop between streaming image hashes and the short board-ID hash.
+__attribute__((noinline, noclone)) void sha256_update(sha256_ctx_t* c, const uint8_t* data, size_t len) {
   for (size_t i = 0; i < len; i++) {
     c->data[c->datalen++] = data[i];
     if (c->datalen == 64) { sha256_transform(c, c->data); c->bitlen += 512; c->datalen = 0; }

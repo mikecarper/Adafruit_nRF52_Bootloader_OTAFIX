@@ -14,25 +14,25 @@ import subprocess
 import zipfile
 
 
-QUALIFIED_BOARDS = (
-    "gat562",
-    "heltec_mesh_pocket",
-    "heltec_mesh_tower_v2",
-    "heltec_mesh_tower_v2_sdcard",
-    "heltec_t096",
-    "heltec_t1",
-    "heltec_t114",
-    "keepteen_lt1",
-    "minewsemi_mx25le01",
-    "promicro_nrf52840",
-    "t1000_e",
-    "thinknode_m3",
-    "wiscore_rak3401",
-    "wiscore_rak4631_board",
-    "wismesh_tag",
-    "xiao_nrf52840_ble",
-    "xiao_nrf52840_ble_sense",
-)
+def release_boards(root: Path = Path(__file__).resolve().parents[1] / "src" / "boards") -> tuple[str, ...]:
+    """Require complete release coverage, never silently omit a new board."""
+    boards = []
+    for directory in sorted(path for path in root.iterdir() if path.is_dir()):
+        cmake = (directory / "board.cmake").read_text(encoding="ascii")
+        make = (directory / "board.mk").read_text(encoding="ascii")
+        backends = [name for name in ("INTERNAL", "QSPI", "SD")
+                    if f"set(MOTA_{name}_BOOTLOADER_UPDATE ON)" in cmake]
+        if len(backends) != 1 or "set(MCU_VARIANT nrf52840)" not in cmake:
+            raise ValueError(f"{directory.name}: missing exact bootloader mOTA profile")
+        if f"-DMOTA_{backends[0]}_BOOTLOADER_UPDATE=1" not in make:
+            raise ValueError(f"{directory.name}: Make/CMake bootloader mOTA disagreement")
+        boards.append(directory.name)
+    if not boards:
+        raise ValueError("empty bootloader release inventory")
+    return tuple(boards)
+
+
+QUALIFIED_BOARDS = release_boards()
 
 TAG_PATTERN = re.compile(
     r"^(?:v?[0-9]+\.[0-9]+\.[0-9]+-)?"
@@ -240,6 +240,15 @@ Then follow the explicit bootloader installation workflow. Always select the
 exact board and storage profile. In particular, heltec_mesh_tower_v2 and
 heltec_mesh_tower_v2_sdcard are not interchangeable even though they share a
 wire target ID.
+
+The USB drive exposes working CURRENT.UF2 readback and zero-byte INFO_UF2.TXT /
+INDEX.HTM placeholders. USB flashing and Legacy BLE DFU remain available.
+
+New QSPI profiles need a compatible MeshCore application and a locally
+installed self-update-capable bootloader before their first remote update.
+The live application must fit below the temporary 0xE0000 scratch range;
+oversized applications are rejected before erase. SenseCAP Solar P1 retains
+its SCAP_DFU carrier identity and is not interchangeable with XIAO_DFU.
 
 The gat562 profile covers the GAT562 30S Kit, Mesh Tracker Pro, EVB Pro / 30S
 Pod, and Solar Relay carriers. It does not cover the GAT562 Mesh Watch 13,
