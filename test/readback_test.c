@@ -42,6 +42,9 @@ static uint32_t g_ws_lo, g_ws_hi;        // workspace = [APP_BASE, mota_addr); t
 static uint32_t g_gpregret, g_gpregret2;
 static uint16_t g_bank0, g_crc; static uint32_t g_size; static int g_committed;
 static int g_settings_writes, g_app_write_while_valid, g_app_write_past_source;
+static uint32_t g_fault_write_address = UINT32_MAX, g_fault_erase_address = UINT32_MAX;
+static int g_fault_writes_remaining, g_fault_erases_remaining;
+static int g_fault_write_attempts, g_fault_erase_attempts;
 #if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
 static uint8_t               HYBRID_RAM[MOTA_HYBRID_ARENA_SIZE];
 static mota_hybrid_handoff_t HYBRID_HANDOFF;
@@ -66,12 +69,26 @@ void     otah_erase(uint32_t page) {
     if (page >= g_ws_lo && page < g_ws_hi && g_bank0 != 0xFF) g_app_write_while_valid++;
     if (page >= g_ws_hi && g_bank0 == 0xFF) g_app_write_past_source++;
     memset(FLASH + page, 0xFF, MOTA_NRF52_FLASH_PAGE);
+    if (page == g_fault_erase_address) {
+        g_fault_erase_attempts++;
+        if (g_fault_erases_remaining != 0) {
+            FLASH[page] = 0;
+            if (g_fault_erases_remaining > 0) g_fault_erases_remaining--;
+        }
+    }
 }
 void     otah_write_words(uint32_t a, const uint32_t* s, uint32_t nw) {
     if (a >= g_ws_lo && a < g_ws_hi && g_bank0 != 0xFF) g_app_write_while_valid++;
     if (a >= g_ws_hi && g_bank0 == 0xFF) g_app_write_past_source++;
     uint32_t* dst = (uint32_t*)(FLASH + a);
     for (uint32_t i = 0; i < nw; i++) dst[i] &= s[i];      // NOR: write only clears bits (target pre-erased)
+    if (a == g_fault_write_address) {
+        g_fault_write_attempts++;
+        if (g_fault_writes_remaining != 0) {
+            FLASH[a] ^= 1u;
+            if (g_fault_writes_remaining > 0) g_fault_writes_remaining--;
+        }
+    }
 }
 uint32_t otah_gpregret_get(void)                           { return g_gpregret; }
 void     otah_gpregret_set(uint32_t v)                     { g_gpregret = v; }
@@ -148,6 +165,7 @@ static void stage_flash(void) {
     // Model the vulnerable/common UF2 state: valid application with CRC checking disabled.
     g_committed = 1; g_bank0 = 0x01; g_crc = 0; g_size = (uint32_t)g_base_n;
     g_settings_writes = 0; g_app_write_while_valid = 0; g_app_write_past_source = 0;
+    g_fault_write_attempts = 0; g_fault_erase_attempts = 0;
     g_cache_page = 0; g_cache_dirty = 0;                           // reset ota_delta.c's static page cache
 #if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
     memset(HYBRID_RAM, 0, sizeof(HYBRID_RAM));
@@ -381,6 +399,77 @@ int main(int argc, char** argv) {
             printf("    NOTE: coherent and stale both committed - vector may not exercise cross-page readback\n");
         }
     }
+
+    // A one-time NVMC mismatch must be repaired from the still-resident RAM
+    // page. A stuck mismatch must stop apply with the app bank invalid.
+    printf("[flash] transient app-page write mismatch: ");
+    g_fault_write_address = MOTA_NRF52_APP_BASE;
+    g_fault_writes_remaining = 1;
+    applied = run_case(0, &committed, &matches);
+    if (applied && committed && matches && g_fault_write_attempts == 2 &&
+        g_gpregret2 == 0xB8u) {
+        printf("PASS - page re-erased and reprogrammed once\n");
+    } else {
+        printf("FAIL - applied=%d committed=%d matches=%d attempts=%d result=0x%X\n",
+               applied, committed, matches, g_fault_write_attempts, g_gpregret2);
+        fails++;
+    }
+
+    printf("[flash] persistent app-page write mismatch: ");
+    g_fault_writes_remaining = -1;
+    applied = run_case(0, &committed, &matches);
+    if (!applied && !committed && g_bank0 == 0xFFu &&
+        g_fault_write_attempts == (int)FLASH_PAGE_ATTEMPTS &&
+        !g_app_write_while_valid) {
+        printf("PASS - update aborted with app bank invalid\n");
+    } else {
+        printf("FAIL - applied=%d committed=%d attempts=%d bank=0x%X result=0x%X\n",
+               applied, committed, g_fault_write_attempts, g_bank0, g_gpregret2);
+        fails++;
+    }
+    g_fault_write_address = UINT32_MAX;
+    g_fault_writes_remaining = 0;
+
+    printf("[flash] staged approval-page write mismatch: ");
+    g_fault_write_address = g_write_start;
+    g_fault_writes_remaining = -1;
+    applied = run_case(0, &committed, &matches);
+    if (!applied && committed && g_bank0 == 0x01u &&
+        g_settings_writes == 0 && g_gpregret2 == 0xBCu &&
+        g_fault_write_attempts == (int)FLASH_PAGE_ATTEMPTS &&
+        memcmp(FLASH + MOTA_NRF52_APP_BASE, g_base, (size_t)g_base_n) == 0) {
+        printf("PASS - original application remains bootable\n");
+    } else {
+        printf("FAIL - applied=%d committed=%d bank=0x%X settings=%d attempts=%d result=0x%X\n",
+               applied, committed, g_bank0, g_settings_writes,
+               g_fault_write_attempts, g_gpregret2);
+        fails++;
+    }
+    g_fault_write_address = UINT32_MAX;
+    g_fault_writes_remaining = 0;
+
+    printf("[flash] transient and persistent page-erase mismatch: ");
+    stage_flash();
+    struct apply_ctx erase_ctx = {.ws_lo = MOTA_NRF52_APP_BASE,
+                                  .ws_hi = g_write_start};
+    g_fault_erase_address = MOTA_NRF52_APP_BASE;
+    g_fault_erases_remaining = 1;
+    int transient_erase = dt_me(&erase_ctx, 0, MOTA_NRF52_FLASH_PAGE);
+    int transient_attempts = g_fault_erase_attempts;
+    g_fault_erases_remaining = -1;
+    g_fault_erase_attempts = 0;
+    int permanent_erase = dt_me(&erase_ctx, 0, MOTA_NRF52_FLASH_PAGE);
+    if (transient_erase == DETOOLS_OK && transient_attempts == 2 &&
+        permanent_erase == -DETOOLS_IO_FAILED &&
+        g_fault_erase_attempts == (int)FLASH_PAGE_ATTEMPTS) {
+        printf("PASS - erase retries and callback reports failure\n");
+    } else {
+        printf("FAIL - transient=%d/%d persistent=%d/%d\n",
+               transient_erase, transient_attempts, permanent_erase, g_fault_erase_attempts);
+        fails++;
+    }
+    g_fault_erase_address = UINT32_MAX;
+    g_fault_erases_remaining = 0;
 
     // Codec identifiers are an explicit allowlist, not an invitation to feed an
     // unknown payload to detools. This includes the withdrawn codec-3 format.

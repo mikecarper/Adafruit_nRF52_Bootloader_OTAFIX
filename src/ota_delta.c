@@ -545,32 +545,72 @@ static void sha256_region(uint32_t addr, uint32_t len, uint8_t out[32]) {
   (void)sha256_read_region(addr, len, out, false, UINT32_MAX);
 }
 
+// NVMC completion means the controller is idle, not that the destination
+// contains the requested bytes. Keep the source page in RAM through each
+// attempt, including when internal bootloader staging overlaps the raw copy.
+#define FLASH_PAGE_ATTEMPTS 3u
+static int flash_page_matches(uint32_t page, const uint32_t *words) {
+  uint32_t actual;
+  for (uint32_t i = 0; i < PAGE / 4u; i++) {
+    fl_read(page + i * 4u, &actual, sizeof(actual));
+    if (actual != (words ? words[i] : UINT32_MAX)) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int flash_page_change_verified(uint32_t page, const uint32_t *words) {
+  for (uint32_t attempt = 0; attempt < FLASH_PAGE_ATTEMPTS; attempt++) {
+    inherited_watchdog_feed();
+    fl_erase(page);
+    if (words) {
+      inherited_watchdog_feed();
+      fl_write_words(page, words, PAGE / 4u);
+    }
+    if (flash_page_matches(page, words)) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int flash_page_write_verified(uint32_t page, const uint32_t *words) {
+  return flash_page_change_verified(page, words);
+}
+
+static int flash_page_erase_verified(uint32_t page) {
+  return flash_page_change_verified(page, NULL);
+}
+
 // ---- coherent single-page write-back cache (in-place reads back shifted data it just wrote) -------
 static uint8_t  g_cache[PAGE] __attribute__((aligned(4)));
 static uint32_t g_cache_page; // page-aligned addr; 0 == INVALID (no app page is at 0)
 static int      g_cache_dirty;
 
-static void cache_flush(void) {
+static int cache_flush(void) {
   if (!g_cache_page) {
-    return;
+    return 1;
   }
-  if (g_cache_dirty) {
-    inherited_watchdog_feed();
-    fl_erase(g_cache_page);
-    inherited_watchdog_feed();
-    fl_write_words(g_cache_page, (const uint32_t *)g_cache, PAGE / 4);
+  if (g_cache_dirty &&
+      !flash_page_write_verified(g_cache_page, (const uint32_t *)g_cache)) {
+    return 0;
   }
   g_cache_page  = 0;
   g_cache_dirty = 0;
+  return 1;
 }
-static void cache_use(uint32_t page) {
+static int cache_use(uint32_t page) {
   if (g_cache_page == page) {
-    return;
+    return 1;
   }
-  cache_flush();
+  if (!cache_flush()) {
+    return 0;
+  }
   g_cache_page  = page;
   g_cache_dirty = 0;
   fl_read(page, g_cache, PAGE);
+  return 1;
 }
 static void cread(uint32_t addr, uint8_t *dst, uint32_t n) { // coherent read (overlay dirty page)
   fl_read(addr, dst, n);
@@ -582,21 +622,24 @@ static void cread(uint32_t addr, uint8_t *dst, uint32_t n) { // coherent read (o
     }
   }
 }
-static void cwrite(uint32_t addr, const uint8_t *src, uint32_t n) {
+static int cwrite(uint32_t addr, const uint8_t *src, uint32_t n) {
   while (n) {
     uint32_t page = addr & ~(PAGE - 1), off = addr - page, chunk = PAGE - off;
     if (chunk > n) {
       chunk = n;
     }
-    cache_use(page);
+    if (!cache_use(page)) {
+      return 0;
+    }
     memcpy(g_cache + off, src, chunk);
     g_cache_dirty = 1;
     addr += chunk;
     src += chunk;
     n -= chunk;
   }
+  return 1;
 }
-static void cerase(uint32_t addr, uint32_t n) { // detools calls this page-aligned
+static int cerase(uint32_t addr, uint32_t n) { // detools calls this page-aligned
   while (n) {
     uint32_t page = addr & ~(PAGE - 1), off = addr - page, step = PAGE - off;
     if (step > n) {
@@ -605,12 +648,13 @@ static void cerase(uint32_t addr, uint32_t n) { // detools calls this page-align
     if (g_cache_page == page) {
       memset(g_cache, 0xFF, PAGE);
       g_cache_dirty = 1;
-    } else {
-      fl_erase(page);
+    } else if (!flash_page_erase_verified(page)) {
+      return 0;
     }
     addr += step;
     n -= step;
   }
+  return 1;
 }
 
 // ---- detools in-place callbacks (region addresses are 0-based; base sits at workspace offset 0) ---
@@ -648,8 +692,7 @@ static int dt_mw(void *a, uintptr_t dst, void *src, size_t n) {
     return -DETOOLS_IO_FAILED;
   }
   inherited_watchdog_feed();
-  cwrite(addr, (const uint8_t *)src, n);
-  return DETOOLS_OK;
+  return cwrite(addr, (const uint8_t *)src, n) ? DETOOLS_OK : -DETOOLS_IO_FAILED;
 }
 static int dt_me(void *a, uintptr_t addr0, size_t n) {
   struct apply_ctx *c = a;
@@ -658,8 +701,7 @@ static int dt_me(void *a, uintptr_t addr0, size_t n) {
     return -DETOOLS_IO_FAILED;
   }
   inherited_watchdog_feed();
-  cerase(addr, n);
-  return DETOOLS_OK;
+  return cerase(addr, n) ? DETOOLS_OK : -DETOOLS_IO_FAILED;
 }
 static int dt_ss(void *a, int s) {
   ((struct apply_ctx *)a)->step = s;
@@ -1018,14 +1060,10 @@ static int clear_approval(const struct mota_min *o) {
     return ota_qspi_write(o->approval_addr, z, sizeof(z)) ? 1 : 0;
   }
   uint8_t z[4] = {0, 0, 0, 0};
-  cwrite(o->approval_addr, z, 4);
-  cache_flush();
-  return 1;
+  return cwrite(o->approval_addr, z, 4) && cache_flush();
 #else
   uint8_t z[4] = {0, 0, 0, 0};
-  cwrite(o->approval_addr, z, 4);
-  cache_flush();
-  return 1;
+  return cwrite(o->approval_addr, z, 4) && cache_flush();
 #endif
 }
 
@@ -1358,7 +1396,6 @@ static int boot_image_metadata_valid_at(uint32_t address,
 }
 
 static int copy_bootloader_to_raw_source(const struct mota_min *m) {
-  uint8_t readback[256];
   for (uint32_t off = 0; off < MOTA_NRF52_BL_SIZE; off += PAGE) {
     inherited_watchdog_feed();
     // Internal staging deliberately overlaps the destination. The payload is
@@ -1368,15 +1405,9 @@ static int copy_bootloader_to_raw_source(const struct mota_min *m) {
     if (!staged_read(m->payload_addr + off, g_cache, PAGE)) {
       return 0;
     }
-    fl_erase(BOOT_UPDATE_RAW_START + off);
-    inherited_watchdog_feed();
-    fl_write_words(BOOT_UPDATE_RAW_START + off, (const uint32_t *)g_cache, PAGE / 4u);
-    for (uint32_t page_off = 0; page_off < PAGE; page_off += sizeof(readback)) {
-      inherited_watchdog_feed();
-      fl_read(BOOT_UPDATE_RAW_START + off + page_off, readback, sizeof(readback));
-      if (memcmp(readback, g_cache + page_off, sizeof(readback)) != 0) {
-        return 0;
-      }
+    if (!flash_page_write_verified(BOOT_UPDATE_RAW_START + off,
+                                   (const uint32_t *)g_cache)) {
+      return 0;
     }
   }
 
@@ -1553,9 +1584,10 @@ static bool apply_full_external(const struct mota_min *m) {
       gpregret2_set(0xBB);
       return false;
     }
-    fl_erase(APP_BASE + off);
-    inherited_watchdog_feed();
-    fl_write_words(APP_BASE + off, (const uint32_t *)g_cache, PAGE / 4);
+    if (!flash_page_write_verified(APP_BASE + off, (const uint32_t *)g_cache)) {
+      gpregret2_set(0xBF);
+      return false;
+    }
   }
 
   sha256_region(APP_BASE, m->image_size, h);
@@ -1659,7 +1691,8 @@ bool ota_delta_check_and_apply(void) {
   // 0xB3 bad full/codec | 0xB4 no body_len | 0xB5 base mismatch | 0xB9 bad detools geometry |
   // 0xBA external full pre-hash mismatch | 0xBB external read failure | 0xBC approval clear failure |
   // 0xBE invalid hybrid handoff/reset/geometry | 0x9N detools err N |
-  // 0xB6 wrong size | 0xB7 result-hash mismatch | 0xB8 SUCCESS.
+  // 0xB6 wrong size | 0xB7 result-hash mismatch | 0xB8 SUCCESS |
+  // 0xBF final/full page readback failed after retries (callback failures use 0x9N).
 
 #if defined(MOTA_SD_CARD)
   if (!sd_auth_take(MOTA_SD_AUTH_PURPOSE_APP, 2u)) {
@@ -1770,9 +1803,12 @@ bool ota_delta_check_and_apply(void) {
   c.step = 0;
   int r = detools_apply_patch_in_place_callbacks(dt_mr, dt_mw, dt_me, dt_ss,
                                                 dt_sg, dt_pr, (size_t)m.payload_size, &c);
-  cache_flush();
   if (r < 0) {
     gpregret2_set(0x90 | ((uint32_t)(-r) & 0x0F));
+    return finish_apply(false);
+  }
+  if (!cache_flush()) {
+    gpregret2_set(0xBF);
     return finish_apply(false);
   }
   if (c.patch_pos != c.patch_len) {

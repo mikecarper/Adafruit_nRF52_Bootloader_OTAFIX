@@ -48,6 +48,8 @@ static int      g_qspi_deinit_calls;
 static int      g_qspi_read_calls;
 static int      g_qspi_write_calls;
 static int      g_qspi_write_fail;
+static uint32_t g_fault_write_address;
+static int      g_fault_writes_remaining, g_fault_write_attempts;
 
 void otah_read(uint32_t address, void *dst, uint32_t len) {
   memcpy(dst, FLASH + address, len);
@@ -67,6 +69,15 @@ void otah_write_words(uint32_t address, const uint32_t *src, uint32_t word_count
   uint32_t *dst = (uint32_t *)(FLASH + address);
   for (uint32_t i = 0; i < word_count; i++) {
     dst[i] &= src[i];
+  }
+  if (address == g_fault_write_address) {
+    g_fault_write_attempts++;
+    if (g_fault_writes_remaining != 0) {
+      FLASH[address] ^= 1u;
+      if (g_fault_writes_remaining > 0) {
+        g_fault_writes_remaining--;
+      }
+    }
   }
 }
 
@@ -337,6 +348,9 @@ static void reset_device(const uint8_t *base, uint32_t base_len) {
   g_qspi_read_calls       = 0;
   g_qspi_write_calls      = 0;
   g_qspi_write_fail       = 0;
+  g_fault_write_address   = UINT32_MAX;
+  g_fault_writes_remaining = 0;
+  g_fault_write_attempts  = 0;
   g_cache_page            = 0;
   g_cache_dirty           = 0;
 }
@@ -508,6 +522,41 @@ int main(int argc, char **argv) {
   } else {
     printf("FAIL applied=%d bank=0x%X size=%u settings=%d unsafe=%d\n", applied, g_bank0, g_size, g_settings_writes,
            g_app_write_while_valid);
+    failures++;
+  }
+
+  printf("[flash] %s full image retries a transient app-page mismatch: ", STORE_NAME);
+  reset_device(base, (uint32_t)base_len);
+  if (!stage_external_mota(full, full_len)) {
+    return 2;
+  }
+  g_fault_write_address = MOTA_NRF52_APP_BASE + MOTA_NRF52_FLASH_PAGE;
+  g_fault_writes_remaining = 1;
+  applied = ota_delta_check_and_apply();
+  if (result_ok(applied, large, large_len) && g_fault_write_attempts == 2) {
+    printf("PASS\n");
+  } else {
+    printf("FAIL applied=%d attempts=%d bank=0x%X result=0x%X\n",
+           applied, g_fault_write_attempts, g_bank0, g_gpregret2);
+    failures++;
+  }
+
+  printf("[flash] %s full image rejects a persistent app-page mismatch: ", STORE_NAME);
+  reset_device(base, (uint32_t)base_len);
+  if (!stage_external_mota(full, full_len)) {
+    return 2;
+  }
+  g_fault_write_address = MOTA_NRF52_APP_BASE + MOTA_NRF52_FLASH_PAGE;
+  g_fault_writes_remaining = -1;
+  applied = ota_delta_check_and_apply();
+  if (!applied && g_fault_write_attempts == (int)FLASH_PAGE_ATTEMPTS &&
+      g_bank0 == BANK_INVALID_APP_V && g_settings_writes == 1 &&
+      g_gpregret2 == 0xBFu && g_app_write_while_valid == 0) {
+    printf("PASS - app bank remains invalid\n");
+  } else {
+    printf("FAIL applied=%d attempts=%d bank=0x%X settings=%d result=0x%X\n",
+           applied, g_fault_write_attempts, g_bank0, g_settings_writes,
+           g_gpregret2);
     failures++;
   }
 

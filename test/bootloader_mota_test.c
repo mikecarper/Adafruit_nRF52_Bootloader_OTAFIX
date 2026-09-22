@@ -86,6 +86,7 @@ static uint32_t g_gpregret, g_gpregret2;
 static int      g_qspi_init_calls, g_qspi_deinit_calls, g_qspi_writes;
 static int      g_settings_writes, g_mbr_calls, g_mbr_success;
 static uint32_t g_mbr_source, g_mbr_words, g_corrupt_write_address;
+static int      g_corrupt_write_failures, g_corrupt_write_attempts;
 static uint16_t g_bank0, g_bank0_crc;
 static uint32_t g_bank0_size;
 static bootloader_image_info_t g_installed_boot_info;
@@ -116,7 +117,13 @@ void otah_write_words(uint32_t address, const uint32_t *src, uint32_t words) {
     dst[i] &= src[i];
   }
   if (address == g_corrupt_write_address) {
-    FLASH[address] ^= 1u;
+    g_corrupt_write_attempts++;
+    if (g_corrupt_write_failures != 0) {
+      FLASH[address] ^= 1u;
+      if (g_corrupt_write_failures > 0) {
+        g_corrupt_write_failures--;
+      }
+    }
   }
 #if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_BOOTLOADER_UPDATE) || defined(MOTA_QSPI_BOOTLOADER_UPDATE)
 #if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
@@ -471,6 +478,8 @@ static void reset_device(void) {
   g_mbr_source            = 0;
   g_mbr_words             = 0;
   g_corrupt_write_address = UINT32_MAX;
+  g_corrupt_write_failures = -1;
+  g_corrupt_write_attempts = 0;
   g_bank0                  = 0x01u;
   g_bank0_crc              = 0u;
   g_bank0_size             = TEST_PRESERVE_END - MOTA_NRF52_APP_BASE;
@@ -1168,8 +1177,22 @@ int main(void) {
   reset_device();
   stage(mota, total);
   g_corrupt_write_address = TEST_RAW_START + MOTA_NRF52_FLASH_PAGE;
+  g_corrupt_write_failures = 1;
+  g_mbr_success = 1;
+  applied = ota_delta_check_and_apply();
+  report("transient raw-page fault is retried before MBR handoff",
+         applied && g_gpregret2 == GPREGRET2_BL_MBR_HANDOFF &&
+           g_corrupt_write_attempts == 2 && g_mbr_calls == 1 &&
+           memcmp(FLASH + TEST_RAW_START, image, MOTA_NRF52_BL_SIZE) == 0 &&
+           app_unchanged() && old_bootloader_unchanged(), &failures);
+
+  reset_device();
+  stage(mota, total);
+  g_corrupt_write_address = TEST_RAW_START + MOTA_NRF52_FLASH_PAGE;
   applied                 = ota_delta_check_and_apply();
-  ok = !applied && g_gpregret2 == GPREGRET2_BL_COPY && g_mbr_calls == 0 && app_unchanged();
+  ok = !applied && g_gpregret2 == GPREGRET2_BL_COPY &&
+       g_corrupt_write_attempts == (int)FLASH_PAGE_ATTEMPTS &&
+       g_mbr_calls == 0 && app_unchanged();
   int writes_before = g_qspi_writes;
   applied           = ota_delta_check_and_apply();
   ok = ok && !applied && g_gpregret2 == GPREGRET2_BL_COPY && g_qspi_writes == writes_before;
