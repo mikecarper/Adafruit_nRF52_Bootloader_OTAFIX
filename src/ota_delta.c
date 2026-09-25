@@ -34,6 +34,11 @@
 #else
   #define MOTA_QSPI_STORAGE_FLAGS (MOTA_BL_STORAGE_QSPI | MOTA_BL_STORAGE_STAGE_CEILING)
 #endif
+#if defined(MOTA_RAK_AUTO_STORE)
+  #undef MOTA_QSPI_STORAGE_FLAGS
+  #define MOTA_QSPI_STORAGE_FLAGS \
+    (MOTA_BL_STORAGE_QSPI | MOTA_BL_STORAGE_STAGE_CEILING | MOTA_BL_STORAGE_HEADER_W25)
+#endif
 
 #if defined(MOTA_SD_BOOTLOADER_UPDATE)
   #define MOTA_SD_STORAGE_FLAGS (MOTA_BL_STORAGE_SD | MOTA_BL_STORAGE_BOOT_UPDATE)
@@ -1672,10 +1677,13 @@ bool ota_delta_check_and_apply(void) {
 #if defined(MOTA_RAK_AUTO_RAK4631)
                || stage_handoff == GPREGRET2_OTA_STAGE_RAK15001
 #endif
+#if defined(MOTA_RAK_AUTO_STORE)
+               || stage_handoff == GPREGRET2_OTA_STAGE_HEADER_W25
+#endif
                  ;
-#if defined(MOTA_RAK_AUTO_RAK4631)
+#if defined(MOTA_RAK_AUTO_STORE)
   if (g_qspi_source) {
-    ota_qspi_set_rak15001_source(stage_handoff == GPREGRET2_OTA_STAGE_RAK15001);
+    ota_qspi_set_rak_source(stage_handoff);
   }
 #endif
 #endif

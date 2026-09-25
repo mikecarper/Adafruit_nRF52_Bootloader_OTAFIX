@@ -3,8 +3,8 @@
 
 #include "../wiscore_rak4631_board/board.h"
 
-// RAK15001 Slot C and the header-wired W25Q16 share SPI data/clock but
-// use distinct chip selects. The loader probes exact JEDEC IDs at apply time.
+// RAK15001 Slot C uses the WisBlock SPI bus. A header-wired W25Q16 uses
+// TX1/RX1/IO1 for its bus; both layouts have distinct handoff markers.
 #define MOTA_RAK_AUTO_STORE 1
 #define MOTA_RAK_AUTO_RAK4631 1
 #define MOTA_QSPI_SCK_PIN _PINNUM(0, 3)
@@ -16,12 +16,16 @@
 #define MOTA_QSPI_SCK_FREQ NRF_QSPI_FREQ_32MDIV4
 
 #undef BLEDIS_MODEL
-#define BLEDIS_MODEL "RAK4631 Auto"
+#define BLEDIS_MODEL "RAK4631"
+#undef BLEDIS_MANUFACTURER
+#define BLEDIS_MANUFACTURER "RAK"
 #undef UF2_PRODUCT_NAME
 #undef UF2_VOLUME_LABEL
 #undef UF2_BOARD_ID
-#define UF2_PRODUCT_NAME "RAK4631 Auto"
-#define UF2_VOLUME_LABEL "4631AUTO"
-#define UF2_BOARD_ID "WisBlock-RAK4631-Auto"
+#define UF2_PRODUCT_NAME "RAK4631"
+#define UF2_VOLUME_LABEL "4631A"
+#define UF2_BOARD_ID "4631A"
+#undef UF2_INDEX_URL
+#define UF2_INDEX_URL "https://rakwireless.com"
 
 #endif

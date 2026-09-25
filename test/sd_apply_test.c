@@ -52,6 +52,7 @@ static int      g_qspi_read_calls;
 static int      g_qspi_write_calls;
 static int      g_qspi_write_fail;
 static int      g_qspi_slot_c;
+static int      g_qspi_source_marker;
 static uint32_t g_fault_write_address;
 static int      g_fault_writes_remaining, g_fault_write_attempts;
 
@@ -169,8 +170,9 @@ bool ota_sd_read_bytes(uint32_t first_sector, uint32_t offset, void *out, uint32
 }
 #elif defined(MOTA_QSPI_FLASH)
 #if defined(MOTA_RAK_AUTO_STORE)
-void ota_qspi_set_rak15001_source(bool slot_c) {
-  g_qspi_slot_c = slot_c ? 1 : 0;
+void ota_qspi_set_rak_source(uint8_t stage_handoff) {
+  g_qspi_source_marker = stage_handoff;
+  g_qspi_slot_c = stage_handoff == GPREGRET2_OTA_STAGE_RAK15001 ? 1 : 0;
 }
 #endif
 bool ota_qspi_init(void) {
@@ -368,6 +370,7 @@ static void reset_device(const uint8_t *base, uint32_t base_len) {
   g_qspi_write_calls      = 0;
   g_qspi_write_fail       = 0;
   g_qspi_slot_c           = -1;
+  g_qspi_source_marker    = -1;
   g_fault_write_address   = UINT32_MAX;
   g_fault_writes_remaining = 0;
   g_fault_write_attempts  = 0;
@@ -658,14 +661,22 @@ int main(int argc, char **argv) {
   reset_device(base, (uint32_t)base_len);
   if (!stage_external_mota(delta, (uint32_t)delta_len)) return 2;
   applied = ota_delta_check_and_apply();
-#if defined(MOTA_RAK_AUTO_RAK4631)
   const int expected_w25_selector = 0;
-#else
-  const int expected_w25_selector = -1;
-#endif
   if (result_ok(applied, expected, (uint32_t)expected_len) &&
-      g_qspi_slot_c == expected_w25_selector) printf("PASS\n");
+      g_qspi_slot_c == expected_w25_selector &&
+      g_qspi_source_marker == GPREGRET2_OTA_STAGE_QSPI) printf("PASS\n");
   else { printf("FAIL selector=%d result=0x%X\n", g_qspi_slot_c, g_gpregret2); failures++; }
+
+  printf("[auto] 2.54 mm header W25Q16 source marker: ");
+  reset_device(base, (uint32_t)base_len);
+  if (!stage_external_mota(delta, (uint32_t)delta_len)) return 2;
+  g_gpregret2 = GPREGRET2_OTA_STAGE_HEADER_W25;
+  applied = ota_delta_check_and_apply();
+  if (result_ok(applied, expected, (uint32_t)expected_len) &&
+      g_qspi_slot_c == 0 &&
+      g_qspi_source_marker == GPREGRET2_OTA_STAGE_HEADER_W25) printf("PASS\n");
+  else { printf("FAIL selector=%d marker=0x%X result=0x%X\n",
+                g_qspi_slot_c, g_qspi_source_marker, g_gpregret2); failures++; }
 
   printf("[auto] RAK15001 marker is board-specific: ");
   reset_device(base, (uint32_t)base_len);
@@ -674,7 +685,8 @@ int main(int argc, char **argv) {
   applied = ota_delta_check_and_apply();
 #if defined(MOTA_RAK_AUTO_RAK4631)
   const int slot_c_ok = result_ok(applied, expected, (uint32_t)expected_len) &&
-                        g_qspi_slot_c == 1;
+                        g_qspi_slot_c == 1 &&
+                        g_qspi_source_marker == GPREGRET2_OTA_STAGE_RAK15001;
 #else
   const int slot_c_ok = !applied && g_qspi_init_calls == 0 &&
                         g_settings_writes == 0 &&

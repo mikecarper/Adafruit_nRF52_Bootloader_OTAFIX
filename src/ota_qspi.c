@@ -1,4 +1,5 @@
 #include "ota_qspi.h"
+#include "ota_layout.h"
 #include "ota_qspi_alignment.h"
 #include "ota_qspi_wake.h"
 
@@ -36,8 +37,15 @@
     (QSPI_PIN_CNF_DEFAULT | (GPIO_PIN_CNF_DRIVE_H0H1 << GPIO_PIN_CNF_DRIVE_Pos))
   #define QSPI_PIN_CNF_OUTPUT_H0H1 \
     (QSPI_PIN_CNF_H0H1 | (GPIO_PIN_CNF_DIR_Output << GPIO_PIN_CNF_DIR_Pos))
-  #define QSPI_GPIO_PORT(pin) (((pin) & 32u) != 0 ? NRF_P1 : NRF_P0)
-  #define QSPI_GPIO_INDEX(pin) ((pin) & 31u)
+  #if defined(MOTA_RAK_AUTO_STORE)
+    // Both RAK bus layouts, both selects, and the RAK3401 radio NSS are P0.
+    // Avoid a P0/P1 branch at every register access in the fixed 40 KiB loader.
+    #define QSPI_GPIO_PORT(pin) NRF_P0
+    #define QSPI_GPIO_INDEX(pin) (pin)
+  #else
+    #define QSPI_GPIO_PORT(pin) (((pin) & 32u) != 0 ? NRF_P1 : NRF_P0)
+    #define QSPI_GPIO_INDEX(pin) ((pin) & 31u)
+  #endif
 
   #ifndef MOTA_QSPI_SCK_FREQ
     #define MOTA_QSPI_SCK_FREQ NRF_QSPI_FREQ_32MDIV2
@@ -82,10 +90,27 @@ _Static_assert(MOTA_QSPI_AUX_CSN_PIN != NRF_QSPI_PIN_NOT_CONNECTED &&
 #endif
 
 #if defined(MOTA_RAK_AUTO_STORE)
-static uint32_t g_auto_csn_pin = MOTA_QSPI_CSN_PIN;
+_Static_assert(MOTA_QSPI_SCK_PIN < 32u && MOTA_QSPI_CSN_PIN < 32u &&
+               MOTA_QSPI_IO0_PIN < 32u && MOTA_QSPI_IO1_PIN < 32u,
+               "RAK adaptive QSPI bus must remain on P0");
+#if defined(MOTA_QSPI_AUX_CSN_PIN)
+_Static_assert(MOTA_QSPI_AUX_CSN_PIN < 32u,
+               "RAK auxiliary chip select must remain on P0");
+#endif
+// The apply handoff sets all four before ota_qspi_init() is called.
+static uint8_t g_auto_csn_pin;
+static uint8_t g_auto_sck_pin;
+static uint8_t g_auto_io0_pin;
+static uint8_t g_auto_io1_pin;
 #define QSPI_CSN_PIN g_auto_csn_pin
+#define QSPI_SCK_PIN g_auto_sck_pin
+#define QSPI_IO0_PIN g_auto_io0_pin
+#define QSPI_IO1_PIN g_auto_io1_pin
 #else
 #define QSPI_CSN_PIN MOTA_QSPI_CSN_PIN
+#define QSPI_SCK_PIN MOTA_QSPI_SCK_PIN
+#define QSPI_IO0_PIN MOTA_QSPI_IO0_PIN
+#define QSPI_IO1_PIN MOTA_QSPI_IO1_PIN
 #endif
 
 static void feed_watchdogs(void) {
@@ -158,19 +183,19 @@ static void configure_qspi_pins(bool enable) {
   if (enable) {
     // Preload benign SPI mode-0 levels before PSEL gives QSPI ownership.
     QSPI_GPIO_PORT(QSPI_CSN_PIN)->OUTSET = 1u << QSPI_GPIO_INDEX(QSPI_CSN_PIN);
-    QSPI_GPIO_PORT(MOTA_QSPI_SCK_PIN)->OUTCLR = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_SCK_PIN);
+    QSPI_GPIO_PORT(QSPI_SCK_PIN)->OUTCLR = 1u << QSPI_GPIO_INDEX(QSPI_SCK_PIN);
   }
   // Match current nrfx: QSPI owns direction while active; connected pads
   // remain GPIO inputs with disconnected input buffers and H0H1 drive.
-  QSPI_GPIO_PORT(MOTA_QSPI_SCK_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_SCK_PIN)] = pin_cnf;
+  QSPI_GPIO_PORT(QSPI_SCK_PIN)->PIN_CNF[QSPI_GPIO_INDEX(QSPI_SCK_PIN)] = pin_cnf;
   QSPI_GPIO_PORT(QSPI_CSN_PIN)->PIN_CNF[QSPI_GPIO_INDEX(QSPI_CSN_PIN)] = pin_cnf;
-  QSPI_GPIO_PORT(MOTA_QSPI_IO0_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_IO0_PIN)] = pin_cnf;
-  QSPI_GPIO_PORT(MOTA_QSPI_IO1_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_IO1_PIN)] = pin_cnf;
+  QSPI_GPIO_PORT(QSPI_IO0_PIN)->PIN_CNF[QSPI_GPIO_INDEX(QSPI_IO0_PIN)] = pin_cnf;
+  QSPI_GPIO_PORT(QSPI_IO1_PIN)->PIN_CNF[QSPI_GPIO_INDEX(QSPI_IO1_PIN)] = pin_cnf;
   if (MOTA_QSPI_IO2_PIN != NRF_QSPI_PIN_NOT_CONNECTED) {
-    QSPI_GPIO_PORT(MOTA_QSPI_IO2_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_IO2_PIN)] = pin_cnf;
+    QSPI_GPIO_PORT(MOTA_QSPI_IO2_PIN)->PIN_CNF[((MOTA_QSPI_IO2_PIN) & 31u)] = pin_cnf;
   }
   if (MOTA_QSPI_IO3_PIN != NRF_QSPI_PIN_NOT_CONNECTED) {
-    QSPI_GPIO_PORT(MOTA_QSPI_IO3_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_IO3_PIN)] = pin_cnf;
+    QSPI_GPIO_PORT(MOTA_QSPI_IO3_PIN)->PIN_CNF[((MOTA_QSPI_IO3_PIN) & 31u)] = pin_cnf;
   }
 }
 
@@ -181,33 +206,33 @@ static void wake_flash_gpio(void) {
   // GPIO ownership is established.  IO1 stays an input; connected IO2/IO3 are
   // held high so WP#/HOLD# remain inactive during the single-line command.
   QSPI_GPIO_PORT(QSPI_CSN_PIN)->OUTSET = 1u << QSPI_GPIO_INDEX(QSPI_CSN_PIN);
-  QSPI_GPIO_PORT(MOTA_QSPI_SCK_PIN)->OUTCLR = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_SCK_PIN);
-  QSPI_GPIO_PORT(MOTA_QSPI_IO0_PIN)->OUTSET = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_IO0_PIN);
+  QSPI_GPIO_PORT(QSPI_SCK_PIN)->OUTCLR = 1u << QSPI_GPIO_INDEX(QSPI_SCK_PIN);
+  QSPI_GPIO_PORT(QSPI_IO0_PIN)->OUTSET = 1u << QSPI_GPIO_INDEX(QSPI_IO0_PIN);
   QSPI_GPIO_PORT(QSPI_CSN_PIN)->PIN_CNF[QSPI_GPIO_INDEX(QSPI_CSN_PIN)] = QSPI_PIN_CNF_OUTPUT_H0H1;
-  QSPI_GPIO_PORT(MOTA_QSPI_SCK_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_SCK_PIN)] = QSPI_PIN_CNF_OUTPUT_H0H1;
-  QSPI_GPIO_PORT(MOTA_QSPI_IO0_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_IO0_PIN)] = QSPI_PIN_CNF_OUTPUT_H0H1;
-  QSPI_GPIO_PORT(MOTA_QSPI_IO1_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_IO1_PIN)] = QSPI_PIN_CNF_H0H1;
+  QSPI_GPIO_PORT(QSPI_SCK_PIN)->PIN_CNF[QSPI_GPIO_INDEX(QSPI_SCK_PIN)] = QSPI_PIN_CNF_OUTPUT_H0H1;
+  QSPI_GPIO_PORT(QSPI_IO0_PIN)->PIN_CNF[QSPI_GPIO_INDEX(QSPI_IO0_PIN)] = QSPI_PIN_CNF_OUTPUT_H0H1;
+  QSPI_GPIO_PORT(QSPI_IO1_PIN)->PIN_CNF[QSPI_GPIO_INDEX(QSPI_IO1_PIN)] = QSPI_PIN_CNF_H0H1;
   if (MOTA_QSPI_IO2_PIN != NRF_QSPI_PIN_NOT_CONNECTED) {
-    QSPI_GPIO_PORT(MOTA_QSPI_IO2_PIN)->OUTSET = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_IO2_PIN);
-    QSPI_GPIO_PORT(MOTA_QSPI_IO2_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_IO2_PIN)] = QSPI_PIN_CNF_OUTPUT_H0H1;
+    QSPI_GPIO_PORT(MOTA_QSPI_IO2_PIN)->OUTSET = 1u << ((MOTA_QSPI_IO2_PIN) & 31u);
+    QSPI_GPIO_PORT(MOTA_QSPI_IO2_PIN)->PIN_CNF[((MOTA_QSPI_IO2_PIN) & 31u)] = QSPI_PIN_CNF_OUTPUT_H0H1;
   }
   if (MOTA_QSPI_IO3_PIN != NRF_QSPI_PIN_NOT_CONNECTED) {
-    QSPI_GPIO_PORT(MOTA_QSPI_IO3_PIN)->OUTSET = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_IO3_PIN);
-    QSPI_GPIO_PORT(MOTA_QSPI_IO3_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_IO3_PIN)] = QSPI_PIN_CNF_OUTPUT_H0H1;
+    QSPI_GPIO_PORT(MOTA_QSPI_IO3_PIN)->OUTSET = 1u << ((MOTA_QSPI_IO3_PIN) & 31u);
+    QSPI_GPIO_PORT(MOTA_QSPI_IO3_PIN)->PIN_CNF[((MOTA_QSPI_IO3_PIN) & 31u)] = QSPI_PIN_CNF_OUTPUT_H0H1;
   }
 
   nrf_delay_us(OTA_QSPI_WAKE_GUARD_US);
   QSPI_GPIO_PORT(QSPI_CSN_PIN)->OUTCLR = 1u << QSPI_GPIO_INDEX(QSPI_CSN_PIN);
   for (uint8_t bit = 0; bit < OTA_QSPI_WAKE_BITS; bit++) {
     if (ota_qspi_wake_bit(bit)) {
-      QSPI_GPIO_PORT(MOTA_QSPI_IO0_PIN)->OUTSET = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_IO0_PIN);
+      QSPI_GPIO_PORT(QSPI_IO0_PIN)->OUTSET = 1u << QSPI_GPIO_INDEX(QSPI_IO0_PIN);
     } else {
-      QSPI_GPIO_PORT(MOTA_QSPI_IO0_PIN)->OUTCLR = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_IO0_PIN);
+      QSPI_GPIO_PORT(QSPI_IO0_PIN)->OUTCLR = 1u << QSPI_GPIO_INDEX(QSPI_IO0_PIN);
     }
     nrf_delay_us(OTA_QSPI_WAKE_EDGE_US);
-    QSPI_GPIO_PORT(MOTA_QSPI_SCK_PIN)->OUTSET = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_SCK_PIN);
+    QSPI_GPIO_PORT(QSPI_SCK_PIN)->OUTSET = 1u << QSPI_GPIO_INDEX(QSPI_SCK_PIN);
     nrf_delay_us(OTA_QSPI_WAKE_EDGE_US);
-    QSPI_GPIO_PORT(MOTA_QSPI_SCK_PIN)->OUTCLR = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_SCK_PIN);
+    QSPI_GPIO_PORT(QSPI_SCK_PIN)->OUTCLR = 1u << QSPI_GPIO_INDEX(QSPI_SCK_PIN);
     nrf_delay_us(OTA_QSPI_WAKE_EDGE_US);
   }
   QSPI_GPIO_PORT(QSPI_CSN_PIN)->OUTSET = 1u << QSPI_GPIO_INDEX(QSPI_CSN_PIN);
@@ -219,21 +244,26 @@ static void wake_flash_gpio(void) {
 
 static void select_qspi_pins(bool enable) {
   const uint32_t off = NRF_QSPI_PIN_VAL(NRF_QSPI_PIN_NOT_CONNECTED);
-  NRF_QSPI->PSEL.SCK = enable ? NRF_QSPI_PIN_VAL(MOTA_QSPI_SCK_PIN) : off;
+  NRF_QSPI->PSEL.SCK = enable ? NRF_QSPI_PIN_VAL(QSPI_SCK_PIN) : off;
   NRF_QSPI->PSEL.CSN = enable ? NRF_QSPI_PIN_VAL(QSPI_CSN_PIN) : off;
-  NRF_QSPI->PSEL.IO0 = enable ? NRF_QSPI_PIN_VAL(MOTA_QSPI_IO0_PIN) : off;
-  NRF_QSPI->PSEL.IO1 = enable ? NRF_QSPI_PIN_VAL(MOTA_QSPI_IO1_PIN) : off;
+  NRF_QSPI->PSEL.IO0 = enable ? NRF_QSPI_PIN_VAL(QSPI_IO0_PIN) : off;
+  NRF_QSPI->PSEL.IO1 = enable ? NRF_QSPI_PIN_VAL(QSPI_IO1_PIN) : off;
   NRF_QSPI->PSEL.IO2 = enable ? NRF_QSPI_PIN_VAL(MOTA_QSPI_IO2_PIN) : off;
   NRF_QSPI->PSEL.IO3 = enable ? NRF_QSPI_PIN_VAL(MOTA_QSPI_IO3_PIN) : off;
 }
 
 #if defined(MOTA_RAK_AUTO_STORE)
-void ota_qspi_set_rak15001_source(bool slot_c) {
+void ota_qspi_set_rak_source(uint8_t stage_handoff) {
+  g_auto_csn_pin = MOTA_QSPI_CSN_PIN;
 #if defined(MOTA_RAK_AUTO_RAK4631)
-  g_auto_csn_pin = slot_c ? _PINNUM(0, 26) : _PINNUM(0, 31);
-#else
-  (void)slot_c;
+  if (stage_handoff == GPREGRET2_OTA_STAGE_RAK15001) {
+    g_auto_csn_pin = _PINNUM(0, 26);
+  }
 #endif
+  const bool header = stage_handoff == GPREGRET2_OTA_STAGE_HEADER_W25;
+  g_auto_sck_pin = header ? _PINNUM(0, 16) : MOTA_QSPI_SCK_PIN;
+  g_auto_io0_pin = header ? _PINNUM(0, 17) : MOTA_QSPI_IO0_PIN;
+  g_auto_io1_pin = header ? _PINNUM(0, 15) : MOTA_QSPI_IO1_PIN;
 }
 #endif
 

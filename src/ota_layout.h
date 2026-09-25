@@ -44,6 +44,7 @@
 #define GPREGRET2_OTA_STAGE_EXPANDED 0xEDu
 #define GPREGRET2_OTA_STAGE_QSPI     0x51u
 #define GPREGRET2_OTA_STAGE_RAK15001 0x52u
+#define GPREGRET2_OTA_STAGE_HEADER_W25 0x54u
 #define GPREGRET2_OTA_STAGE_SD       0x53u
 // One-shot retained-RAM handoff describing a format-v2 application container
 // split between an internal-flash prefix and the fixed 64 KiB SRAM arena.

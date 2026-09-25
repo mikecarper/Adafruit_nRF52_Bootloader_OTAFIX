@@ -61,8 +61,8 @@ bool ota_qspi_write(uint32_t offset, const void *src, uint32_t len) {
     return false;
 }
 #if defined(MOTA_RAK_AUTO_STORE)
-void ota_qspi_set_rak15001_source(bool slot_c) {
-    (void)slot_c;
+void ota_qspi_set_rak_source(uint8_t stage_handoff) {
+    (void)stage_handoff;
     g_unexpected_qspi_calls++;
 }
 #endif
