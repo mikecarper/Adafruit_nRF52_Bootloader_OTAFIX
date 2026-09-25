@@ -153,14 +153,10 @@ STATIC_ASSERT(FAT_ENTRIES_PER_SECTOR                       ==       256); // FAT
 static char const infoUf2File[] = INFO_UF2_INITIAL_CONTENT;
 
 const char indexFile[] =
+    // HTML's root/head/body tags are optional; keep the UF2 redirect small
+    // enough for the auto-storage bootloaders' fixed flash envelope.
     "<!doctype html>\n"
-    "<html>"
-    "<body>"
-    "<script>\n"
-    "location.replace(\"" UF2_INDEX_URL "\");\n"
-    "</script>"
-    "</body>"
-    "</html>\n";
+    "<script>location.replace(\"" UF2_INDEX_URL "\");</script>\n";
 
 static struct TextFile const info[] = {
     {.name = "INFO_UF2TXT", .content = infoUf2File},
