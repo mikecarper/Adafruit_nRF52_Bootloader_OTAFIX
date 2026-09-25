@@ -68,24 +68,18 @@ static void usb_wait_delay_ms(uint32_t delay_ms) {
 #endif
 
 bool usb_wait_for_mount(uint32_t timeout_ms) {
-  // No VBUS means battery-only power, so do not delay the BLE recovery path.
-  // VBUS only proves that USB power is present; a mounted TinyUSB device proves
-  // that an active USB data host is attached and can be used for DFU.
-  if (!usb_wait_vbus_present()) {
-    return false;
-  }
-
+  // On a cold USB power-up the CPU can run before USBREGSTATUS reports VBUS.
+  // Allow a bounded part of the existing enumeration window for VBUS to settle.
   for (uint32_t elapsed_ms = 0; elapsed_ms < timeout_ms; elapsed_ms++) {
     usb_wait_task();
-
-    if (!usb_wait_vbus_present()) {
+    bool const vbus = usb_wait_vbus_present();
+    if (vbus) {
+      if (usb_wait_mounted()) {
+        return true;
+      }
+    } else if (elapsed_ms >= DFU_USB_VBUS_SETTLE_MS) {
       return false;
     }
-
-    if (usb_wait_mounted()) {
-      return true;
-    }
-
     usb_wait_feed_watchdog();
     usb_wait_delay_ms(1);
   }

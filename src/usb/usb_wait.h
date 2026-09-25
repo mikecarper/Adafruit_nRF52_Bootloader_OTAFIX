@@ -32,6 +32,10 @@
 #define DFU_USB_ENUMERATION_TIMEOUT_MS 30000u
 #endif
 
+#ifndef DFU_USB_VBUS_SETTLE_MS
+#define DFU_USB_VBUS_SETTLE_MS 3000u
+#endif
+
 #define DFU_SINGLE_TAP_TIMEOUT_MS 3000u
 
 static inline uint32_t dfu_buttonless_timeout_ms(bool serial_only_dfu,

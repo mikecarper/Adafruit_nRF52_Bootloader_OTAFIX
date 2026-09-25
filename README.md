@@ -392,7 +392,7 @@ candidates are not release artifacts.
 ## Changes in OTAFIX 2.4.1 preview.8
 
 - **USB-first recovery with automatic BLE fallback**
-  When no valid application is installed, the bootloader first checks for an active USB data host. An enumerated host receives serial/UF2 DFU; battery-only power falls back to BLE OTA immediately, while VBUS-powered devices allow up to 30 seconds for host enumeration or VM USB passthrough before falling back. Builds can override the grace period with `DFU_USB_ENUMERATION_TIMEOUT_MS`.
+  When no valid application is installed, the bootloader first checks for an active USB data host. An enumerated host receives serial/UF2 DFU. The first three seconds of the 30-second recovery window allow VBUS status to settle during cold USB power-up; battery-only power then falls back to BLE OTA. VBUS-powered devices keep the rest of the window for host enumeration or VM USB passthrough. Builds can override the window with `DFU_USB_ENUMERATION_TIMEOUT_MS`.
 
 - **Persistent application CRC validation**
   BLE/serial DFU now saves the CRC that was validated during installation, allowing the bootloader to verify application integrity on subsequent boots.
@@ -912,7 +912,7 @@ If the device does not show up on your computer after flashing the bootloader or
 
 In **OTAFIX 2.4.1 preview.8** and above, a device without a valid application chooses its recovery transport automatically:
 - Connected to an active USB data host: serial and UF2 DFU remain available.
-- Running on battery: BLE OTA starts immediately because VBUS is absent.
+- Running on battery: BLE OTA starts after the three-second VBUS settle interval.
 - Connected to USB power without a data host: BLE OTA starts after the 30-second USB detection window.
 - On current builds, removing VBUS from an enumerated no-application USB session exits that session and resets into BLE recovery; no reset-button press is required.
 
