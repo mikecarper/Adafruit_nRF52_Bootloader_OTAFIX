@@ -175,11 +175,14 @@ the mounted drive.
   the old image-wide `-fno-ipa-modref` workaround, allowing safe size recovery
   in ordinary code.
 - Targets with internal, QSPI, or microSD bootloader self-update support expose
-  a compact, label-only UF2 recovery volume to keep the fail-closed updater
-  inside the fixed bootloader envelope. Drag-and-drop/raw UF2 writes still
-  work, but those targets do not synthesize `INFO_UF2.TXT`, `INDEX.HTM`, or
-  `CURRENT.UF2`; board/build identity remains available through USB descriptors
-  and the signed bootloader manifest. Other targets retain the three files.
+  a compact UF2 recovery volume to keep the fail-closed updater inside the
+  fixed bootloader envelope. `INFO_UF2.TXT` and `INDEX.HTM` are visible but
+  intentionally zero bytes long; their directory entries do not allocate data
+  clusters. This is expected, not a failed flash. `CURRENT.UF2` readback and
+  UF2 drag-and-drop writes still work. Use the USB identity, signed bootloader
+  manifest, or board-specific package name instead of the empty info file to
+  identify the installed bootloader. Targets without bootloader self-update,
+  including the adaptive RAK targets below, retain populated info/index files.
 - BLE application DATA reception now clears this bootloader's local connection
   latency and best-effort disables inherited slave latency for the active
   connection. This does **not** request a new GAP interval or override the
@@ -428,7 +431,8 @@ candidates are not release artifacts.
 
   The matching RAK4631 target is `wiscore_rak4631_w25q16`. It uses the same W25Q16 SCK/MOSI/MISO/CS pins, exact JEDEC signature, and 8 MHz clock, but has no auxiliary-CS guard because the RAK4631's internal LoRa radio is on a separate SPI bus. Its mapping also leaves Slot A GPS UART/PPS untouched. Pair it only with MeshCore environment `RAK_4631_repeater_w25q16_lora_ota` and hardware ID `RAK4631_W25Q16`; it is not interchangeable with either the ordinary RAK4631 or RAK15001 Slot C loader.
 
-  The adaptive `wiscore_rak4631_auto` target pairs with MeshCore `RAK_4631_repeater_unified_lora_ota` and supports internal staging, W25Q16 on P0.31, or RAK15001 Slot C on P0.26. The adaptive `wiscore_rak3401_auto` target pairs with `RAK_3401_repeater_unified_lora_ota` and supports internal staging or W25Q16 on P0.31; it keeps radio NSS P0.26 high during flash access. The app detects the exact NOR ID, refuses ambiguous dual-NOR wiring, and sends a distinct RAK15001 staging marker only to the RAK4631 adaptive loader. The loader selects only that indicated CS and checks its exact JEDEC ID before reading an update. Both targets reserve 64 KiB of retained RAM for internal hybrid updates. Their identities are `4631_AUTO_DFU` and `3401_AUTO_DFU`; install each loader with its matching combined SoftDevice DFU package or SWD first. These adaptive loaders support application full/delta updates but do not include bootloader self-update, because the full combination exceeds the fixed 40 KiB bootloader region. Keep the dedicated loaders when bootloader self-update is required.
+  The adaptive `wiscore_rak4631_auto` target pairs with MeshCore `RAK_4631_repeater_unified_lora_ota` and supports internal staging, W25Q16 on P0.31, or RAK15001 Slot C on P0.26. The adaptive `wiscore_rak3401_auto` target pairs with `RAK_3401_repeater_unified_lora_ota` and supports internal staging or W25Q16 on P0.31; it keeps radio NSS P0.26 high during flash access. The app detects the exact NOR ID, refuses ambiguous dual-NOR wiring, and sends a distinct RAK15001 staging marker only to the RAK4631 adaptive loader. The loader selects only that indicated CS and checks its exact JEDEC ID before reading an update. Both targets reserve 64 KiB of retained RAM for internal hybrid updates. Their identities are `4631_AUTO_DFU` and `3401_AUTO_DFU`; install each loader with its matching combined SoftDevice DFU package or SWD first. The target version for the merged local builds is OTAFIX 2.4.8 (packed version `0x020408FF`). These adaptive loaders support application full/delta updates but do not include bootloader self-update, because the full combination exceeds the fixed 40 KiB bootloader region. Keep the dedicated loaders when bootloader self-update is required.
+
 
   The ordinary RAK4631 and RAK3401 targets retain internal staging. Heltec T114 is excluded because its public schematics mark the MX25R1635F U9 footprint optional, so the standard target cannot assume it is populated.
 
