@@ -200,6 +200,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: mikecarper/MeshCore
+          # Includes the application USB READY fix qualified with OTAFIX preview.2.
           ref: 602dbfe3d9ad43630d9b4b6e8d9b6a73f4bc48b8
           path: _meshcore
 
