@@ -313,6 +313,16 @@ static void check_dfu_mode(void) {
   }
 
   /*------------- Determine DFU mode (Serial, OTA, FRESET or normal) -------------*/
+  // Allow wake button presses to be released before selecting DFU mode.
+#if defined(BUTTON_DFU_DELAY_MS) && defined(BUTTON_DFU)
+  for (uint16_t waited = 0; waited < BUTTON_DFU_DELAY_MS; waited += 10) {
+    if (!button_pressed(BUTTON_DFU)) {
+      break;
+    }
+    NRFX_DELAY_MS(10);
+  }
+#endif
+
   // DFU button pressed
 #if defined(BUTTON_DFU)
   dfu_start = dfu_start || button_pressed(BUTTON_DFU);

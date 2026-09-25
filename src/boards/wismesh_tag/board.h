@@ -34,8 +34,8 @@
 /* LED
  *------------------------------------------------------------------*/
 #define LEDS_NUMBER           2
-#define LED_PRIMARY_PIN       _PINNUM(1, 4)
-#define LED_SECONDARY_PIN     _PINNUM(1, 3)
+#define LED_PRIMARY_PIN       _PINNUM(1, 3)
+#define LED_SECONDARY_PIN     _PINNUM(1, 4)
 #define LED_STATE_ON          1
 
 /*------------------------------------------------------------------*/
@@ -44,6 +44,7 @@
 #define BUTTON_DFU            _PINNUM(0, 9) // Allow booting to OTA DFU from button
 #define BUTTON_DFU_OTA        _PINNUM(0, 9)
 #define BUTTON_PULL           NRF_GPIO_PIN_PULLUP
+#define BUTTON_DFU_DELAY_MS   500
 
 //--------------------------------------------------------------------+
 // BLE OTA
