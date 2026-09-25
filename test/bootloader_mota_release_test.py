@@ -63,8 +63,9 @@ def define_hex(text: str, key: str) -> int:
 class QualifiedReleaseInventoryTest(unittest.TestCase):
     def test_inventory_covers_every_release_board(self) -> None:
         boards = {path.name for path in (ROOT / "src" / "boards").iterdir() if path.is_dir()}
-        self.assertEqual(set(release.QUALIFIED_BOARDS), boards)
-        self.assertEqual(len(release.QUALIFIED_BOARDS), len(boards))
+        adaptive = {"wiscore_rak3401_auto", "wiscore_rak4631_auto"}
+        self.assertEqual(set(release.QUALIFIED_BOARDS), boards - adaptive)
+        self.assertEqual(len(release.QUALIFIED_BOARDS), len(boards) - len(adaptive))
 
     def test_unconfigured_new_board_blocks_release(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -74,6 +75,21 @@ class QualifiedReleaseInventoryTest(unittest.TestCase):
             (board / "board.cmake").write_text("set(MCU_VARIANT nrf52840)\n")
             (board / "board.mk").write_text("")
             with self.assertRaisesRegex(ValueError, "missing exact"):
+                release.release_boards(root)
+
+    def test_adaptive_profile_requires_matching_make_and_qspi_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            board = root / "wiscore_rak4631_auto"
+            board.mkdir()
+            (board / "board.cmake").write_text(
+                "set(MCU_VARIANT nrf52840)\nset(MOTA_RAK_AUTO_STORE ON)\n"
+                "set(MOTA_QSPI_FLASH ON)\n")
+            (board / "board.mk").write_text("CFLAGS += -DMOTA_RAK_AUTO_STORE=1\n")
+            with self.assertRaisesRegex(ValueError, "empty bootloader release"):
+                release.release_boards(root)
+            (board / "board.mk").write_text("")
+            with self.assertRaisesRegex(ValueError, "inconsistent adaptive"):
                 release.release_boards(root)
 
     def test_gat562_exact_internal_profile_is_qualified(self) -> None:

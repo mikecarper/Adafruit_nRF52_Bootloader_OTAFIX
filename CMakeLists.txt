@@ -51,10 +51,9 @@ set(DFU_USB_ENUMERATION_TIMEOUT_MS "30000" CACHE STRING
 set(SIGNED_FW_QX "" CACHE STRING "Public key Qx (comma-separated bytes)")
 set(SIGNED_FW_QY "" CACHE STRING "Public key Qy (comma-separated bytes)")
 
-# Internal-only nRF52840 targets use the fixed top-of-SRAM mOTA arena by
-# default. It remains an explicit cache setting so qualification builds can
-# disable it, while QSPI/SD targets keep their historical full-RAM layout.
-if (MOTA_INTERNAL_BOOTLOADER_UPDATE)
+# Internal-only and RAK adaptive nRF52840 targets use the fixed top-of-SRAM
+# mOTA arena. Other QSPI/SD targets retain their historical full-RAM layout.
+if (MOTA_INTERNAL_BOOTLOADER_UPDATE OR MOTA_RAK_AUTO_STORE)
   set(MOTA_RAM_ARENA_SIZE_DEFAULT 65536)
 else ()
   set(MOTA_RAM_ARENA_SIZE_DEFAULT 0)
@@ -66,10 +65,11 @@ if (NOT MOTA_RAM_ARENA_SIZE MATCHES "^(0|65536|0[xX]10000)$")
 endif ()
 math(EXPR MOTA_RAM_ARENA_SIZE_BYTES "${MOTA_RAM_ARENA_SIZE}")
 if (MOTA_RAM_ARENA_SIZE_BYTES GREATER 0 AND
-    (NOT MOTA_INTERNAL_BOOTLOADER_UPDATE OR MOTA_QSPI_FLASH OR MOTA_SD_CARD OR
+    (NOT (MOTA_INTERNAL_BOOTLOADER_UPDATE OR MOTA_RAK_AUTO_STORE) OR
+     (MOTA_QSPI_FLASH AND NOT MOTA_RAK_AUTO_STORE) OR MOTA_SD_CARD OR
      NOT MCU_VARIANT STREQUAL "nrf52840"))
   message(FATAL_ERROR
-    "The mOTA SRAM arena is supported only by internal-only nRF52840 targets")
+    "The mOTA SRAM arena requires an internal or RAK adaptive nRF52840 target")
 endif ()
 
 if (NOT DFU_USB_ENUMERATION_TIMEOUT_MS MATCHES "^[0-9]+$")
@@ -157,6 +157,12 @@ endif ()
 if (MOTA_QSPI_FLASH)
   target_sources(bootloader PUBLIC src/ota_qspi.c)
   target_compile_definitions(bootloader PUBLIC MOTA_QSPI_FLASH=1)
+endif ()
+if (MOTA_RAK_AUTO_STORE)
+  if (NOT MOTA_QSPI_FLASH OR NOT BOARD MATCHES "^wiscore_rak(3401|4631)_auto$")
+    message(FATAL_ERROR "RAK auto storage requires an exact RAK auto board with QSPI")
+  endif ()
+  target_compile_definitions(bootloader PUBLIC MOTA_RAK_AUTO_STORE=1)
 endif ()
 
 if (MOTA_QSPI_BOOTLOADER_UPDATE)

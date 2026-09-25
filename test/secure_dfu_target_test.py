@@ -37,7 +37,7 @@ class Targets(unittest.TestCase):
                 wrong = struct.pack('<II', 0x20030000, 0x1001)+bytes(248)
                 with self.assertRaises(ValueError):
                     init_packet(wrong, **profile)
-        self.assertEqual(len(ids), 27)
+        self.assertEqual(len(ids), 29)
         self.assertEqual(hardware_version('wiscore_rak3401'), 0x3401)
 
     def test_invalid_board_refused(self):

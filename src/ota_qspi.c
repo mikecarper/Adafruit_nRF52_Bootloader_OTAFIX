@@ -7,6 +7,7 @@
   #include <string.h>
   #include "boards.h"
   #include "hal/nrf_qspi.h"
+  #include "hal/nrf_gpio.h"
   #include "nrf_delay.h"
   #include "watchdog.h"
 
@@ -80,6 +81,13 @@ _Static_assert(MOTA_QSPI_AUX_CSN_PIN != NRF_QSPI_PIN_NOT_CONNECTED &&
                "QSPI auxiliary CSN must be connected and distinct from the flash bus pins");
 #endif
 
+#if defined(MOTA_RAK_AUTO_STORE)
+static uint32_t g_auto_csn_pin = MOTA_QSPI_CSN_PIN;
+#define QSPI_CSN_PIN g_auto_csn_pin
+#else
+#define QSPI_CSN_PIN MOTA_QSPI_CSN_PIN
+#endif
+
 static void feed_watchdogs(void) {
   otafix_watchdog_feed();
   board_watchdog_feed();
@@ -149,13 +157,13 @@ static void configure_qspi_pins(bool enable) {
   const uint32_t pin_cnf = enable ? QSPI_PIN_CNF_H0H1 : QSPI_PIN_CNF_DEFAULT;
   if (enable) {
     // Preload benign SPI mode-0 levels before PSEL gives QSPI ownership.
-    QSPI_GPIO_PORT(MOTA_QSPI_CSN_PIN)->OUTSET = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_CSN_PIN);
+    QSPI_GPIO_PORT(QSPI_CSN_PIN)->OUTSET = 1u << QSPI_GPIO_INDEX(QSPI_CSN_PIN);
     QSPI_GPIO_PORT(MOTA_QSPI_SCK_PIN)->OUTCLR = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_SCK_PIN);
   }
   // Match current nrfx: QSPI owns direction while active; connected pads
   // remain GPIO inputs with disconnected input buffers and H0H1 drive.
   QSPI_GPIO_PORT(MOTA_QSPI_SCK_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_SCK_PIN)] = pin_cnf;
-  QSPI_GPIO_PORT(MOTA_QSPI_CSN_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_CSN_PIN)] = pin_cnf;
+  QSPI_GPIO_PORT(QSPI_CSN_PIN)->PIN_CNF[QSPI_GPIO_INDEX(QSPI_CSN_PIN)] = pin_cnf;
   QSPI_GPIO_PORT(MOTA_QSPI_IO0_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_IO0_PIN)] = pin_cnf;
   QSPI_GPIO_PORT(MOTA_QSPI_IO1_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_IO1_PIN)] = pin_cnf;
   if (MOTA_QSPI_IO2_PIN != NRF_QSPI_PIN_NOT_CONNECTED) {
@@ -172,10 +180,10 @@ static void wake_flash_gpio(void) {
   // first.  Preloading every output avoids a CS# pulse or clock edge while
   // GPIO ownership is established.  IO1 stays an input; connected IO2/IO3 are
   // held high so WP#/HOLD# remain inactive during the single-line command.
-  QSPI_GPIO_PORT(MOTA_QSPI_CSN_PIN)->OUTSET = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_CSN_PIN);
+  QSPI_GPIO_PORT(QSPI_CSN_PIN)->OUTSET = 1u << QSPI_GPIO_INDEX(QSPI_CSN_PIN);
   QSPI_GPIO_PORT(MOTA_QSPI_SCK_PIN)->OUTCLR = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_SCK_PIN);
   QSPI_GPIO_PORT(MOTA_QSPI_IO0_PIN)->OUTSET = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_IO0_PIN);
-  QSPI_GPIO_PORT(MOTA_QSPI_CSN_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_CSN_PIN)] = QSPI_PIN_CNF_OUTPUT_H0H1;
+  QSPI_GPIO_PORT(QSPI_CSN_PIN)->PIN_CNF[QSPI_GPIO_INDEX(QSPI_CSN_PIN)] = QSPI_PIN_CNF_OUTPUT_H0H1;
   QSPI_GPIO_PORT(MOTA_QSPI_SCK_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_SCK_PIN)] = QSPI_PIN_CNF_OUTPUT_H0H1;
   QSPI_GPIO_PORT(MOTA_QSPI_IO0_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_IO0_PIN)] = QSPI_PIN_CNF_OUTPUT_H0H1;
   QSPI_GPIO_PORT(MOTA_QSPI_IO1_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_IO1_PIN)] = QSPI_PIN_CNF_H0H1;
@@ -189,7 +197,7 @@ static void wake_flash_gpio(void) {
   }
 
   nrf_delay_us(OTA_QSPI_WAKE_GUARD_US);
-  QSPI_GPIO_PORT(MOTA_QSPI_CSN_PIN)->OUTCLR = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_CSN_PIN);
+  QSPI_GPIO_PORT(QSPI_CSN_PIN)->OUTCLR = 1u << QSPI_GPIO_INDEX(QSPI_CSN_PIN);
   for (uint8_t bit = 0; bit < OTA_QSPI_WAKE_BITS; bit++) {
     if (ota_qspi_wake_bit(bit)) {
       QSPI_GPIO_PORT(MOTA_QSPI_IO0_PIN)->OUTSET = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_IO0_PIN);
@@ -202,7 +210,7 @@ static void wake_flash_gpio(void) {
     QSPI_GPIO_PORT(MOTA_QSPI_SCK_PIN)->OUTCLR = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_SCK_PIN);
     nrf_delay_us(OTA_QSPI_WAKE_EDGE_US);
   }
-  QSPI_GPIO_PORT(MOTA_QSPI_CSN_PIN)->OUTSET = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_CSN_PIN);
+  QSPI_GPIO_PORT(QSPI_CSN_PIN)->OUTSET = 1u << QSPI_GPIO_INDEX(QSPI_CSN_PIN);
   nrf_delay_us(OTA_QSPI_WAKE_GUARD_US);
 
   // Restore the exact nrfx QSPI pad configuration before assigning PSEL.
@@ -212,12 +220,22 @@ static void wake_flash_gpio(void) {
 static void select_qspi_pins(bool enable) {
   const uint32_t off = NRF_QSPI_PIN_VAL(NRF_QSPI_PIN_NOT_CONNECTED);
   NRF_QSPI->PSEL.SCK = enable ? NRF_QSPI_PIN_VAL(MOTA_QSPI_SCK_PIN) : off;
-  NRF_QSPI->PSEL.CSN = enable ? NRF_QSPI_PIN_VAL(MOTA_QSPI_CSN_PIN) : off;
+  NRF_QSPI->PSEL.CSN = enable ? NRF_QSPI_PIN_VAL(QSPI_CSN_PIN) : off;
   NRF_QSPI->PSEL.IO0 = enable ? NRF_QSPI_PIN_VAL(MOTA_QSPI_IO0_PIN) : off;
   NRF_QSPI->PSEL.IO1 = enable ? NRF_QSPI_PIN_VAL(MOTA_QSPI_IO1_PIN) : off;
   NRF_QSPI->PSEL.IO2 = enable ? NRF_QSPI_PIN_VAL(MOTA_QSPI_IO2_PIN) : off;
   NRF_QSPI->PSEL.IO3 = enable ? NRF_QSPI_PIN_VAL(MOTA_QSPI_IO3_PIN) : off;
 }
+
+#if defined(MOTA_RAK_AUTO_STORE)
+void ota_qspi_set_rak15001_source(bool slot_c) {
+#if defined(MOTA_RAK_AUTO_RAK4631)
+  g_auto_csn_pin = slot_c ? _PINNUM(0, 26) : _PINNUM(0, 31);
+#else
+  (void)slot_c;
+#endif
+}
+#endif
 
 bool ota_qspi_init(void) {
   #if defined(MOTA_QSPI_AUX_CSN_PIN)
@@ -231,6 +249,14 @@ bool ota_qspi_init(void) {
   }
   g_capacity = 0;
   g_awake = false;
+
+  #if defined(MOTA_RAK_AUTO_RAK4631)
+  // Both chip selects must be high before waking the selected NOR.
+  nrf_gpio_pin_set(_PINNUM(0, 26));
+  nrf_gpio_cfg_output(_PINNUM(0, 26));
+  nrf_gpio_pin_set(_PINNUM(0, 31));
+  nrf_gpio_cfg_output(_PINNUM(0, 31));
+  #endif
 
   #if defined(MOTA_QSPI_POWER_PIN)
   nrf_gpio_cfg_output(MOTA_QSPI_POWER_PIN);
@@ -290,6 +316,12 @@ bool ota_qspi_init(void) {
     ota_qspi_deinit();
     return false;
   }
+  #elif defined(MOTA_RAK_AUTO_STORE)
+  const uint32_t matched_id = g_auto_csn_pin == _PINNUM(0, 26) ? 0xC84015u : 0xEF4015u;
+  if ((((uint32_t)jedec[0] << 16) | ((uint32_t)jedec[1] << 8) | jedec[2]) != matched_id) {
+    ota_qspi_deinit();
+    return false;
+  }
   #endif
   g_capacity = 1u << jedec[2];
   if (g_capacity > QSPI_MAX_CAPACITY) {
@@ -327,8 +359,8 @@ void ota_qspi_deinit(void) {
     // If status could not prove the NOR idle, keep CS# asserted high even
     // after releasing the QSPI peripheral. This lets an in-flight internal
     // operation finish safely without relying on a board-level pull-up.
-    QSPI_GPIO_PORT(MOTA_QSPI_CSN_PIN)->OUTSET = 1u << QSPI_GPIO_INDEX(MOTA_QSPI_CSN_PIN);
-    QSPI_GPIO_PORT(MOTA_QSPI_CSN_PIN)->PIN_CNF[QSPI_GPIO_INDEX(MOTA_QSPI_CSN_PIN)] = QSPI_PIN_CNF_OUTPUT_H0H1;
+    QSPI_GPIO_PORT(QSPI_CSN_PIN)->OUTSET = 1u << QSPI_GPIO_INDEX(QSPI_CSN_PIN);
+    QSPI_GPIO_PORT(QSPI_CSN_PIN)->PIN_CNF[QSPI_GPIO_INDEX(QSPI_CSN_PIN)] = QSPI_PIN_CNF_OUTPUT_H0H1;
   }
   g_capacity = 0;
 

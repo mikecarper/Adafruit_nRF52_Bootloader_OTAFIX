@@ -12,6 +12,9 @@
 #include <string.h>
 
 #include "ota_layout.h"
+#if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
+  #include "ota_hybrid_handoff.h"
+#endif
 #if defined(MOTA_SD_CARD)
   #include "ota_sd_auth.h"
 #endif
@@ -48,6 +51,7 @@ static int      g_qspi_deinit_calls;
 static int      g_qspi_read_calls;
 static int      g_qspi_write_calls;
 static int      g_qspi_write_fail;
+static int      g_qspi_slot_c;
 static uint32_t g_fault_write_address;
 static int      g_fault_writes_remaining, g_fault_write_attempts;
 
@@ -106,6 +110,16 @@ void otah_settings_commit(uint16_t bank0, uint16_t crc, uint32_t size) {
   g_settings_writes++;
 }
 
+#if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
+uint32_t otah_resetreas_get(void) { return 1u << 2; }
+void otah_hybrid_handoff_read(void *dst, uint32_t len) { memset(dst, 0, len); }
+void otah_hybrid_handoff_consume(void) {}
+int otah_hybrid_ram_read(uint32_t offset, void *dst, uint32_t len) {
+  (void)offset; (void)dst; (void)len;
+  return 0;
+}
+#endif
+
 #if defined(MOTA_SD_CARD)
 void otah_sd_auth_read(void *dst, uint32_t len) {
   memcpy(dst, &SD_AUTH, len);
@@ -154,6 +168,11 @@ bool ota_sd_read_bytes(uint32_t first_sector, uint32_t offset, void *out, uint32
   return true;
 }
 #elif defined(MOTA_QSPI_FLASH)
+#if defined(MOTA_RAK_AUTO_STORE)
+void ota_qspi_set_rak15001_source(bool slot_c) {
+  g_qspi_slot_c = slot_c ? 1 : 0;
+}
+#endif
 bool ota_qspi_init(void) {
   g_qspi_init_calls++;
   return true;
@@ -348,6 +367,7 @@ static void reset_device(const uint8_t *base, uint32_t base_len) {
   g_qspi_read_calls       = 0;
   g_qspi_write_calls      = 0;
   g_qspi_write_fail       = 0;
+  g_qspi_slot_c           = -1;
   g_fault_write_address   = UINT32_MAX;
   g_fault_writes_remaining = 0;
   g_fault_write_attempts  = 0;
@@ -633,6 +653,36 @@ int main(int argc, char **argv) {
 #endif
 
 #if defined(MOTA_QSPI_FLASH)
+#if defined(MOTA_RAK_AUTO_STORE)
+  printf("[auto] W25Q16 source marker: ");
+  reset_device(base, (uint32_t)base_len);
+  if (!stage_external_mota(delta, (uint32_t)delta_len)) return 2;
+  applied = ota_delta_check_and_apply();
+#if defined(MOTA_RAK_AUTO_RAK4631)
+  const int expected_w25_selector = 0;
+#else
+  const int expected_w25_selector = -1;
+#endif
+  if (result_ok(applied, expected, (uint32_t)expected_len) &&
+      g_qspi_slot_c == expected_w25_selector) printf("PASS\n");
+  else { printf("FAIL selector=%d result=0x%X\n", g_qspi_slot_c, g_gpregret2); failures++; }
+
+  printf("[auto] RAK15001 marker is board-specific: ");
+  reset_device(base, (uint32_t)base_len);
+  if (!stage_external_mota(delta, (uint32_t)delta_len)) return 2;
+  g_gpregret2 = GPREGRET2_OTA_STAGE_RAK15001;
+  applied = ota_delta_check_and_apply();
+#if defined(MOTA_RAK_AUTO_RAK4631)
+  const int slot_c_ok = result_ok(applied, expected, (uint32_t)expected_len) &&
+                        g_qspi_slot_c == 1;
+#else
+  const int slot_c_ok = !applied && g_qspi_init_calls == 0 &&
+                        g_settings_writes == 0 &&
+                        memcmp(FLASH + MOTA_NRF52_APP_BASE, base, (size_t)base_len) == 0;
+#endif
+  if (slot_c_ok) printf("PASS\n");
+  else { printf("FAIL selector=%d result=0x%X\n", g_qspi_slot_c, g_gpregret2); failures++; }
+#endif
   printf("[4] QSPI approval write failure leaves application valid: ");
   reset_device(base, (uint32_t)base_len);
   if (!stage_external_mota(delta, (uint32_t)delta_len)) {

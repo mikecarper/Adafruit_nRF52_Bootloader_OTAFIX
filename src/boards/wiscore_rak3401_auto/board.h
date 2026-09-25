@@ -1,0 +1,27 @@
+#ifndef _WISCORE_RAK3401_AUTO_H
+#define _WISCORE_RAK3401_AUTO_H
+
+#include "../wiscore_rak3401/board.h"
+
+// The W25Q16 uses P0.31; P0.26 is the RAK13302 radio NSS and stays high.
+#define MOTA_RAK_AUTO_STORE 1
+#define MOTA_RAK_AUTO_RAK3401 1
+#define MOTA_QSPI_SCK_PIN _PINNUM(0, 3)
+#define MOTA_QSPI_CSN_PIN _PINNUM(0, 31)
+#define MOTA_QSPI_IO0_PIN _PINNUM(0, 30)
+#define MOTA_QSPI_IO1_PIN _PINNUM(0, 29)
+#define MOTA_QSPI_IO2_PIN 0xFFu
+#define MOTA_QSPI_IO3_PIN 0xFFu
+#define MOTA_QSPI_AUX_CSN_PIN _PINNUM(0, 26)
+#define MOTA_QSPI_SCK_FREQ NRF_QSPI_FREQ_32MDIV4
+
+#undef BLEDIS_MODEL
+#define BLEDIS_MODEL "RAK3401 Auto"
+#undef UF2_PRODUCT_NAME
+#undef UF2_VOLUME_LABEL
+#undef UF2_BOARD_ID
+#define UF2_PRODUCT_NAME "RAK3401 Auto"
+#define UF2_VOLUME_LABEL "3401AUTO"
+#define UF2_BOARD_ID "WisBlock-RAK3401-Auto"
+
+#endif

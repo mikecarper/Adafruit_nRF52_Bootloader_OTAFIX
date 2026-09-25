@@ -71,6 +71,20 @@ qspi_apply_test: sd_apply_test.c $(SRC)/ota_delta.c $(SRC)/detools/detools.c $(S
 	$(CC) $(CFLAGS) -DOTA_DELTA_HOST_TEST -DMOTA_QSPI_FLASH $(INC) sd_apply_test.c \
 		$(SRC)/detools/detools.c $(SRC)/sha256.c -o $@
 
+rak_auto_apply_4631_test rak_auto_hybrid_4631_test: RAK_AUTO_BOARD=4631
+rak_auto_apply_3401_test rak_auto_hybrid_3401_test: RAK_AUTO_BOARD=3401
+rak_auto_apply_4631_test rak_auto_apply_3401_test: sd_apply_test.c $(SRC)/ota_delta.c \
+    $(SRC)/detools/detools.c $(SRC)/sha256.c $(SRC)/ota_qspi.h $(SRC)/ota_hybrid_handoff.h
+	$(CC) $(CFLAGS) -DOTA_DELTA_HOST_TEST -DMOTA_QSPI_FLASH -DMOTA_RAK_AUTO_STORE \
+		-DMOTA_RAK_AUTO_RAK$(RAK_AUTO_BOARD) -DMOTA_RAM_ARENA_SIZE=65536 $(INC) \
+		sd_apply_test.c $(SRC)/detools/detools.c $(SRC)/sha256.c -o $@
+
+rak_auto_hybrid_4631_test rak_auto_hybrid_3401_test: readback_test.c $(SRC)/ota_delta.c \
+    $(SRC)/detools/detools.c $(SRC)/sha256.c $(SRC)/ota_qspi.h $(SRC)/ota_hybrid_handoff.h
+	$(CC) $(CFLAGS) -DOTA_DELTA_HOST_TEST -DMOTA_QSPI_FLASH -DMOTA_RAK_AUTO_STORE \
+		-DMOTA_RAK_AUTO_RAK$(RAK_AUTO_BOARD) -DMOTA_RAM_ARENA_SIZE=65536 $(INC) \
+		readback_test.c $(SRC)/detools/detools.c $(SRC)/sha256.c -o $@
+
 bootloader_mota_recovery_test: override CFLAGS += -DRECOVERY_ALLOW_ALL_BOARDS=1
 bootloader_mota_test bootloader_mota_recovery_test: bootloader_mota_test.c $(SRC)/ota_delta.c $(SRC)/detools/detools.c \
                       $(SRC)/sha256.c $(SRC)/usb/uf2/bootloader_image.c \
@@ -233,6 +247,10 @@ check: apply_sim readback_test readback_test_v7 readback_internal_test bootloade
 	./sd_apply_test
 	@echo
 	./qspi_apply_test
+	./rak_auto_apply_4631_test
+	./rak_auto_apply_3401_test
+	./rak_auto_hybrid_4631_test
+	./rak_auto_hybrid_3401_test
 	@echo
 	./bootloader_mota_test
 	./bootloader_mota_recovery_test
@@ -278,6 +296,7 @@ sanitize:
 	$(MAKE) CFLAGS="$(SANITIZER_CFLAGS)" check
 
 clean:
+	rm -f rak_auto_apply_4631_test rak_auto_apply_3401_test rak_auto_hybrid_4631_test rak_auto_hybrid_3401_test
 	rm -f uf2_volume_test
 	rm -f bootloader_mota_techo_lite_test
 	rm -f bootloader_mota_qspi_generic_test bootloader_mota_qspi_generic_v7_test
@@ -289,6 +308,7 @@ clean:
 # These executables include the retained handoff headers and/or image validator.
 # Rebuild them when the shared CRC implementation changes, not only its callers.
 apply_sim readback_test readback_test_v7 readback_internal_test \
+rak_auto_apply_4631_test rak_auto_apply_3401_test rak_auto_hybrid_4631_test rak_auto_hybrid_3401_test \
 bootloader_image_test bootloader_image_recovery_test sd_apply_test qspi_apply_test \
 bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test \
 bootloader_mota_qspi_generic_test bootloader_mota_qspi_generic_v7_test bootloader_mota_techo_lite_test \
@@ -297,3 +317,4 @@ bootloader_mota_recovery_test dfu_image_policy_test dfu_image_policy_recovery_te
 check: bootloader_image_recovery_test dfu_image_policy_recovery_test bootloader_mota_recovery_test
 check: bootloader_mota_qspi_generic_test bootloader_mota_qspi_generic_v7_test bootloader_mota_techo_lite_test
 check: uf2_volume_test
+check: rak_auto_apply_4631_test rak_auto_apply_3401_test rak_auto_hybrid_4631_test rak_auto_hybrid_3401_test

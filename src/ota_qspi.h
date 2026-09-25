@@ -9,6 +9,9 @@ extern "C" {
 #endif
 
 bool     ota_qspi_init(void);
+#if defined(MOTA_RAK_AUTO_STORE)
+void     ota_qspi_set_rak15001_source(bool slot_c);
+#endif
 void     ota_qspi_deinit(void);
 uint32_t ota_qspi_capacity(void);
 bool     ota_qspi_read(uint32_t offset, void *dst, uint32_t len);

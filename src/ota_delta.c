@@ -82,8 +82,9 @@ __attribute__((used, aligned(4))) const mota_bl_info_t g_mota_bl_info = {
 };
 
 #if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
-  #if !defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_CARD) || defined(MOTA_QSPI_FLASH)
-    #error "The retained mOTA RAM arena requires the internal-only nRF52840 profile"
+  #if (!defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) && !defined(MOTA_RAK_AUTO_STORE)) || \
+      defined(MOTA_SD_CARD) || (defined(MOTA_QSPI_FLASH) && !defined(MOTA_RAK_AUTO_STORE))
+    #error "The retained mOTA RAM arena requires an internal or RAK adaptive nRF52840 profile"
   #endif
 // A separate marker preserves the old mota_bl_info_t ABI, whose reserved bytes
 // are required to stay zero by already-deployed OTAFIX self-update validators.
@@ -483,6 +484,11 @@ static uint32_t g_qspi_total_size;
 static int      g_qspi_source;
 
 static int staged_read(uint32_t address_or_offset, void *dst, uint32_t len) {
+#if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
+  if (g_hybrid.container_total != 0u) {
+    return hybrid_staged_read(address_or_offset, dst, len);
+  }
+#endif
   if (g_qspi_source) {
     if (address_or_offset > g_qspi_total_size ||
         len > g_qspi_total_size - address_or_offset) {
@@ -1662,7 +1668,16 @@ bool ota_delta_check_and_apply(void) {
   }
 #endif
 #if defined(MOTA_QSPI_FLASH)
-  g_qspi_source = stage_handoff == GPREGRET2_OTA_STAGE_QSPI;
+  g_qspi_source = stage_handoff == GPREGRET2_OTA_STAGE_QSPI
+#if defined(MOTA_RAK_AUTO_RAK4631)
+               || stage_handoff == GPREGRET2_OTA_STAGE_RAK15001
+#endif
+                 ;
+#if defined(MOTA_RAK_AUTO_RAK4631)
+  if (g_qspi_source) {
+    ota_qspi_set_rak15001_source(stage_handoff == GPREGRET2_OTA_STAGE_RAK15001);
+  }
+#endif
 #endif
   uint32_t stage_ceiling =
     (stage_handoff == GPREGRET2_OTA_STAGE_EXPANDED

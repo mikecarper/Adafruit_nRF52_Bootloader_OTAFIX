@@ -45,6 +45,28 @@ static int g_settings_writes, g_app_write_while_valid, g_app_write_past_source;
 static uint32_t g_fault_write_address = UINT32_MAX, g_fault_erase_address = UINT32_MAX;
 static int g_fault_writes_remaining, g_fault_erases_remaining;
 static int g_fault_write_attempts, g_fault_erase_attempts;
+#if defined(MOTA_QSPI_FLASH)
+static int g_unexpected_qspi_calls;
+bool ota_qspi_init(void) { g_unexpected_qspi_calls++; return false; }
+void ota_qspi_deinit(void) { g_unexpected_qspi_calls++; }
+uint32_t ota_qspi_capacity(void) { g_unexpected_qspi_calls++; return 0; }
+bool ota_qspi_read(uint32_t offset, void *dst, uint32_t len) {
+    (void)offset; (void)dst; (void)len;
+    g_unexpected_qspi_calls++;
+    return false;
+}
+bool ota_qspi_write(uint32_t offset, const void *src, uint32_t len) {
+    (void)offset; (void)src; (void)len;
+    g_unexpected_qspi_calls++;
+    return false;
+}
+#if defined(MOTA_RAK_AUTO_STORE)
+void ota_qspi_set_rak15001_source(bool slot_c) {
+    (void)slot_c;
+    g_unexpected_qspi_calls++;
+}
+#endif
+#endif
 #if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
 static uint8_t               HYBRID_RAM[MOTA_HYBRID_ARENA_SIZE];
 static mota_hybrid_handoff_t HYBRID_HANDOFF;
@@ -195,7 +217,7 @@ static bool run_case(int stale, int* committed, int* matches) {
     return applied;
 }
 
-#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_RAK_AUTO_STORE)
 // Inflate the approved vector to at least payload_size without changing its detools stream: the decoder
 // accepts trailing padding, while the larger payload moves the bottom-aligned
 // container lower in the shared ED000 window. Merkle/signature verification belongs to the
@@ -477,7 +499,7 @@ int main(int argc, char** argv) {
     {
         const uint8_t original_codec = g_mota[64u];
         const uint8_t unsupported[] = {1u, 3u, 255u};
-#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_QSPI_FLASH)
         const uint16_t expected_mask = (1u << CODEC_FULL) | (1u << CODEC_INPLACE);
 #else
         const uint16_t expected_mask = 1u << CODEC_INPLACE;
@@ -702,7 +724,11 @@ int main(int argc, char** argv) {
         (void)hybrid_payload_offset;
         mota_hybrid_handoff_t zero_handoff = {0};
         int hybrid_ok = hybrid_mota != NULL;
-        if (hybrid_ok) {
+        if (hybrid_ok &&
+#if defined(MOTA_RAK_AUTO_STORE)
+            g_unexpected_qspi_calls == 0 &&
+#endif
+            true) {
             // Asking to inflate an already-large vector must never shrink or reject it.
             long retained_len = 0;
             uint32_t retained_offset = 0;

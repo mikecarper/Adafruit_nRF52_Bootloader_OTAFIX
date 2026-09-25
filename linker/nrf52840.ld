@@ -3,9 +3,9 @@
 SEARCH_DIR(.)
 /*GROUP(-lgcc -lc -lnosys)*/
 
-/* The build passes this symbol only for internal-only boards that reserve the
- * fixed mOTA SRAM arena. A zero default keeps every external-storage profile's
- * historical RAM layout unchanged. */
+/* The build passes this symbol for internal-only and RAK adaptive boards that
+ * reserve the fixed mOTA SRAM arena. Other external-storage profiles keep
+ * their historical RAM layout. */
 MOTA_RAM_ARENA_SIZE = DEFINED(__mota_ram_arena_size__) ? __mota_ram_arena_size__ : 0;
 
 MEMORY

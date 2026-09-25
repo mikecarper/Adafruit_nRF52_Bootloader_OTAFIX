@@ -62,8 +62,8 @@ ifneq ($(MOTA_RAM_ARENA_SIZE),0)
   ifneq ($(MCU_SUB_VARIANT),nrf52840)
     $(error MOTA_RAM_ARENA_SIZE requires an nRF52840 target)
   endif
-  ifeq ($(findstring -DMOTA_INTERNAL_BOOTLOADER_UPDATE=1,$(CFLAGS)),)
-    $(error MOTA_RAM_ARENA_SIZE requires the internal-only OTA profile)
+  ifeq ($(findstring -DMOTA_INTERNAL_BOOTLOADER_UPDATE=1,$(CFLAGS))$(findstring -DMOTA_RAK_AUTO_STORE=1,$(CFLAGS)),)
+    $(error MOTA_RAM_ARENA_SIZE requires the internal or RAK adaptive OTA profile)
   endif
   CFLAGS += -DMOTA_RAM_ARENA_SIZE=$(MOTA_RAM_ARENA_SIZE)
 endif

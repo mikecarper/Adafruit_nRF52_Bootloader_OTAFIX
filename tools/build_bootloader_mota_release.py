@@ -20,6 +20,15 @@ def release_boards(root: Path = Path(__file__).resolve().parents[1] / "src" / "b
     for directory in sorted(path for path in root.iterdir() if path.is_dir()):
         cmake = (directory / "board.cmake").read_text(encoding="ascii")
         make = (directory / "board.mk").read_text(encoding="ascii")
+        # Adaptive RAK loaders deliberately have no bootloader self-update:
+        # their combined internal/RAM/QSPI application updater fills 40 KiB.
+        if "set(MOTA_RAK_AUTO_STORE ON)" in cmake:
+            if ("-DMOTA_RAK_AUTO_STORE=1" not in make or
+                    "set(MOTA_QSPI_FLASH ON)" not in cmake or
+                    any(f"set(MOTA_{name}_BOOTLOADER_UPDATE ON)" in cmake
+                        for name in ("INTERNAL", "QSPI", "SD"))):
+                raise ValueError(f"{directory.name}: inconsistent adaptive bootloader profile")
+            continue
         backends = [name for name in ("INTERNAL", "QSPI", "SD")
                     if f"set(MOTA_{name}_BOOTLOADER_UPDATE ON)" in cmake]
         if len(backends) != 1 or "set(MCU_VARIANT nrf52840)" not in cmake:
