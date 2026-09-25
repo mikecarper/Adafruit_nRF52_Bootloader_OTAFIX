@@ -198,6 +198,43 @@ static void test_new_qspi_board_profiles(void) {
   free(pca_cmake);
 }
 
+static void test_rak_adaptive_profiles(void) {
+  const char *boards[] = {"wiscore_rak4631_auto", "wiscore_rak3401_auto"};
+  const char *names[] = {"4631_AUTO_DFU", "3401_AUTO_DFU"};
+  for (size_t i = 0; i < 2; ++i) {
+    char header[128], make_path[128], cmake_path[128];
+    char header_alt[128], make_alt[128], cmake_alt[128];
+    snprintf(header, sizeof(header), "../src/boards/%s/board.h", boards[i]);
+    snprintf(make_path, sizeof(make_path), "../src/boards/%s/board.mk", boards[i]);
+    snprintf(cmake_path, sizeof(cmake_path), "../src/boards/%s/board.cmake", boards[i]);
+    snprintf(header_alt, sizeof(header_alt), "src/boards/%s/board.h", boards[i]);
+    snprintf(make_alt, sizeof(make_alt), "src/boards/%s/board.mk", boards[i]);
+    snprintf(cmake_alt, sizeof(cmake_alt), "src/boards/%s/board.cmake", boards[i]);
+    char *board = load_file(header, header_alt);
+    char *make = load_file(make_path, make_alt);
+    char *cmake = load_file(cmake_path, cmake_alt);
+    assert(strstr(board, "MOTA_QSPI_SCK_PIN _PINNUM(0, 3)") != NULL);
+    assert(strstr(board, "MOTA_QSPI_CSN_PIN _PINNUM(0, 31)") != NULL);
+    assert(strstr(board, "MOTA_QSPI_IO0_PIN _PINNUM(0, 30)") != NULL);
+    assert(strstr(board, "MOTA_QSPI_IO1_PIN _PINNUM(0, 29)") != NULL);
+    assert(strstr(board, "MOTA_QSPI_SCK_FREQ NRF_QSPI_FREQ_32MDIV4") != NULL);
+    assert(strstr(make, "-DMOTA_RAK_AUTO_STORE=1") != NULL);
+    assert(strstr(cmake, "set(MOTA_RAK_AUTO_STORE ON)") != NULL);
+    assert(strstr(cmake, "set(MOTA_RAM_ARENA_SIZE 65536") != NULL);
+    assert(strstr(cmake, "BOOTLOADER_UPDATE ON") == NULL);
+    assert(strlen(names[i]) < 16u);
+    assert(strstr(make, names[i]) != NULL);
+    assert(strstr(cmake, names[i]) != NULL);
+    if (i == 0) {
+      assert(strstr(board, "MOTA_RAK_AUTO_RAK4631 1") != NULL);
+    } else {
+      assert(strstr(board, "MOTA_RAK_AUTO_RAK3401 1") != NULL);
+      assert(strstr(board, "MOTA_QSPI_AUX_CSN_PIN _PINNUM(0, 26)") != NULL);
+    }
+    free(board); free(make); free(cmake);
+  }
+}
+
 int main(void) {
   test_opcode_and_timing();
   test_wake_precedes_activation();
@@ -205,6 +242,7 @@ int main(void) {
   test_aux_deselect_precedes_wake();
   test_rak_w25q16_profiles();
   test_new_qspi_board_profiles();
+  test_rak_adaptive_profiles();
   puts("QSPI wake, switched-rail safety, and board profiles: PASS");
   return 0;
 }
