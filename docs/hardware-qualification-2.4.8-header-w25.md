@@ -18,6 +18,16 @@ the `OTAFIX2.4.8` GitHub release and tag were not updated by this trial.
   The running application then reported `QSPI W25Q16 header jedec=EF4015
   size=2048K` and `bootloader: QSPI apply OK`, with its original application
   version and serial console intact.
+- A direct RAK3401 Full Companion seeder delivered a full, unsigned, same-image
+  `.mota` to this RAK4631 over LoRa. The package had target `05F5FFAE`, MID
+  `B66A2A29`, 303 blocks of at most 2048 bytes, and SHA-256
+  `82fa88c21518ab0b605ac8422c826e4bcdcad3f0fb7cbb4beca5e5103bc594c8`.
+  The RAK4631 reported `ready to install 303/303` after staging on W25Q16.
+  `ota install` replied `verified (unsigned) full image on QSPI; rebooting into
+  bootloader`. USB disconnected and the application re-enumerated after about
+  25 seconds. Its `ver` and `ota self` matched the original image, `ota qspi`
+  still found JEDEC `EF4015`, and `ota status` reported `blrc:B8` with no
+  pending download. `B8` is the bootloader's successful application result.
 
 ## RAK3401 USB migration control
 
@@ -33,7 +43,11 @@ the `OTAFIX2.4.8` GitHub release and tag were not updated by this trial.
   serial console did not respond following warm resets. Unplugging and
   reconnecting only RAK3401 USB restored its version reply. The RAK3401
   had no external W25Q16 fitted for this trial.
+- The same RAK3401 successfully served the complete 303-block mOTA above.
+  After the host seeder detached, its text console stopped responding again,
+  including after a host-side USB data reset. This remains an application USB
+  session issue to investigate; it did not interrupt the completed transfer.
 
-The RAK4631 flash pattern test and QSPI capability check do not constitute a
-completed LoRa mOTA install. A full or delta external-flash bootloader apply
-remains to be tested separately.
+The RAK4631 W25Q16 full-image LoRa staging and bootloader apply are now
+qualified. RAK15001 and RAK3401 external-W25Q16 hardware modes have not yet
+received this same end-to-end test.
