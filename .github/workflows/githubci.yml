@@ -19,7 +19,7 @@ permissions:
 
 env:
   # 0x02040401 identifies the failed global TinyUSB-budget candidate.
-  # 0x02040703 identifies post-preview.2 USB/field-kit qualification, not a release.
+  # 0x02040703 identifies post-preview.2 qualification, not a release.
   OTAFIX_QUALIFICATION_VERSION: '0x02040703'
   OTAFIX_RELEASE_BUILD: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.release_build) }}
 
@@ -189,64 +189,9 @@ jobs:
             cmake --build "cmake-build-signed-dualbank-$board"
           done
 
-  field-firmware:
-    if: ${{ !startsWith(github.ref_name, 'R_') }}
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v7
-
-      - name: Checkout pinned USB-fixed MeshCore field firmware
-        uses: actions/checkout@v7
-        with:
-          repository: mikecarper/MeshCore
-          # Includes the application USB READY fix qualified with OTAFIX preview.2.
-          ref: 602dbfe3d9ad43630d9b4b6e8d9b6a73f4bc48b8
-          path: _meshcore
-
-      - name: Set up PlatformIO
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.13"
-
-      - name: Install PlatformIO and firmware build dependencies
-        run: python3 -m pip install platformio==6.1.19 intelhex==2.3.0
-
-      - name: Verify pinned USB backport
-        working-directory: _meshcore
-        run: |
-          git config core.abbrev 8
-          test "$(git rev-parse HEAD)" = 602dbfe3d9ad43630d9b4b6e8d9b6a73f4bc48b8
-          test "$(git rev-parse --short HEAD)" = 602dbfe3
-          python3 -B test/test_nrf52_usb_power.py -v
-
-      # Keep PlatformIO sequential: it shares and can clean its build tree.
-      - name: Build phone sources and the USB-fixed receiver prerequisite
-        working-directory: _meshcore
-        env:
-          FIRMWARE_VERSION: v1.17.1-dev
-        run: |
-          mkdir -p ../_field-deps
-          for target in Xiao_nrf52_companion_radio_full \
-                        GAT562_30S_Mesh_Kit_companion_radio_full \
-                        GAT562_30S_Mesh_Kit_repeater_lora_ota_no_external_sensors; do
-            bash build.sh build-firmware "$target"
-            install -m 644 out/"$target"-*.uf2 out/"$target"-*.zip \
-              out/"$target"-*.capabilities.json ../_field-deps/
-          done
-
-      - name: Validate images and record pinned-source provenance
-        run: python3 tools/check_field_firmware.py --artifacts-dir _field-deps
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: field-firmware
-          path: _field-deps/
-          if-no-files-found: error
-
   bootloader-mota:
     if: ${{ (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.release_build)) && !startsWith(github.ref_name, 'R_') }}
-    needs: [build, field-firmware]
+    needs: build
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout Code
@@ -258,26 +203,6 @@ jobs:
           repository: mikecarper/motatool
           ref: 5d9646cb08105245fb96c28450669c58763224bb
           path: _motatool
-
-      - name: Checkout pinned MeshCore Open field app
-        uses: actions/checkout@v7
-        with:
-          repository: mikecarper/meshcore-open
-          ref: 40e440e7d5c3cbc925b7701225ea1f023b0d9ae7
-          path: _meshcore-open
-
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: 3.41.2
-          channel: stable
-          cache: true
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -294,63 +219,10 @@ jobs:
           path: _release
           merge-multiple: true
 
-      - name: Download qualified field firmware
-        uses: actions/download-artifact@v8
-        with:
-          name: field-firmware
-          path: _field-deps
-
-      - name: Recheck field firmware provenance and checksums
-        run: python3 tools/check_field_firmware.py --artifacts-dir _field-deps --verify
-
       - name: Build motatool
         shell: bash
         run: |
           cargo build --release --locked --manifest-path _motatool/Cargo.toml
-
-      - name: Build isolated Android field app
-        shell: bash
-        working-directory: _meshcore-open
-        run: |
-          flutter pub get
-          flutter test \
-            test/services/ble_mota_catalog_test.dart \
-            test/services/lora_ota_bootloader_install_test.dart \
-            test/screens/lora_ota_screen_test.dart
-          sed -i \
-            's/applicationId = "com.meshcore.meshcore_open"/applicationId = "com.meshcore.meshcore_open.otafixfield"/' \
-            android/app/build.gradle.kts
-          sed -i \
-            's/android:label="MeshCore Open"/android:label="MeshCore Open OTAFIX Field"/' \
-            android/app/src/main/AndroidManifest.xml
-          sed -i '/^        ndk {$/,/^        }$/d' \
-            android/app/build.gradle.kts
-          grep -F 'applicationId = "com.meshcore.meshcore_open.otafixfield"' \
-            android/app/build.gradle.kts
-          grep -F 'android:label="MeshCore Open OTAFIX Field"' \
-            android/app/src/main/AndroidManifest.xml
-          ! grep -F 'abiFilters' android/app/build.gradle.kts
-          flutter build apk --release --no-pub --split-per-abi \
-            --build-name 9.5.1 --build-number 17
-          mkdir -p ../_field-deps
-          install -m 644 \
-            build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
-            ../_field-deps/MeshCore-Open-9.5.1-OTAFIX-field-arm64.apk
-          mapfile -t apk_abis < <(
-            unzip -Z1 \
-              ../_field-deps/MeshCore-Open-9.5.1-OTAFIX-field-arm64.apk \
-              | sed -n 's#^lib/\([^/]*\)/.*#\1#p' \
-              | sort -u
-          )
-          test "${apk_abis[*]}" = "arm64-v8a"
-          apksigner=$(
-            find "$ANDROID_SDK_ROOT/build-tools" -type f -name apksigner \
-              | sort -V \
-              | tail -n 1
-          )
-          test -n "$apksigner"
-          "$apksigner" verify --verbose --print-certs \
-            ../_field-deps/MeshCore-Open-9.5.1-OTAFIX-field-arm64.apk
 
       - name: Build signed bootloader mOTA bundle
         shell: bash
@@ -378,29 +250,6 @@ jobs:
             cd _mota-release
             sha256sum otafix_mota_update.py > otafix_mota_update.py.sha256
           )
-          python3 tools/build_gat562_field_kit.py \
-            --release-dir _mota-release \
-            --android-apk \
-              _field-deps/MeshCore-Open-9.5.1-OTAFIX-field-arm64.apk \
-            --xiao-companion-uf2 \
-              _field-deps/Xiao_nrf52_companion_radio_full-v1.17.1-dev-602dbfe3.uf2 \
-            --xiao-companion-zip \
-              _field-deps/Xiao_nrf52_companion_radio_full-v1.17.1-dev-602dbfe3.zip \
-            --xiao-companion-capabilities \
-              _field-deps/Xiao_nrf52_companion_radio_full-v1.17.1-dev-602dbfe3.capabilities.json \
-            --gat562-source-uf2 \
-              _field-deps/GAT562_30S_Mesh_Kit_companion_radio_full-v1.17.1-dev-602dbfe3.uf2 \
-            --gat562-source-zip \
-              _field-deps/GAT562_30S_Mesh_Kit_companion_radio_full-v1.17.1-dev-602dbfe3.zip \
-            --gat562-source-capabilities \
-              _field-deps/GAT562_30S_Mesh_Kit_companion_radio_full-v1.17.1-dev-602dbfe3.capabilities.json \
-            --gat562-receiver-uf2 \
-              _field-deps/GAT562_30S_Mesh_Kit_repeater_lora_ota_no_external_sensors-ota-v1.17.1-dev-602dbfe3.uf2 \
-            --gat562-receiver-zip \
-              _field-deps/GAT562_30S_Mesh_Kit_repeater_lora_ota_no_external_sensors-ota-v1.17.1-dev-602dbfe3.zip \
-            --gat562-receiver-capabilities \
-              _field-deps/GAT562_30S_Mesh_Kit_repeater_lora_ota_no_external_sensors-ota-v1.17.1-dev-602dbfe3.capabilities.json \
-            --tag "$GITHUB_REF_NAME"
 
       - name: Upload bootloader mOTA release bundle
         uses: actions/upload-artifact@v7
@@ -438,7 +287,7 @@ jobs:
 
   release:
     if: ${{ github.event_name == 'release' && !startsWith(github.ref_name, 'R_') }}
-    needs: [build, feature-builds, field-firmware, bootloader-mota, recovery-bundle]
+    needs: [build, feature-builds, bootloader-mota, recovery-bundle]
     runs-on: ubuntu-latest
     permissions:
       contents: write

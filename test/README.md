@@ -362,14 +362,11 @@ profiles, keeps
 `-fno-ipa-modref` workaround now that every bundled Nordic SVC wrapper carries
 its own `noipa` and memory barriers.
 
-The field-kit regression pins all three radios to the USB-fixed MeshCore
-revision. It checks CI coverage on the development branch and guards against
-release-only field-firmware testing, stale receiver versions, wrong targets,
-missing capabilities, inconsistent UF2/DFU images, and altered provenance.
-CI builds the real pinned radios and runs the application's USB handler tests;
-`tools/check_field_firmware.py --artifacts-dir DIR --verify` rechecks the
-generated `FIELD-FIRMWARE.json` and `FIELD-FIRMWARE.SHA256SUMS` before release
-packaging. These checks do not claim physical-radio qualification.
+The historical field-kit regression guards the pinned radio versions, target
+identity, capabilities, UF2/DFU consistency, and provenance for old releases.
+From OTAFIX 2.4.9 onward, releases do not build or publish the MeshCore Open
+field kit. Get the app from the separate MeshCore Open release linked in
+`docs/mota_signing.md`. These checks do not claim physical-radio qualification.
 
 The all-board helper regression keeps each board in an isolated build
 directory and resolves the exact current `OUT_NAME`; an older versioned `.out`

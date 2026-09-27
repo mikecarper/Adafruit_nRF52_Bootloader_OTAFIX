@@ -305,7 +305,7 @@ class BuildProfileTest(unittest.TestCase):
 
         workflow = WORKFLOW.read_text(encoding="utf-8")
         jobs = workflow.split("\njobs:\n", 1)[1]
-        for job in ("set-matrix", "feature-builds", "field-firmware",
+        for job in ("set-matrix", "feature-builds",
                     "bootloader-mota", "recovery-bundle", "release"):
             block = re.search(
                 rf"(?ms)^  {re.escape(job)}:\n(.*?)(?=^  [\w-]+:\n|\Z)", jobs

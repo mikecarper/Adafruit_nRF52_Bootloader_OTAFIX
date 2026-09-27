@@ -182,46 +182,24 @@ class QualifiedReleaseInventoryTest(unittest.TestCase):
         self.assertIn("ota bootloader install A1B2C3D4 0123456789ABCDEF", text)
         self.assertNotIn("--target-serial", text)
 
-    def test_release_workflow_builds_phone_field_components(self) -> None:
+    def test_release_workflow_omits_open_field_kit(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "githubci.yml").read_text(
             encoding="ascii"
         )
-        self.assertIn("repository: mikecarper/meshcore-open", workflow)
-        self.assertIn(field.MESHCORE_OPEN_COMMIT, workflow)
-        self.assertIn(field.MESHCORE_COMMIT, workflow)
-        self.assertEqual(
-            field.MESHCORE_BUILD_VERSION,
-            f"v1.17.1-dev-{field.MESHCORE_COMMIT[:8]}",
-        )
-        self.assertIn("git config core.abbrev 8", workflow)
+        self.assertNotIn("  field-firmware:", workflow)
+        self.assertNotIn("repository: mikecarper/meshcore-open", workflow)
+        self.assertNotIn("flutter build apk", workflow)
+        self.assertNotIn("tools/build_gat562_field_kit.py", workflow)
+        self.assertNotIn("field-kit.zip", workflow)
+        self.assertNotIn(".apk", workflow)
+        self.assertIn("  bootloader-mota:", workflow)
+        self.assertIn("needs: build", workflow)
+        self.assertIn("tools/build_bootloader_mota_release.py", workflow)
         self.assertIn(
-            f'test "$(git rev-parse --short HEAD)" = '
-            f"{field.MESHCORE_COMMIT[:8]}",
+            "needs: [build, feature-builds, bootloader-mota, recovery-bundle]",
             workflow,
         )
-        self.assertIn("flutter build apk", workflow)
-        self.assertIn(
-            "python3 -m pip install platformio==6.1.19 intelhex==2.3.0",
-            workflow,
-        )
-        self.assertIn(field.XIAO_COMPANION_ZIP, workflow)
-        self.assertIn(field.GAT562_SOURCE_ZIP, workflow)
-        self.assertIn(field.GAT562_RECEIVER_ZIP, workflow)
-        self.assertIn(field.GAT562_RECEIVER_CAPABILITIES, workflow)
-        self.assertIn("tools/build_gat562_field_kit.py", workflow)
-        firmware_job = workflow.split("  field-firmware:\n", 1)[1].split(
-            "  bootloader-mota:\n", 1
-        )[0]
-        self.assertNotIn("github.event_name == 'release'", firmware_job)
-        self.assertIn("test/test_nrf52_usb_power.py -v", firmware_job)
-        self.assertIn("tools/check_field_firmware.py", firmware_job)
-        self.assertIn(field.GAT562_RECEIVER_TARGET, firmware_job)
-        self.assertNotIn("secrets.", firmware_job)
-        self.assertIn("needs: [build, field-firmware]", workflow)
-        self.assertIn("--artifacts-dir _field-deps --verify", workflow)
         self.assertEqual(workflow.count("pattern: bootloader-*"), 2)
-        self.assertNotIn("51ce1f8f", workflow)
-        self.assertNotIn("4d5ccbdd", workflow)
 
     def test_field_builder_emits_one_checked_gat562_directory(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

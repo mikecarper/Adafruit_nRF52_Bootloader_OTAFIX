@@ -81,6 +81,10 @@ python3 -m pip install --user pyserial
 python3 tools/otafix_mota_update.py
 ```
 
+For the current Android app, use the separate
+[MeshCore Open 9.5.5 RC2 release](https://github.com/mikecarper/meshcore-open/releases/tag/v9.5.5-rc.2).
+From OTAFIX 2.4.9 onward, releases do not bundle the app or the field kit.
+
 OTAFIX 2.4.6 also publishes
 `GAT562-OTAFIX-2.4.6-LoRa-field-kit.zip`. That archive is a phone-driven field
 kit for the exact `gat562` profile: Android talks over encrypted Bluetooth to

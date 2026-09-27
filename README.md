@@ -9,7 +9,7 @@ before using it: first install the bridge matching the **installed bootloader**,
 then the normal bootloader matching the **physical board**. Recovery packages are
 separately labelled and must not be left installed for normal operation.
 
-## OTAFIX 2.4.7 qualification (unreleased)
+## Development build qualification
 
 Development pushes on `feature/ota-delta-apply`, as well as `master`, pull
 requests, and manual runs, build with packed test version `0x02040703`
@@ -21,18 +21,12 @@ the full Git/test description retained in filenames. This keeps growing Git
 descriptions from overflowing the signed display builds; production version
 text, signature checks, and the fixed linker envelope are unchanged.
 
-The field-kit XIAO and GAT562 Full Companion sources and GAT562 30S receiver
-prerequisite now share immutable MeshCore commit
-`602dbfe3d9ad43630d9b4b6e8d9b6a73f4bc48b8`, including the application USB READY
-backport. A separate CI job runs its USB regressions, builds all three radios
-sequentially, checks the UF2/DFU image pairs, board/SoftDevice/version identities
-and required capabilities, and records source provenance and SHA-256 checksums.
-Release packaging revalidates that exact artifact; it no longer downloads the
-pre-fix receiver. The phone APK pin is unchanged. Updating only a bootloader
-does not replace the USB driver in an already installed application.
+From OTAFIX 2.4.9 onward, releases do not bundle MeshCore Open or a field kit.
+Get the Android app from the separate
+[MeshCore Open 9.5.5 RC2 release](https://github.com/mikecarper/meshcore-open/releases/tag/v9.5.5-rc.2).
 
 These are build/host checks, not new physical LoRa, phone DFU, cold-start, or
-bootloader rollback qualification. No 2.4.7 release is published by a push.
+bootloader rollback qualification. No release is published by a push.
 
 ## Changes in OTAFIX 2.4.6
 
