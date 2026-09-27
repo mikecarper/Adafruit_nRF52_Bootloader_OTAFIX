@@ -30,10 +30,6 @@ LATEST_PAGE = f"https://github.com/{REPOSITORY}/releases/latest"
 OFFICIAL_PUBLIC_KEY = (
     "272564CC588D3D122285A15E6E2566D2ABE7177BB7EA1D1E41B23B29F0F85D2D"
 )
-ADAPTIVE_RECOVERY_IDENTITIES = {
-    ("239A0029", "D04AB3AB", "3401_AUTO_DFU", 2, 0x16),
-    ("239A0029", "FEEAFD1B", "4631_AUTO_DFU", 2, 0x16),
-}
 BUNDLE_RE = re.compile(r"^OTAFIX-(.+)-bootloader-mota\.zip$")
 RELEASE_TAG_RE = re.compile(
     r"^(?:v?[0-9]+\.[0-9]+\.[0-9]+-)?"
@@ -92,11 +88,6 @@ class NodeIdentity:
     crc: str
     abi: int
     caps: int
-
-
-def is_adaptive_recovery(identity: NodeIdentity) -> bool:
-    return (identity.board_id, identity.target_id, identity.name,
-            identity.abi, identity.caps) in ADAPTIVE_RECOVERY_IDENTITIES
 
 
 @dataclass(frozen=True)
@@ -331,8 +322,7 @@ def query_node(meshcli: str | None, port: str) -> tuple[Version, str, NodeIdenti
     identity_reply = mesh_command(meshcli, port, "ota bootloader")
     version = parse_version(version_reply)
     identity = parse_identity(identity_reply)
-    if not (is_adaptive_recovery(identity) or
-            (identity.abi >= 3 and identity.caps in (0x09, 0x0A, 0x0E))):
+    if identity.abi < 3 or identity.caps not in (0x09, 0x0A, 0x0E):
         raise UpdateError(
             f"unsupported bootloader capability: ABI {identity.abi}, caps 0x{identity.caps:02X}"
         )
@@ -341,7 +331,7 @@ def query_node(meshcli: str | None, port: str) -> tuple[Version, str, NodeIdenti
 
 def choose_target(meshcli: str | None) -> tuple[str, Version, str, NodeIdentity]:
     candidates: list[tuple[str, Version, str, NodeIdentity]] = []
-    print("\nScanning serial ports for OTAFIX bootloader update targets...")
+    print("\nScanning serial ports for self-update-capable OTAFIX targets...")
     for port in serial_ports():
         try:
             version, reply, identity = query_node(meshcli, port)
@@ -679,9 +669,6 @@ def stop_process(process: subprocess.Popen[str] | None) -> None:
 def install_update(args: argparse.Namespace, meshcli: str | None, motatool: str,
                    target_port: str, current: Version,
                    identity: NodeIdentity, release: Release) -> None:
-    recovery = is_adaptive_recovery(identity)
-    if recovery and current.order >= release.version.order:
-        raise UpdateError("adaptive RAK recovery requires a newer bootloader version")
     package_path, package = prepare_package(release, identity, args.cache, motatool)
     expected_mid = str(package["merkle_root"]).upper()
     expected_hash = str(package["image_sha256"])[:16].upper()
@@ -882,30 +869,18 @@ def install_update(args: argparse.Namespace, meshcli: str | None, motatool: str,
                 except (UpdateError, subprocess.TimeoutExpired) as exc:
                     last_error = str(exc)
                     continue
-                if (new_identity.board_id, new_identity.target_id,
-                    new_identity.name, new_identity.abi, new_identity.caps) != (
-                    identity.board_id, identity.target_id, identity.name,
-                    identity.abi, identity.caps):
+                if new_identity.target_id != identity.target_id:
                     raise UpdateError("bootloader target identity changed after installation")
                 if new_version.order != release.version.order:
                     last_error = f"node reports {new_version.label}"
                     continue
-                if "no download" not in status:
+                if "blup:C8" not in status or "no download" not in status:
                     last_error = status
                     continue
-                if recovery and ("blup:CE" in status or
-                                 new_identity.crc == identity.crc):
-                    last_error = status
-                    continue
-                if not recovery and "blup:C8" not in status:
-                    last_error = status
-                    continue
-                result = (
-                    "identity CRC changed after application-owned MBR recovery"
-                    if recovery else "bootloader result blup:C8"
+                print(
+                    f"SUCCESS: {package['board']} now runs OTAFIX "
+                    f"{new_version.label}; bootloader result blup:C8."
                 )
-                print(f"SUCCESS: {package['board']} now runs OTAFIX "
-                      f"{new_version.label}; {result}.")
                 return
             raise UpdateError(f"post-reboot verification timed out: {last_error}")
         finally:
@@ -1004,14 +979,14 @@ def main() -> int:
         return 0 if current.order >= release.version.order else 10
 
     while True:
-        recovery = is_adaptive_recovery(identity)
-        actions = ["Refresh version and latest-release check"]
-        if not recovery or current.order < release.version.order:
-            actions.append("Download, verify, and install latest over LoRa")
-        actions.extend(["Show bootloader identity", "Exit"])
         action = choose(
             "OTAFIX menu",
-            actions,
+            [
+                "Refresh version and latest-release check",
+                "Download, verify, and install latest over LoRa (upgrade/reinstall/rollback)",
+                "Show bootloader identity",
+                "Exit",
+            ],
             default=1 if current.order < release.version.order else 0,
         )
         if action.startswith("Refresh"):
@@ -1020,8 +995,6 @@ def main() -> int:
             release = resolve_release(args.release_bundle)
             if current.order < release.version.order:
                 relation = "upgrade available"
-            elif is_adaptive_recovery(identity):
-                relation = "adaptive recovery requires a newer release"
             elif current.order == release.version.order:
                 relation = "equal-version reinstall available"
             else:

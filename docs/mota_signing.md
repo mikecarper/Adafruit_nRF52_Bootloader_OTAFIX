@@ -24,15 +24,16 @@ The second command lists the trusted keys so the addition can be confirmed.
 Only the public key is distributed. The official private key is stored outside
 the source tree and in the repository's release-only GitHub Actions secret.
 
-The adaptive RAK3401 and RAK4631 profiles require the updated MeshCore
-`*_repeater_unified_lora_ota` application before a LoRa bootloader recovery.
-Their installed ABI-2 bootloaders do not self-update. The application verifies
-the exact-board signed package, copies it into the internal recovery slot,
-and invokes the MBR after its LoRa reply. Use `wiscore_rak3401_auto` only for
-`3401_AUTO_DFU` and `wiscore_rak4631_auto` only for `4631_AUTO_DFU`; both
-report capability `0x16`. The installed version must be older than the signed
-candidate, and the live application and bank settings must leave `0xE2000`
-onward free. A node unable to run this application needs local UF2/DFU or SWD.
+The adaptive RAK3401 and RAK4631 profiles do not support bootloader mOTA.
+On OTAFIX 2.4.8, the bootloader locks `0xF4000..0x100000` before starting the
+application, including the MBR parameter page at `0xFE000`. A signed package
+verified by MeshCore cannot invoke the MBR copy through that lock. A physical
+RAK3401 test confirmed an MBR bus fault with the installed bootloader
+unchanged. Use the exact-board UF2 or local DFU package to migrate these
+profiles.
+
+The SWD trace and restoration checks are in
+[the adaptive RAK hardware result](rak-adaptive-recovery-hardware-20260927.md).
 
 After trusting the key, use MeshCore's explicit bootloader flow:
 
@@ -71,9 +72,7 @@ from a directly connected MeshCore target, queries the latest GitHub release,
 and reports whether an update is needed. Its install menu downloads the signed
 bundle, verifies GitHub and package SHA-256 digests, requires the pinned
 official signer, selects by the bootloader's exact target identity and storage
-capability, and runs the explicit LoRa bootloader workflow. The adaptive RAK
-option requires the exact ABI-2/`0x16` identity and offers only a newer-version
-recovery; all other profiles keep their self-update path.
+capability, and runs the explicit LoRa bootloader workflow.
 
 Install `meshcli`, `motatool`, and PySerial first. Then run:
 
