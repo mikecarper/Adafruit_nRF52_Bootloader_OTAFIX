@@ -14,20 +14,34 @@ import subprocess
 import zipfile
 
 
+ADAPTIVE_RECOVERY_BOARDS = {
+    "wiscore_rak3401_auto": ("3401_AUTO_DFU", 0xD04AB3AB),
+    "wiscore_rak4631_auto": ("4631_AUTO_DFU", 0xFEEAFD1B),
+}
+
+
 def release_boards(root: Path = Path(__file__).resolve().parents[1] / "src" / "boards") -> tuple[str, ...]:
     """Require complete release coverage, never silently omit a new board."""
     boards = []
     for directory in sorted(path for path in root.iterdir() if path.is_dir()):
         cmake = (directory / "board.cmake").read_text(encoding="ascii")
         make = (directory / "board.mk").read_text(encoding="ascii")
-        # Adaptive RAK loaders deliberately have no bootloader self-update:
-        # their combined internal/RAM/QSPI application updater fills 40 KiB.
+        # Adaptive RAK loaders have no self-update. A matching MeshCore
+        # application performs the authenticated MBR recovery instead.
         if "set(MOTA_RAK_AUTO_STORE ON)" in cmake:
-            if ("-DMOTA_RAK_AUTO_STORE=1" not in make or
+            expected = ADAPTIVE_RECOVERY_BOARDS.get(directory.name)
+            expected_name = expected[0] if expected is not None else None
+            if (expected is None or
+                    f"set(DEVICE_NAME {expected_name})" not in cmake or
+                    f"-DDEVICE_NAME='\"{expected_name}\"'" not in make or
+                    "set(MCU_VARIANT nrf52840)" not in cmake or
+                    "-DMOTA_RAK_AUTO_STORE=1" not in make or
                     "set(MOTA_QSPI_FLASH ON)" not in cmake or
+                    "-DMOTA_QSPI_FLASH=1" not in make or
                     any(f"set(MOTA_{name}_BOOTLOADER_UPDATE ON)" in cmake
                         for name in ("INTERNAL", "QSPI", "SD"))):
-                raise ValueError(f"{directory.name}: inconsistent adaptive bootloader profile")
+                raise ValueError(f"{directory.name}: inconsistent adaptive recovery profile")
+            boards.append(directory.name)
             continue
         backends = [name for name in ("INTERNAL", "QSPI", "SD")
                     if f"set(MOTA_{name}_BOOTLOADER_UPDATE ON)" in cmake]
@@ -138,6 +152,10 @@ def parse_package(path: Path, board: str, expected_version: int,
     )
     if not expected:
         raise ValueError(f"{path.name}: bootloader package contract mismatch")
+    if board in ADAPTIVE_RECOVERY_BOARDS:
+        device_name, exact_target = ADAPTIVE_RECOVERY_BOARDS[board]
+        if target_id != exact_target or hw_id != f"NRF_BL_239A0029_{device_name}":
+            raise ValueError(f"{path.name}: adaptive recovery identity mismatch")
 
     return {
         "board": board,
@@ -235,9 +253,13 @@ def main() -> int:
     readme_path.write_text(
         f"""OTAFIX {version_label} signed bootloader mOTA packages
 
-These are full, exact-board, format-3 bootloader packages. They update any
-compatible older self-update-capable bootloader to {version_label}; the package
-does not contain or require a source-version delta.
+These are full, exact-board, format-3 bootloader packages. The 27 ordinary
+profiles update a compatible older self-update-capable bootloader. The
+wiscore_rak3401_auto and wiscore_rak4631_auto packages require the matching
+MeshCore adaptive recovery application: their installed ABI-2 bootloaders
+cannot apply a bootloader package themselves. Install that application first.
+Adaptive RAK recovery requires an installed version older than {version_label}.
+No package contains or requires a source-version delta.
 
 Official signing public key:
 {public_text.upper()}
@@ -258,6 +280,12 @@ installed self-update-capable bootloader before their first remote update.
 The live application must fit below the temporary 0xE0000 scratch range;
 oversized applications are rejected before erase. SenseCAP Solar P1 retains
 its SCAP_DFU carrier identity and is not interchangeable with XIAO_DFU.
+
+Adaptive RAK recovery also requires a hash-valid live EndF and bank settings
+showing that the complete application stops by 0xE2000, exact board and
+SoftDevice continuity, and the 0x16 storage capability. MeshCore copies the
+verified image to 0xE2000..0xEC000 and calls the MBR after replying over LoRa.
+A node unable to run the recovery application needs local UF2/DFU or SWD.
 
 The gat562 profile covers the GAT562 30S Kit, Mesh Tracker Pro, EVB Pro / 30S
 Pod, and Solar Relay carriers. It does not cover the GAT562 Mesh Watch 13,

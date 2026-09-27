@@ -24,6 +24,16 @@ The second command lists the trusted keys so the addition can be confirmed.
 Only the public key is distributed. The official private key is stored outside
 the source tree and in the repository's release-only GitHub Actions secret.
 
+The adaptive RAK3401 and RAK4631 profiles require the updated MeshCore
+`*_repeater_unified_lora_ota` application before a LoRa bootloader recovery.
+Their installed ABI-2 bootloaders do not self-update. The application verifies
+the exact-board signed package, copies it into the internal recovery slot,
+and invokes the MBR after its LoRa reply. Use `wiscore_rak3401_auto` only for
+`3401_AUTO_DFU` and `wiscore_rak4631_auto` only for `4631_AUTO_DFU`; both
+report capability `0x16`. The installed version must be older than the signed
+candidate, and the live application and bank settings must leave `0xE2000`
+onward free. A node unable to run this application needs local UF2/DFU or SWD.
+
 After trusting the key, use MeshCore's explicit bootloader flow:
 
 ```text
@@ -61,7 +71,9 @@ from a directly connected MeshCore target, queries the latest GitHub release,
 and reports whether an update is needed. Its install menu downloads the signed
 bundle, verifies GitHub and package SHA-256 digests, requires the pinned
 official signer, selects by the bootloader's exact target identity and storage
-capability, and runs the explicit LoRa bootloader workflow.
+capability, and runs the explicit LoRa bootloader workflow. The adaptive RAK
+option requires the exact ABI-2/`0x16` identity and offers only a newer-version
+recovery; all other profiles keep their self-update path.
 
 Install `meshcli`, `motatool`, and PySerial first. Then run:
 
@@ -160,7 +172,7 @@ file mode:
 ```bash
 git clone https://github.com/mikecarper/motatool.git
 cd motatool
-git checkout 60d9174d531160722497f21cea8ab484291cd2d7
+git checkout 5d9646cb08105245fb96c28450669c58763224bb
 cargo build --release --locked
 umask 077
 ./target/release/motatool keygen --out custom-otafix.key

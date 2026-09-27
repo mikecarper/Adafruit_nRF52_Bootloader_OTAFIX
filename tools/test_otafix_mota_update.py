@@ -90,6 +90,41 @@ class CompanionTerminalTests(unittest.TestCase):
         )
 
 
+class AdaptiveRecoveryTests(unittest.TestCase):
+    def test_only_exact_adaptive_identities_can_use_abi_two(self) -> None:
+        version = "OTAFIX2.4.8"
+        for target, name in (("D04AB3AB", "3401_AUTO_DFU"),
+                             ("FEEAFD1B", "4631_AUTO_DFU")):
+            identity = (f"BL board=239A0029 target={target} name={name} "
+                        "crc=12345678 abi=2 caps=16")
+            with self.subTest(name=name), mock.patch.object(
+                updater, "mesh_command", side_effect=[version, identity]
+            ):
+                _, _, parsed = updater.query_node(None, "/dev/test")
+                self.assertTrue(updater.is_adaptive_recovery(parsed))
+        for target, name, caps in (("D04AB3AC", "3401_AUTO_DFU", "16"),
+                                   ("D04AB3AB", "4631_AUTO_DFU", "16"),
+                                   ("D04AB3AB", "3401_AUTO_DFU", "0A")):
+            identity = (f"BL board=239A0029 target={target} name={name} "
+                        f"crc=12345678 abi=2 caps={caps}")
+            with self.subTest(identity=identity), mock.patch.object(
+                updater, "mesh_command", side_effect=[version, identity]
+            ), self.assertRaisesRegex(updater.UpdateError, "unsupported bootloader capability"):
+                updater.query_node(None, "/dev/test")
+
+    def test_recovery_refuses_equal_version_before_fetch(self) -> None:
+        identity = updater.NodeIdentity(
+            "239A0029", "D04AB3AB", "3401_AUTO_DFU", "12345678", 2, 0x16
+        )
+        current = updater.Version(2, 4, 8, 255, "2.4.8")
+        release = mock.Mock(version=updater.Version(2, 4, 8, 255, "2.4.8"))
+        with mock.patch.object(updater, "prepare_package") as prepare:
+            with self.assertRaisesRegex(updater.UpdateError, "requires a newer"):
+                updater.install_update(mock.Mock(), None, "motatool", "/dev/test",
+                                       current, identity, release)
+            prepare.assert_not_called()
+
+
 class OfflineFieldBundleTests(unittest.TestCase):
     def write_bundle(self, directory: str, key: str | None = None) -> Path:
         path = Path(directory) / "GAT562-OTAFIX-2.4.5-LoRa-bundle.zip"
