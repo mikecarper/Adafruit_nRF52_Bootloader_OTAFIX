@@ -95,6 +95,10 @@ if(NOT CMAKE_C_COMPILER_ID STREQUAL "GNU" OR
 endif()
 
 set(CMAKE_EXECUTABLE_SUFFIX .elf)
+set(STARTUP_SOURCE ${NRFX_DIR}/mdk/gcc_startup_${MCU_VARIANT}.S)
+if (MCU_VARIANT STREQUAL "nrf52840")
+  set(STARTUP_SOURCE src/startup_nrf52840.S)
+endif ()
 add_executable(bootloader
   # src
   src/dfu_ble_svc.c
@@ -133,7 +137,7 @@ add_executable(bootloader
   ${SDK_DIR}/libraries/hci/hci_transport.c
   ${SDK_DIR}/libraries/util/nrf_assert.c
   # startup
-  ${NRFX_DIR}/mdk/gcc_startup_${MCU_VARIANT}.S
+  ${STARTUP_SOURCE}
   )
 
 if (SECURE_DFU_TEST)
@@ -183,8 +187,8 @@ if (MOTA_SD_BOOTLOADER_UPDATE)
 endif ()
 
 if (MOTA_INTERNAL_BOOTLOADER_UPDATE)
-  if (MOTA_QSPI_FLASH OR MOTA_SD_CARD)
-    message(FATAL_ERROR "MOTA_INTERNAL_BOOTLOADER_UPDATE requires internal-only OTA storage")
+  if ((MOTA_QSPI_FLASH AND NOT MOTA_RAK_AUTO_STORE) OR MOTA_SD_CARD)
+    message(FATAL_ERROR "MOTA_INTERNAL_BOOTLOADER_UPDATE requires internal or RAK adaptive OTA storage")
   endif ()
   if (NOT MCU_VARIANT STREQUAL "nrf52840")
     message(FATAL_ERROR "MOTA_INTERNAL_BOOTLOADER_UPDATE requires the nRF52840 1 MiB flash layout")
@@ -303,6 +307,7 @@ target_compile_options(bootloader PUBLIC
   )
 
 target_compile_definitions(bootloader PUBLIC
+  DETOOLS_CONFIG_IN_PLACE_RESUME=0
   DETOOLS_CONFIG_COMPRESSION_NONE=0
   SOFTDEVICE_PRESENT
   CONFIG_GPIO_AS_PINRESET

@@ -213,7 +213,30 @@ bool ota_qspi_write(uint32_t offset, const void *src, uint32_t len) {
 }
 #endif
 
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+// Application-only tests must never hand control to the MBR.
+int otah_crc_bound_app_size(uint32_t *size) {
+  *size = g_size;
+  return g_bank0 == 0x01u && g_crc != 0u;
+}
+const uint8_t *otah_flash_pointer(uint32_t address, uint32_t len) {
+  return (uint64_t)address + len <= FLASH_LEN ? FLASH + address : NULL;
+}
+int otah_mbr_copy_bl(uint32_t source, uint32_t word_count) {
+  (void)source; (void)word_count;
+  abort();
+}
+#endif
+
 #include "ota_delta.c"
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+int otah_installed_boot_info(bootloader_image_info_t *info) {
+  (void)info;
+  return 0;
+}
+uint16_t otah_runtime_softdevice_fwid(void) { return 0x00B6u; }
+#endif
+
 
 static void wr32(uint8_t *p, uint32_t value) {
   p[0] = (uint8_t)value;

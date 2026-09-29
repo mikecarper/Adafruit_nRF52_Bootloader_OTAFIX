@@ -19,10 +19,14 @@ def asset_labels(assets, tag):
     labels = {}
     seen = set()
     available = assets_by_name(assets)
-    for profile, description, identity in (
+    # Preserve truthful labels when maintaining historical two-profile releases.
+    historical = any(asset["name"].startswith(f"wiscore_rak4631_board_bootloader-{tag}_")
+                     for asset in assets)
+    profiles = (
         ("auto", "unified app, adaptive storage", "4631_AUTO_DFU"),
         ("board", "internal-only storage", "4631_DFU"),
-    ):
+    ) if historical else (("auto", "compatible adaptive storage", "4631_DFU"),)
+    for profile, description, identity in profiles:
         base = f"wiscore_rak4631_{profile}_bootloader-{tag}"
         types = {
             f"update-{base}_mbr.uf2": "bootloader UF2",
@@ -41,8 +45,8 @@ def asset_labels(assets, tag):
                 raise ValueError(f"duplicate RAK4631 release asset: {key}")
             seen.add(key)
             labels[name] = f"RAK4631 {description} - {kind} ({identity})"
-    if len(labels) != 6:
-        raise ValueError("expected six RAK4631 release assets")
+    if len(labels) != 3 * len(profiles):
+        raise ValueError("expected three RAK4631 release assets per profile")
     return labels
 
 

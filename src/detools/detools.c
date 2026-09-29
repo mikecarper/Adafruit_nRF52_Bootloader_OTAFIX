@@ -32,6 +32,7 @@
 
 #include <stdlib.h>
 #include "detools.h"
+#include <stddef.h>
 
 /* Patch types. */
 #define PATCH_TYPE_SEQUENTIAL                               0
@@ -1528,6 +1529,7 @@ int detools_apply_patch_finalize(struct detools_apply_patch_t *self_p)
 
 static int in_place_all_steps_completed(struct detools_apply_patch_in_place_t *self_p)
 {
+#if DETOOLS_CONFIG_IN_PLACE_RESUME == 1
     int res;
 
     res = 0;
@@ -1541,11 +1543,16 @@ static int in_place_all_steps_completed(struct detools_apply_patch_in_place_t *s
     }
 
     return (res);
+#else
+    (void)self_p;
+    return (0);
+#endif
 }
 
 static int in_place_is_step_completed(struct detools_apply_patch_in_place_t *self_p,
                                       bool *res_p)
 {
+#if DETOOLS_CONFIG_IN_PLACE_RESUME == 1
     int res;
     int completed_step;
 
@@ -1562,10 +1569,16 @@ static int in_place_is_step_completed(struct detools_apply_patch_in_place_t *sel
     }
 
     return (0);
+#else
+    (void)self_p;
+    *res_p = false;
+    return (0);
+#endif
 }
 
 static int in_place_next_step(struct detools_apply_patch_in_place_t *self_p)
 {
+#if DETOOLS_CONFIG_IN_PLACE_RESUME == 1
     int res;
     bool is_step_completed;
 
@@ -1590,6 +1603,10 @@ static int in_place_next_step(struct detools_apply_patch_in_place_t *self_p)
     self_p->ongoing_step++;
 
     return (res);
+#else
+    (void)self_p;
+    return (0);
+#endif
 }
 
 static int in_place_mem_read(struct detools_apply_patch_in_place_t *self_p,
@@ -1746,79 +1763,27 @@ static int in_place_process_init_fixed_header(
     return (0);
 }
 
-static int in_place_process_init_memory_size(
+/* The four unsigned geometry fields share the same streaming decoder.
+ * Offset selection avoids four copies of its state/error handling. */
+static int in_place_process_init_geometry(
     struct detools_apply_patch_in_place_t *self_p)
 {
-    int res;
-    int memory_size;
-
-    res = chunk_unpack_header_size(&self_p->chunk, &self_p->size, &memory_size);
-
+    static const uint16_t offsets[] = {
+        offsetof(struct detools_apply_patch_in_place_t, memory_size),
+        offsetof(struct detools_apply_patch_in_place_t, segment_size),
+        offsetof(struct detools_apply_patch_in_place_t, shift_size),
+        offsetof(struct detools_apply_patch_in_place_t, from_size)
+    };
+    int value;
+    int res = chunk_unpack_header_size(&self_p->chunk, &self_p->size, &value);
     if (res != 0) {
         return (res);
     }
-
-    self_p->memory_size = (size_t)memory_size;
-    self_p->init_state = detools_apply_patch_in_place_init_state_segment_size_t;
+    size_t index = self_p->init_state - detools_apply_patch_in_place_init_state_memory_size_t;
+    size_t *field = (size_t *)((uint8_t *)self_p + offsets[index]);
+    *field = (size_t)value;
+    self_p->init_state++;
     self_p->size.state = detools_unpack_usize_state_first_t;
-
-    return (0);
-}
-
-static int in_place_process_init_segment_size(
-    struct detools_apply_patch_in_place_t *self_p)
-{
-    int res;
-    int segment_size;
-
-    res = chunk_unpack_header_size(&self_p->chunk, &self_p->size, &segment_size);
-
-    if (res != 0) {
-        return (res);
-    }
-
-    self_p->segment_size = (size_t)segment_size;
-    self_p->init_state = detools_apply_patch_in_place_init_state_shift_size_t;
-    self_p->size.state = detools_unpack_usize_state_first_t;
-
-    return (0);
-}
-
-static int in_place_process_init_shift_size(
-    struct detools_apply_patch_in_place_t *self_p)
-{
-    int res;
-    int shift_size;
-
-    res = chunk_unpack_header_size(&self_p->chunk, &self_p->size, &shift_size);
-
-    if (res != 0) {
-        return (res);
-    }
-
-    self_p->shift_size = (size_t)shift_size;
-    self_p->init_state = detools_apply_patch_in_place_init_state_from_size_t;
-    self_p->size.state = detools_unpack_usize_state_first_t;
-
-    return (0);
-}
-
-static int in_place_process_init_from_size(
-    struct detools_apply_patch_in_place_t *self_p)
-{
-    int res;
-    int from_size;
-
-    res = chunk_unpack_header_size(&self_p->chunk, &self_p->size, &from_size);
-
-    if (res != 0) {
-        return (res);
-    }
-
-    self_p->from_size = (size_t)from_size;
-    self_p->init_state = detools_apply_patch_in_place_init_state_to_size_t;
-    self_p->size.state = detools_unpack_usize_state_first_t;
-
     return (0);
 }
 
@@ -1879,19 +1844,10 @@ static int in_place_process_init(struct detools_apply_patch_in_place_t *self_p)
         break;
 
     case detools_apply_patch_in_place_init_state_memory_size_t:
-        res = in_place_process_init_memory_size(self_p);
-        break;
-
     case detools_apply_patch_in_place_init_state_segment_size_t:
-        res = in_place_process_init_segment_size(self_p);
-        break;
-
     case detools_apply_patch_in_place_init_state_shift_size_t:
-        res = in_place_process_init_shift_size(self_p);
-        break;
-
     case detools_apply_patch_in_place_init_state_from_size_t:
-        res = in_place_process_init_from_size(self_p);
+        res = in_place_process_init_geometry(self_p);
         break;
 
     case detools_apply_patch_in_place_init_state_to_size_t:
@@ -2125,15 +2081,23 @@ int detools_apply_patch_in_place_init(
     size_t patch_size,
     void *arg_p)
 {
+#if DETOOLS_CONFIG_IN_PLACE_RESUME != 1
+    if (step_set != NULL || step_get != NULL) {
+        return (-DETOOLS_NOT_IMPLEMENTED);
+    }
+#endif
+
     self_p->mem_read = mem_read;
     self_p->mem_write = mem_write;
     self_p->mem_erase = mem_erase;
+#if DETOOLS_CONFIG_IN_PLACE_RESUME == 1
     self_p->step_set = step_set;
     self_p->step_get = step_get;
+    self_p->ongoing_step = 1;
+#endif
     self_p->patch_size = patch_size;
     self_p->arg_p = arg_p;
     self_p->state = detools_apply_patch_state_init_t;
-    self_p->ongoing_step = 1;
     self_p->init_state = detools_apply_patch_in_place_init_state_fixed_header_t;
     self_p->patch_reader.destroy = NULL;
 

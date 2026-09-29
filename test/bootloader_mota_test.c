@@ -45,13 +45,19 @@
 #elif defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
   #define TEST_BOARD_ID       0x239A0029u
   #define TEST_OTHER_BOARD_ID 0x239A0071u
+  #if defined(MOTA_RAK_AUTO_STORE)
+  #define TEST_DEVICE_NAME    DEVICE_NAME
+  // TEST_HW_ID and TEST_TARGET_ID come from the exact adaptive board profile.
+  #define TEST_STORAGE_FLAGS  (MOTA_BL_STORAGE_STAGE_CEILING | MOTA_BL_STORAGE_BOOT_UPDATE)
+  #else
   #define TEST_DEVICE_NAME    "3401_DFU"
   #define TEST_HW_ID          "NRF_BL_239A0029_3401_DFU"
   #define TEST_TARGET_ID      0x23818A80u
+  #define TEST_STORAGE_FLAGS  (MOTA_BL_STORAGE_STAGE_CEILING | MOTA_BL_STORAGE_BOOT_UPDATE)
+  #endif
   #define TEST_SOURCE         GPREGRET2_OTA_STAGE_EXPANDED
   #define TEST_PRESERVE_END   MOTA_NRF52_INTERNAL_BL_SLOT_START
   #define TEST_RAW_START      MOTA_NRF52_INTERNAL_BL_SLOT_START
-  #define TEST_STORAGE_FLAGS  (MOTA_BL_STORAGE_STAGE_CEILING | MOTA_BL_STORAGE_BOOT_UPDATE)
 #elif defined(TEST_GENERIC_QSPI)
   #define TEST_BOARD_ID       (((uint32_t)USB_DESC_VID << 16) | USB_DESC_UF2_PID)
   #define TEST_OTHER_BOARD_ID 0x28860045u
@@ -205,6 +211,11 @@ bool ota_qspi_init(void) {
   g_qspi_init_calls++;
   return true;
 }
+#if defined(MOTA_RAK_AUTO_STORE)
+void ota_qspi_set_rak_source(uint8_t stage_handoff) {
+  (void)stage_handoff;
+}
+#endif
 void ota_qspi_deinit(void) {
   g_qspi_deinit_calls++;
 }
@@ -329,6 +340,12 @@ static uint8_t *make_boot_image(uint32_t board_id, uint16_t abi, uint8_t storage
   ram_caps->abi         = MOTA_RAM_INFO_ABI;
   ram_caps->handoff_len = MOTA_HYBRID_HANDOFF_LEN;
   ram_caps->arena_size  = MOTA_HYBRID_ARENA_SIZE;
+#if defined(MOTA_RAK_AUTO_STORE)
+  static const uint8_t optional_store[16] = {
+    'M','O','T','A','S','T','O','R',1,0,16,0,0x14,0,0,0
+  };
+  memcpy(image + RAM_CAPS_OFFSET + sizeof(*ram_caps), optional_store, sizeof(optional_store));
+#endif
 #endif
 
   bootloader_update_envelope_t *envelope =
@@ -971,6 +988,18 @@ int main(void) {
          rejected_with(bad, total, GPREGRET2_BL_MANIFEST), &failures);
   free(bad);
   free(bad_image);
+
+#if defined(MOTA_RAK_AUTO_STORE)
+  bad_image = make_boot_image(board_base, 3, required_caps);
+  memset(bad_image + RAM_CAPS_OFFSET + sizeof(mota_ram_info_t), 0, 16);
+  fix_image_crc(bad_image);
+  bad = make_mota(bad_image, MOTA_NRF52_BL_SIZE, 3, MFLAG_FULL | MFLAG_SIGNED | MFLAG_BOOTLOADER,
+                  TEST_TARGET_ID, TEST_HW_ID, &total);
+  report("adaptive successor that removes optional application storage is rejected",
+         rejected_with(bad, total, GPREGRET2_BL_MANIFEST), &failures);
+  free(bad);
+  free(bad_image);
+#endif
 
   bad_image = make_boot_image(board_base, 3, required_caps);
   ((mota_ram_info_t *)(void *)(bad_image + RAM_CAPS_OFFSET))->arena_size--;

@@ -14,28 +14,38 @@ import subprocess
 import zipfile
 
 
+# Historical profiles remain buildable and available in the recovery archive.
+# Normal releases offer one adaptive image for each physical RAK model.
+LEGACY_RAK_PROFILES = frozenset((
+    "wiscore_rak3401", "wiscore_rak3401_rak13302_w25q16",
+    "wiscore_rak4631_board", "wiscore_rak4631_board_rak15001_slot_c",
+    "wiscore_rak4631_w25q16",
+))
+
+
 def release_boards(root: Path = Path(__file__).resolve().parents[1] / "src" / "boards") -> tuple[str, ...]:
     """Require complete release coverage, never silently omit a new board."""
     boards = []
     for directory in sorted(path for path in root.iterdir() if path.is_dir()):
         cmake = (directory / "board.cmake").read_text(encoding="ascii")
         make = (directory / "board.mk").read_text(encoding="ascii")
-        # Adaptive RAK loaders deliberately have no bootloader self-update:
-        # their combined internal/RAM/QSPI application updater fills 40 KiB.
+        # Adaptive RAK application storage coexists with internal-only
+        # bootloader staging. Both build systems must select that exact path.
         if "set(MOTA_RAK_AUTO_STORE ON)" in cmake:
             if ("-DMOTA_RAK_AUTO_STORE=1" not in make or
                     "set(MOTA_QSPI_FLASH ON)" not in cmake or
+                    "set(MOTA_INTERNAL_BOOTLOADER_UPDATE ON)" not in cmake or
                     any(f"set(MOTA_{name}_BOOTLOADER_UPDATE ON)" in cmake
-                        for name in ("INTERNAL", "QSPI", "SD"))):
+                        for name in ("QSPI", "SD"))):
                 raise ValueError(f"{directory.name}: inconsistent adaptive bootloader profile")
-            continue
         backends = [name for name in ("INTERNAL", "QSPI", "SD")
                     if f"set(MOTA_{name}_BOOTLOADER_UPDATE ON)" in cmake]
         if len(backends) != 1 or "set(MCU_VARIANT nrf52840)" not in cmake:
             raise ValueError(f"{directory.name}: missing exact bootloader mOTA profile")
         if f"-DMOTA_{backends[0]}_BOOTLOADER_UPDATE=1" not in make:
             raise ValueError(f"{directory.name}: Make/CMake bootloader mOTA disagreement")
-        boards.append(directory.name)
+        if directory.name not in LEGACY_RAK_PROFILES:
+            boards.append(directory.name)
     if not boards:
         raise ValueError("empty bootloader release inventory")
     return tuple(boards)
@@ -269,6 +279,13 @@ remote gat562 packages; exact identity matching cannot perform that migration.
 Every package is exactly {MOTA_SIZE} bytes, signed, board-bound, and verified
 against the public key. See manifest.json and SHA256SUMS for the inventory.
 Never install a bootloader package on a similarly named board.
+
+RAK3401 and RAK4631 each have one normal image, named *_auto. They retain the
+standard 3401_DFU / 4631_DFU identities and internal bootloader staging, so
+standard OTAFIX 2.4.9 board devices can install them directly through this
+signed update flow. External application storage is optional. Older
+*_AUTO_DFU and dedicated external-storage identities require local recovery;
+the separate recovery ZIP preserves bridges for those installed identities.
 """,
         encoding="ascii",
     )

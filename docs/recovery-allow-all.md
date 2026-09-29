@@ -25,7 +25,7 @@ prefer a current BLM2 bootloader and its matching SoftDevice package.
 
 For a physical RAK4631 displaying `GAT562BOOT` after installing GAT562 OTAFIX:
 install the **gat562 recovery** bridge first, then the **normal
-wiscore_rak4631_board** bootloader. The first step deliberately still identifies
+wiscore_rak4631_auto** bootloader. The first step deliberately still identifies
 as GAT562; only the second step should restore the RAK identity. Neither a host
 script override nor erasing the application changes the installed bootloader's
 identity checks. A successful host transfer alone does not prove activation.
@@ -40,6 +40,15 @@ start DFU, and hardware access may still be needed if USB recovery fails.
 Confirm the physical board manually. Allow-all means the bridge can accept the
 wrong board again. Do not leave it installed for normal use. Back up settings
 where possible and plan for application/settings loss during recovery.
+
+For standard `3401_DFU` / `4631_DFU` devices, the next compatible `*_auto`
+release preserves the installed identity. Use its ordinary signed bootloader
+`.mota` or matching local updater directly; no recovery bridge is needed.
+For historical `3401_AUTO_DFU` / `4631_AUTO_DFU` devices, the recovery `*_auto`
+images deliberately keep those old names. Install that temporary local bridge,
+then the normal compatible image. Recovery adaptive builds omit LoRa bootloader
+self-update and remain manual recovery tools. Dedicated external RAK identities
+also retain their matching bridges inside this archive.
 
 ## Linux build
 

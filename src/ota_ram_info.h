@@ -38,7 +38,29 @@ typedef char mota_ram_info_arena_size_offset_must_be_12
   #if MOTA_RAM_ARENA_SIZE != MOTA_HYBRID_ARENA_SIZE
     #error "The mOTA retained arena ABI requires exactly 64 KiB"
   #endif
-extern const mota_ram_info_t g_mota_ram_info;
+// Append optional application storage capabilities without changing either
+// legacy MOTABLDR or MOTARAMA. Old board loaders can validate this successor
+// using their exact existing identity, internal boot-update profile and RAM ABI.
+typedef struct {
+  mota_ram_info_t ram;
+#if defined(MOTA_RAK_AUTO_STORE)
+  struct {
+    uint8_t  magic[8];       // MOTASTOR
+    uint16_t abi;            // 1
+    uint16_t length;         // 16
+    uint8_t  storage_flags;  // optional application QSPI/header-W25 capabilities
+    uint8_t  reserved[3];
+  } app;
+#endif
+} mota_ram_capabilities_t;
+
+#if defined(MOTA_RAK_AUTO_STORE)
+typedef char mota_ram_capabilities_size_must_be_32[(sizeof(mota_ram_capabilities_t) == 32u) ? 1 : -1];
+typedef char mota_app_storage_offset_must_be_16[(offsetof(mota_ram_capabilities_t, app) == 16u) ? 1 : -1];
+#endif
+
+extern const mota_ram_capabilities_t g_mota_ram_capabilities;
+#define g_mota_ram_info (g_mota_ram_capabilities.ram)
 #endif
 
 #endif // OTA_RAM_INFO_H_

@@ -17,13 +17,20 @@ official C implementation; MeshCore does not reimplement the delta codec.
 
 Local modifications
 -------------------
-Only the config defaults at the top of detools.h were changed (upstream = 1):
+The config defaults at the top of detools.h were changed (upstream = 1):
   DETOOLS_CONFIG_FILE_IO                -> 0   (no <stdio> file IO on device)
   DETOOLS_CONFIG_COMPRESSION_LZMA       -> 0   (would need liblzma)
   DETOOLS_CONFIG_COMPRESSION_HEATSHRINK -> 0   (would need malloc + heatshrink/)
   DETOOLS_CONFIG_COMPRESSION_NONE       =  1   (kept)
   DETOOLS_CONFIG_COMPRESSION_CRLE       =  1   (kept)
-detools.c is byte-for-byte upstream.
+
+OTAFIX also shares the four identical in-place geometry-field decoders and
+adds DETOOLS_CONFIG_IN_PLACE_RESUME (default 1). Bootloader builds set it to 0
+and pass NULL step callbacks. OTAFIX has never persisted detools step state:
+it consumes approval and invalidates the application before writing, then
+enters DFU after an interruption. Disabling unused replay bookkeeping keeps
+that behavior and retains all bounds, decoder-error and flash-readback checks.
+The disabled configuration rejects non-NULL step callbacks at initialization.
 
 With this config the decoder is self-contained (no malloc, no liblzma, no
 heatshrink/, no file IO) and applies `--codec sequential --compression crle`
@@ -39,4 +46,4 @@ The decoded image is verified against the signed manifest image_hash before the
 slot is armed as boot partition.
 
 To update: re-copy c/detools.{c,h} from the pinned detools tag and re-apply the
-three config-default edits above.
+configuration and shared geometry-decoder changes above.

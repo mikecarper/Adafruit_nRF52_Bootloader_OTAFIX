@@ -95,9 +95,9 @@ int main(int argc, char** argv) {
     printf("== in-place apply ==\n");
     struct apply_ctx c;
     c.patch_addr = m.payload_addr; c.patch_len = m.payload_size; c.patch_pos = 0;
-    c.ws_lo = MOTA_NRF52_APP_BASE; c.ws_hi = found; c.step = 0;     // workspace = [APP_BASE, mota_addr)
+    c.ws_lo = MOTA_NRF52_APP_BASE; c.ws_hi = found;     // workspace = [APP_BASE, mota_addr)
     printf("  workspace=[0x%X,0x%X)=%u bytes  patch=%u bytes\n", c.ws_lo, c.ws_hi, c.ws_hi - c.ws_lo, m.payload_size);
-    int r = detools_apply_patch_in_place_callbacks(dt_mr, dt_mw, dt_me, dt_ss, dt_sg, dt_pr,
+    int r = detools_apply_patch_in_place_callbacks(dt_mr, dt_mw, dt_me, NULL, NULL, dt_pr,
                                                    (size_t)m.payload_size, &c);
     cache_flush();
     printf("  detools returned r=%d  (expected image_size=%u)\n", r, m.image_size);

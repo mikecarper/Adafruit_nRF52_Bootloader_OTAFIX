@@ -200,7 +200,7 @@ static void test_new_qspi_board_profiles(void) {
 
 static void test_rak_adaptive_profiles(void) {
   const char *boards[] = {"wiscore_rak4631_auto", "wiscore_rak3401_auto"};
-  const char *names[] = {"4631_AUTO_DFU", "3401_AUTO_DFU"};
+  const char *names[] = {"4631_DFU", "3401_DFU"};
   for (size_t i = 0; i < 2; ++i) {
     char header[128], make_path[128], cmake_path[128];
     char header_alt[128], make_alt[128], cmake_alt[128];
@@ -221,7 +221,12 @@ static void test_rak_adaptive_profiles(void) {
     assert(strstr(make, "-DMOTA_RAK_AUTO_STORE=1") != NULL);
     assert(strstr(cmake, "set(MOTA_RAK_AUTO_STORE ON)") != NULL);
     assert(strstr(cmake, "set(MOTA_RAM_ARENA_SIZE 65536") != NULL);
-    assert(strstr(cmake, "BOOTLOADER_UPDATE ON") == NULL);
+    assert(strstr(cmake, "set(MOTA_INTERNAL_BOOTLOADER_UPDATE ON)") != NULL);
+    assert(strstr(make, "-DMOTA_INTERNAL_BOOTLOADER_UPDATE=1") != NULL);
+    assert(strstr(cmake, "set(MOTA_QSPI_BOOTLOADER_UPDATE ON)") == NULL);
+    assert(strstr(cmake, "set(MOTA_SD_BOOTLOADER_UPDATE ON)") == NULL);
+    assert(strstr(make, "-DMOTA_QSPI_BOOTLOADER_UPDATE=1") == NULL);
+    assert(strstr(make, "-DMOTA_SD_BOOTLOADER_UPDATE=1") == NULL);
     assert(strlen(names[i]) < 16u);
     assert(strstr(make, names[i]) != NULL);
     assert(strstr(cmake, names[i]) != NULL);

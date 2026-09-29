@@ -63,9 +63,26 @@ def define_hex(text: str, key: str) -> int:
 class QualifiedReleaseInventoryTest(unittest.TestCase):
     def test_inventory_covers_every_release_board(self) -> None:
         boards = {path.name for path in (ROOT / "src" / "boards").iterdir() if path.is_dir()}
-        adaptive = {"wiscore_rak3401_auto", "wiscore_rak4631_auto"}
-        self.assertEqual(set(release.QUALIFIED_BOARDS), boards - adaptive)
-        self.assertEqual(len(release.QUALIFIED_BOARDS), len(boards) - len(adaptive))
+        self.assertEqual(set(release.QUALIFIED_BOARDS), boards - release.LEGACY_RAK_PROFILES)
+        self.assertEqual(len(release.QUALIFIED_BOARDS), len(boards) - 5)
+        self.assertEqual({name for name in release.QUALIFIED_BOARDS if name.startswith("wiscore_rak")},
+                         {"wiscore_rak3401_auto", "wiscore_rak4631_auto"})
+
+    def test_normal_release_uploads_use_the_canonical_inventory(self) -> None:
+        workflow = (ROOT / ".github/workflows/githubci.yml").read_text(encoding="ascii")
+        self.assertIn("from build_bootloader_mota_release import QUALIFIED_BOARDS", workflow)
+        self.assertIn("steps.release-profile.outputs.publish == 'true'", workflow)
+        spec = importlib.util.spec_from_file_location(
+            "rak_labels", ROOT / "tools/label_rak4631_release_assets.py")
+        labels = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(labels)
+        tag = "v0.11.0-OTAFIX2.4.10"
+        base = f"wiscore_rak4631_auto_bootloader-{tag}"
+        assets = [{"name": name} for name in (
+            f"update-{base}_mbr.uf2", f"{base}_s140_6.1.1.hex", f"{base}_s140_6.1.1.zip")]
+        result = labels.asset_labels(assets, tag)
+        self.assertEqual(len(result), 3)
+        self.assertTrue(all("(4631_DFU)" in label for label in result.values()))
 
     def test_unconfigured_new_board_blocks_release(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -84,10 +101,11 @@ class QualifiedReleaseInventoryTest(unittest.TestCase):
             board.mkdir()
             (board / "board.cmake").write_text(
                 "set(MCU_VARIANT nrf52840)\nset(MOTA_RAK_AUTO_STORE ON)\n"
-                "set(MOTA_QSPI_FLASH ON)\n")
-            (board / "board.mk").write_text("CFLAGS += -DMOTA_RAK_AUTO_STORE=1\n")
-            with self.assertRaisesRegex(ValueError, "empty bootloader release"):
-                release.release_boards(root)
+                "set(MOTA_QSPI_FLASH ON)\nset(MOTA_INTERNAL_BOOTLOADER_UPDATE ON)\n")
+            (board / "board.mk").write_text(
+                "CFLAGS += -DMOTA_RAK_AUTO_STORE=1\n"
+                "CFLAGS += -DMOTA_INTERNAL_BOOTLOADER_UPDATE=1\n")
+            self.assertEqual(release.release_boards(root), ("wiscore_rak4631_auto",))
             (board / "board.mk").write_text("")
             with self.assertRaisesRegex(ValueError, "inconsistent adaptive"):
                 release.release_boards(root)

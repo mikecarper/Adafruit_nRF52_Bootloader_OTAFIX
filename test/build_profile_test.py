@@ -15,7 +15,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 MAKEFILE = ROOT / "Makefile"
 WORKFLOW = ROOT / ".github" / "workflows" / "githubci.yml"
-QUALIFICATION_VERSION = "0x02040703"
+QUALIFICATION_VERSION = "0x02040A03"
 
 
 FAKE_TOOL = r"""#!/usr/bin/env python3
@@ -347,6 +347,16 @@ class BuildProfileTest(unittest.TestCase):
         test_readme = (ROOT / "test" / "README.md").read_text(encoding="utf-8")
         self.assertIn(QUALIFICATION_VERSION, readme)
         self.assertIn(QUALIFICATION_VERSION, test_readme)
+
+    def test_rak_normal_and_recovery_keep_the_intended_identities(self) -> None:
+        for model in (3401, 4631):
+            board = f"BOARD=wiscore_rak{model}_auto"
+            normal = self.make_variable("CFLAGS", board, "RECOVERY_ALLOW_ALL_BOARDS=0")
+            recovery = self.make_variable("CFLAGS", board, "RECOVERY_ALLOW_ALL_BOARDS=1")
+            self.assertIn(f'"{model}_DFU"', normal)
+            self.assertIn("-DMOTA_INTERNAL_BOOTLOADER_UPDATE=1", normal)
+            self.assertIn(f'"{model}_AUTO_DFU"', recovery)
+            self.assertNotIn("-DMOTA_INTERNAL_BOOTLOADER_UPDATE=1", recovery)
 
     def test_ci_pins_gcc_14_2_and_builds_the_tightest_profiles(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")

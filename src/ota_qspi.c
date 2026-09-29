@@ -98,14 +98,11 @@ _Static_assert(MOTA_QSPI_AUX_CSN_PIN < 32u,
                "RAK auxiliary chip select must remain on P0");
 #endif
 // The apply handoff sets all four before ota_qspi_init() is called.
-static uint8_t g_auto_csn_pin;
-static uint8_t g_auto_sck_pin;
-static uint8_t g_auto_io0_pin;
-static uint8_t g_auto_io1_pin;
-#define QSPI_CSN_PIN g_auto_csn_pin
-#define QSPI_SCK_PIN g_auto_sck_pin
-#define QSPI_IO0_PIN g_auto_io0_pin
-#define QSPI_IO1_PIN g_auto_io1_pin
+static uint8_t g_auto_pins[4];
+#define QSPI_SCK_PIN g_auto_pins[0]
+#define QSPI_CSN_PIN g_auto_pins[1]
+#define QSPI_IO0_PIN g_auto_pins[2]
+#define QSPI_IO1_PIN g_auto_pins[3]
 #else
 #define QSPI_CSN_PIN MOTA_QSPI_CSN_PIN
 #define QSPI_SCK_PIN MOTA_QSPI_SCK_PIN
@@ -187,10 +184,16 @@ static void configure_qspi_pins(bool enable) {
   }
   // Match current nrfx: QSPI owns direction while active; connected pads
   // remain GPIO inputs with disconnected input buffers and H0H1 drive.
+#if defined(MOTA_RAK_AUTO_STORE)
+  for (uint32_t i = 0; i < sizeof(g_auto_pins); i++) {
+    NRF_P0->PIN_CNF[g_auto_pins[i]] = pin_cnf;
+  }
+#else
   QSPI_GPIO_PORT(QSPI_SCK_PIN)->PIN_CNF[QSPI_GPIO_INDEX(QSPI_SCK_PIN)] = pin_cnf;
   QSPI_GPIO_PORT(QSPI_CSN_PIN)->PIN_CNF[QSPI_GPIO_INDEX(QSPI_CSN_PIN)] = pin_cnf;
   QSPI_GPIO_PORT(QSPI_IO0_PIN)->PIN_CNF[QSPI_GPIO_INDEX(QSPI_IO0_PIN)] = pin_cnf;
   QSPI_GPIO_PORT(QSPI_IO1_PIN)->PIN_CNF[QSPI_GPIO_INDEX(QSPI_IO1_PIN)] = pin_cnf;
+#endif
   if (MOTA_QSPI_IO2_PIN != NRF_QSPI_PIN_NOT_CONNECTED) {
     QSPI_GPIO_PORT(MOTA_QSPI_IO2_PIN)->PIN_CNF[((MOTA_QSPI_IO2_PIN) & 31u)] = pin_cnf;
   }
@@ -254,16 +257,16 @@ static void select_qspi_pins(bool enable) {
 
 #if defined(MOTA_RAK_AUTO_STORE)
 void ota_qspi_set_rak_source(uint8_t stage_handoff) {
-  g_auto_csn_pin = MOTA_QSPI_CSN_PIN;
+  QSPI_CSN_PIN = MOTA_QSPI_CSN_PIN;
 #if defined(MOTA_RAK_AUTO_RAK4631)
   if (stage_handoff == GPREGRET2_OTA_STAGE_RAK15001) {
-    g_auto_csn_pin = _PINNUM(0, 26);
+    QSPI_CSN_PIN = _PINNUM(0, 26);
   }
 #endif
   const bool header = stage_handoff == GPREGRET2_OTA_STAGE_HEADER_W25;
-  g_auto_sck_pin = header ? _PINNUM(0, 16) : MOTA_QSPI_SCK_PIN;
-  g_auto_io0_pin = header ? _PINNUM(0, 17) : MOTA_QSPI_IO0_PIN;
-  g_auto_io1_pin = header ? _PINNUM(0, 15) : MOTA_QSPI_IO1_PIN;
+  QSPI_SCK_PIN = header ? _PINNUM(0, 16) : MOTA_QSPI_SCK_PIN;
+  QSPI_IO0_PIN = header ? _PINNUM(0, 17) : MOTA_QSPI_IO0_PIN;
+  QSPI_IO1_PIN = header ? _PINNUM(0, 15) : MOTA_QSPI_IO1_PIN;
 }
 #endif
 
@@ -347,7 +350,7 @@ bool ota_qspi_init(void) {
     return false;
   }
   #elif defined(MOTA_RAK_AUTO_STORE)
-  const uint32_t matched_id = g_auto_csn_pin == _PINNUM(0, 26) ? 0xC84015u : 0xEF4015u;
+  const uint32_t matched_id = QSPI_CSN_PIN == _PINNUM(0, 26) ? 0xC84015u : 0xEF4015u;
   if ((((uint32_t)jedec[0] << 16) | ((uint32_t)jedec[1] << 8) | jedec[2]) != matched_id) {
     ota_qspi_deinit();
     return false;

@@ -8,6 +8,7 @@ CC      ?= gcc
 CFLAGS  ?= -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter
 SANITIZER_CFLAGS = -std=c11 -O1 -g -Wall -Wextra -Wno-unused-parameter \
 	-fsanitize=address,undefined -fno-omit-frame-pointer
+override CFLAGS += -DDETOOLS_CONFIG_IN_PLACE_RESUME=0
 SRC      = ../src
 INC      = -I $(SRC) -I $(SRC)/detools
 PSTORAGE_SRC = ../lib/sdk11/components/drivers_nrf/pstorage/pstorage_raw.c
@@ -76,14 +77,18 @@ rak_auto_apply_3401_test rak_auto_hybrid_3401_test: RAK_AUTO_BOARD=3401
 rak_auto_apply_4631_test rak_auto_apply_3401_test: sd_apply_test.c $(SRC)/ota_delta.c \
     $(SRC)/detools/detools.c $(SRC)/sha256.c $(SRC)/ota_qspi.h $(SRC)/ota_hybrid_handoff.h
 	$(CC) $(CFLAGS) -DOTA_DELTA_HOST_TEST -DMOTA_QSPI_FLASH -DMOTA_RAK_AUTO_STORE \
-		-DMOTA_RAK_AUTO_RAK$(RAK_AUTO_BOARD) -DMOTA_RAM_ARENA_SIZE=65536 $(INC) \
-		sd_apply_test.c $(SRC)/detools/detools.c $(SRC)/sha256.c -o $@
+		-DMOTA_RAK_AUTO_RAK$(RAK_AUTO_BOARD) -DMOTA_RAM_ARENA_SIZE=65536 \
+		-DMOTA_INTERNAL_BOOTLOADER_UPDATE -DUSB_DESC_VID=0x239A -DUSB_DESC_UF2_PID=0x0029 \
+		-DDEVICE_NAME='"$(RAK_AUTO_BOARD)_DFU"' $(INC) \
+		sd_apply_test.c $(SRC)/detools/detools.c $(SRC)/sha256.c $(SRC)/usb/uf2/bootloader_image.c -o $@
 
 rak_auto_hybrid_4631_test rak_auto_hybrid_3401_test: readback_test.c $(SRC)/ota_delta.c \
     $(SRC)/detools/detools.c $(SRC)/sha256.c $(SRC)/ota_qspi.h $(SRC)/ota_hybrid_handoff.h
 	$(CC) $(CFLAGS) -DOTA_DELTA_HOST_TEST -DMOTA_QSPI_FLASH -DMOTA_RAK_AUTO_STORE \
-		-DMOTA_RAK_AUTO_RAK$(RAK_AUTO_BOARD) -DMOTA_RAM_ARENA_SIZE=65536 $(INC) \
-		readback_test.c $(SRC)/detools/detools.c $(SRC)/sha256.c -o $@
+		-DMOTA_RAK_AUTO_RAK$(RAK_AUTO_BOARD) -DMOTA_RAM_ARENA_SIZE=65536 \
+		-DMOTA_INTERNAL_BOOTLOADER_UPDATE -DUSB_DESC_VID=0x239A -DUSB_DESC_UF2_PID=0x0029 \
+		-DDEVICE_NAME='"$(RAK_AUTO_BOARD)_DFU"' $(INC) \
+		readback_test.c $(SRC)/detools/detools.c $(SRC)/sha256.c $(SRC)/usb/uf2/bootloader_image.c -o $@
 
 bootloader_mota_recovery_test: override CFLAGS += -DRECOVERY_ALLOW_ALL_BOARDS=1
 bootloader_mota_test bootloader_mota_recovery_test: bootloader_mota_test.c $(SRC)/ota_delta.c $(SRC)/detools/detools.c \
@@ -103,6 +108,21 @@ bootloader_mota_internal_test: bootloader_mota_test.c $(SRC)/ota_delta.c $(SRC)/
 		-DUSB_DESC_VID=0x239A -DUSB_DESC_UF2_PID=0x0029 -DDEVICE_NAME='"3401_DFU"' $(INC) \
 		bootloader_mota_test.c $(SRC)/detools/detools.c $(SRC)/sha256.c \
 		$(SRC)/usb/uf2/bootloader_image.c -o $@
+
+bootloader_mota_rak_auto_3401_test: RAK_AUTO_BOARD=3401
+bootloader_mota_rak_auto_3401_test: RAK_AUTO_TARGET=0x23818A80u
+bootloader_mota_rak_auto_4631_test: RAK_AUTO_BOARD=4631
+bootloader_mota_rak_auto_4631_test: RAK_AUTO_TARGET=0x2D0DF000u
+bootloader_mota_rak_auto_3401_test bootloader_mota_rak_auto_4631_test: bootloader_mota_test.c \
+    $(SRC)/ota_delta.c $(SRC)/detools/detools.c $(SRC)/sha256.c \
+    $(SRC)/usb/uf2/bootloader_image.c $(SRC)/ota_bl_info.h $(SRC)/ota_layout.h
+	$(CC) $(CFLAGS) -DOTA_DELTA_HOST_TEST -DMOTA_INTERNAL_BOOTLOADER_UPDATE \
+		-DMOTA_QSPI_FLASH -DMOTA_RAK_AUTO_STORE -DMOTA_RAK_AUTO_RAK$(RAK_AUTO_BOARD) \
+		-DMOTA_RAM_ARENA_SIZE=65536 -DUSB_DESC_VID=0x239A -DUSB_DESC_UF2_PID=0x0029 \
+		-DDEVICE_NAME='"$(RAK_AUTO_BOARD)_DFU"' \
+		-DTEST_HW_ID='"NRF_BL_239A0029_$(RAK_AUTO_BOARD)_DFU"' \
+		-DTEST_TARGET_ID=$(RAK_AUTO_TARGET) $(INC) bootloader_mota_test.c \
+		$(SRC)/detools/detools.c $(SRC)/sha256.c $(SRC)/usb/uf2/bootloader_image.c -o $@
 
 bootloader_mota_qspi_generic_test: override CFLAGS += -DUSB_DESC_VID=0x239A -DUSB_DESC_UF2_PID=0x0029 \
 	-DDEVICE_NAME='"3401_W25Q16_DFU"' -DTEST_HW_ID='"NRF_BL_239A0029_3401_W25Q16_DFU"' -DTEST_TARGET_ID=0xFEF255E8u
@@ -198,6 +218,7 @@ pstorage_busy_test: pstorage_busy_test.c $(PSTORAGE_SRC) $(wildcard pstorage_stu
 
 check: apply_sim readback_test readback_test_v7 readback_internal_test bootloader_image_test sd_apply_test qspi_apply_test bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test softdevice_fwid_test dfu_init_bounds_test dfu_init_signed_bounds_test qspi_alignment_test qspi_wake_test usb_wait_test dfu_timeout_test uf2_write_state_test bootloader_settings_guard_test dfu_image_policy_test dfu_entry_test peer_data_layout_test peer_data_layout_nrf52_test peer_data_layout_nrf52833_test pstorage_busy_test
 	python3 version_derivation_test.py
+	python3 startup_vector_test.py
 	python3 build_profile_test.py
 	python3 docker_build_test.py
 	python3 build_all_test.py
@@ -256,6 +277,8 @@ check: apply_sim readback_test readback_test_v7 readback_internal_test bootloade
 	./bootloader_mota_recovery_test
 	@echo
 	./bootloader_mota_internal_test
+	./bootloader_mota_rak_auto_3401_test
+	./bootloader_mota_rak_auto_4631_test
 	@echo
 	./bootloader_mota_sd_test
 	./bootloader_mota_qspi_generic_test
@@ -296,6 +319,7 @@ sanitize:
 	$(MAKE) CFLAGS="$(SANITIZER_CFLAGS)" check
 
 clean:
+	rm -f bootloader_mota_rak_auto_3401_test bootloader_mota_rak_auto_4631_test
 	rm -f rak_auto_apply_4631_test rak_auto_apply_3401_test rak_auto_hybrid_4631_test rak_auto_hybrid_3401_test
 	rm -f uf2_volume_test
 	rm -f bootloader_mota_techo_lite_test
@@ -314,7 +338,14 @@ bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test \
 bootloader_mota_qspi_generic_test bootloader_mota_qspi_generic_v7_test bootloader_mota_techo_lite_test \
 bootloader_mota_recovery_test dfu_image_policy_test dfu_image_policy_recovery_test: $(SRC)/crc32.h
 
+bootloader_mota_rak_auto_3401_test bootloader_mota_rak_auto_4631_test: \
+    $(SRC)/crc32.h $(SRC)/ota_hybrid_handoff.h $(SRC)/ota_ram_info.h \
+    $(SRC)/usb/uf2/bootloader_image.h
+rak_auto_apply_4631_test rak_auto_apply_3401_test rak_auto_hybrid_4631_test rak_auto_hybrid_3401_test: \
+    $(SRC)/usb/uf2/bootloader_image.c $(SRC)/usb/uf2/bootloader_image.h
+
 check: bootloader_image_recovery_test dfu_image_policy_recovery_test bootloader_mota_recovery_test
 check: bootloader_mota_qspi_generic_test bootloader_mota_qspi_generic_v7_test bootloader_mota_techo_lite_test
+check: bootloader_mota_rak_auto_3401_test bootloader_mota_rak_auto_4631_test
 check: uf2_volume_test
 check: rak_auto_apply_4631_test rak_auto_apply_3401_test rak_auto_hybrid_4631_test rak_auto_hybrid_3401_test

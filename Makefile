@@ -385,6 +385,9 @@ endif
 # Assembly Files
 #------------------------------------------------------------------------------
 ASM_SRC = $(NRFX_PATH)/mdk/gcc_startup_$(MCU_SUB_VARIANT).S
+ifeq ($(MCU_SUB_VARIANT),nrf52840)
+ASM_SRC = src/startup_nrf52840.S
+endif
 
 #------------------------------------------------------------------------------
 # INCLUDE PATH
@@ -480,6 +483,7 @@ CFLAGS += \
 
 # MeshCore OTA: the bootloader only ever applies CRLE-compressed in-place .mota deltas, so drop the
 # detools uncompressed-patch reader (saves flash in the size-constrained bootloader region).
+CFLAGS += -DDETOOLS_CONFIG_IN_PLACE_RESUME=0
 CFLAGS += -DDETOOLS_CONFIG_COMPRESSION_NONE=0
 
 # Suppress warning caused by SDK

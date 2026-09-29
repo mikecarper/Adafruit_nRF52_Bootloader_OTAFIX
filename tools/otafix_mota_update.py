@@ -322,7 +322,7 @@ def query_node(meshcli: str | None, port: str) -> tuple[Version, str, NodeIdenti
     identity_reply = mesh_command(meshcli, port, "ota bootloader")
     version = parse_version(version_reply)
     identity = parse_identity(identity_reply)
-    if identity.abi < 3 or identity.caps not in (0x09, 0x0A, 0x0E):
+    if identity.abi < 3 or identity.caps not in (0x09, 0x0A, 0x0E, 0x1E):
         raise UpdateError(
             f"unsupported bootloader capability: ABI {identity.abi}, caps 0x{identity.caps:02X}"
         )

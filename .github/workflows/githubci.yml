@@ -19,8 +19,8 @@ permissions:
 
 env:
   # 0x02040401 identifies the failed global TinyUSB-budget candidate.
-  # 0x02040703 identifies post-preview.2 qualification, not a release.
-  OTAFIX_QUALIFICATION_VERSION: '0x02040703'
+  # 0x02040A03 identifies compatible RAK qualification, not a release.
+  OTAFIX_QUALIFICATION_VERSION: '0x02040A03'
   OTAFIX_RELEASE_BUILD: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.release_build) }}
 
 concurrency:
@@ -100,7 +100,13 @@ jobs:
           "${mota_cmake_args[@]}"
         cmake --build cmake-build-${{ matrix.board }}
 
+    - name: Select normal release profile
+      id: release-profile
+      run: |
+        python3 -c 'import sys; sys.path.insert(0, "tools"); from build_bootloader_mota_release import QUALIFIED_BOARDS; print("publish=" + str(sys.argv[1] in QUALIFIED_BOARDS).lower())' "${{ matrix.board }}" >> "$GITHUB_OUTPUT"
+
     - uses: actions/upload-artifact@v7
+      if: ${{ env.OTAFIX_RELEASE_BUILD != 'true' || steps.release-profile.outputs.publish == 'true' }}
       with:
         name: bootloader-${{ matrix.board }}
         path: _bin/${{ matrix.board }}
@@ -201,7 +207,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: mikecarper/motatool
-          ref: 5d9646cb08105245fb96c28450669c58763224bb
+          ref: 97431e56e1b92dc7ff9d02895366cdea48f41df4
           path: _motatool
 
       - name: Set up Python

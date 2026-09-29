@@ -42,6 +42,12 @@
  * feature by passing -DDETOOLS_CONFIG_..=1. See detools/README.meshcore.txt.
  */
 
+/* OTAFIX consumes update approval before starting a patch and deliberately
+ * enters DFU after an interrupted write. It does not persist detools steps. */
+#ifndef DETOOLS_CONFIG_IN_PLACE_RESUME
+#    define DETOOLS_CONFIG_IN_PLACE_RESUME          1
+#endif
+
 #ifndef DETOOLS_CONFIG_FILE_IO
 #    define DETOOLS_CONFIG_FILE_IO                 0
 #endif

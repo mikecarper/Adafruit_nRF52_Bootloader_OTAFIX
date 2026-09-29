@@ -32,6 +32,8 @@ def inspect_profile(artifacts, board, tag, packed):
     _, start, size, name, extension = find_manifest(image)
     cmake = (ROOT / "src/boards" / board / "board.cmake").read_text()
     expected_name = re.search(r"set\(DEVICE_NAME\s+(\S+)\)", cmake).group(1)
+    if board in ("wiscore_rak3401_auto", "wiscore_rak4631_auto"):
+        expected_name = expected_name.replace("_DFU", "_AUTO_DFU")
     if (start, size, name, extension[4]) != (0xF4000, 0xA000, expected_name, packed):
         raise ValueError(f"{board}: bootloader identity/version/layout mismatch")
     verify_manifest(str(hex_path))
