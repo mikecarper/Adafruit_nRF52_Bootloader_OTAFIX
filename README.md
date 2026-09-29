@@ -444,9 +444,10 @@ candidates are not release artifacts.
   1.17.1.7 also publishes `RAK_4631_repeater_unified_lora_ota`. These have
   different mOTA target IDs, so an in-place LoRa delta cannot switch between
   them. Lean-to-lean LoRa upgrades need an exact-base delta that fits the
-  staging space. An exact-base delta built from the published 1.17.1.5 and
-  1.17.1.7 lean images is too large for the authenticated hybrid flash/RAM
-  staging area; even a 1.17.1.6 intermediate leaves the final hop too large.
+  staging space. An exact-base delta from the published `26303793` 1.17.1.5
+  lean image to the `2d03e098` 1.17.1.7 lean image is too large for the
+  authenticated hybrid flash/RAM staging area; even the `306feebe` 1.17.1.6
+  intermediate leaves the final hop too large.
   Use local application UF2 or
   DFU for that version jump and when switching to the unified target.
 

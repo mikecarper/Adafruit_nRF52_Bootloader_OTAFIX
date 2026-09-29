@@ -42,10 +42,10 @@ The unified application can fall back to internal staging with `4631_DFU`,
 but external storage requires `4631_AUTO_DFU`. MeshCore 1.17.1.5's lean LoRa
 target and 1.17.1.7's unified target have different mOTA target IDs. Use an
 exact-base delta for lean-to-lean LoRa upgrades only when it fits staging.
-An exact-base delta built from the published 1.17.1.5 and 1.17.1.7 lean
-images exceeds the authenticated hybrid flash/RAM staging area. Use local
-application UF2 or DFU for that version jump and when changing to the unified
-target.
+An exact-base delta from the published `26303793` 1.17.1.5 lean image to
+the `2d03e098` 1.17.1.7 lean image exceeds the authenticated hybrid flash/RAM
+staging area. Use local application UF2 or DFU for that version jump and when
+changing to the unified target.
 
 The SWD trace and restoration checks are in
 [the adaptive RAK hardware result](rak-adaptive-recovery-hardware-20260927.md).
