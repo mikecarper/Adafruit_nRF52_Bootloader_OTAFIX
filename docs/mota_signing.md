@@ -38,6 +38,14 @@ For MeshCore `RAK_4631_repeater_unified_lora_ota`, select the
 profile used by lean builds on the same physical RAK4631. Check the identity with
 `ota bootloader` before choosing an exact-profile file. If the installed
 identity must change, use the [two-step recovery bridge](recovery-allow-all.md).
+The unified application can fall back to internal staging with `4631_DFU`,
+but external storage requires `4631_AUTO_DFU`. MeshCore 1.17.1.5's lean LoRa
+target and 1.17.1.7's unified target have different mOTA target IDs. Use an
+exact-base delta for lean-to-lean LoRa upgrades only when it fits staging.
+An exact-base delta built from the published 1.17.1.5 and 1.17.1.7 lean
+images exceeds the authenticated hybrid flash/RAM staging area. Use local
+application UF2 or DFU for that version jump and when changing to the unified
+target.
 
 The SWD trace and restoration checks are in
 [the adaptive RAK hardware result](rak-adaptive-recovery-hardware-20260927.md).

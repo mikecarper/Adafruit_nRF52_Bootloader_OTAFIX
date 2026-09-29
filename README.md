@@ -432,11 +432,23 @@ candidates are not release artifacts.
   `wiscore_rak4631_board` release files are for the internal-only
   `4631_DFU` profile used by lean MeshCore builds. Both profiles run on a
   RAK4631 and share USB VID/PID, but only `auto` handles the unified
-  application's supported external storage
-  layouts. A current board-bound loader rejects a UF2 with the other profile's
-  device name. If `ota bootloader` reports `4631_DFU` after installing `board`,
+  application's supported external storage layouts. The unified application
+  can still use `board` for internal-only staging. A current board-bound loader
+  rejects a UF2 with the other profile's device name. If `ota bootloader`
+  reports `4631_DFU` after installing `board`,
   follow the [two-step recovery bridge](docs/recovery-allow-all.md) to migrate
   to `4631_AUTO_DFU`; copying the `auto` UF2 directly will be rejected.
+
+  MeshCore 1.17.1.5 published the lean
+  `RAK_4631_repeater_lora_ota_no_external_sensors` LoRa target. MeshCore
+  1.17.1.7 also publishes `RAK_4631_repeater_unified_lora_ota`. These have
+  different mOTA target IDs, so an in-place LoRa delta cannot switch between
+  them. Lean-to-lean LoRa upgrades need an exact-base delta that fits the
+  staging space. An exact-base delta built from the published 1.17.1.5 and
+  1.17.1.7 lean images is too large for the authenticated hybrid flash/RAM
+  staging area; even a 1.17.1.6 intermediate leaves the final hop too large.
+  Use local application UF2 or
+  DFU for that version jump and when switching to the unified target.
 
 
   The ordinary RAK4631 and RAK3401 targets retain internal staging. Heltec T114 is excluded because its public schematics mark the MX25R1635F U9 footprint optional, so the standard target cannot assume it is populated.
