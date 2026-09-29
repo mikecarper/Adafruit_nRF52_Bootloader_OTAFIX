@@ -40,8 +40,10 @@ physical RAK model. Updated unified applications detect optional external NOR
 through a separate capability record; bootloader packages always stage
 internally. See the [release notes](release-2.4.10.md) and
 [hardware qualification](hardware-qualification-2.4.10-rak-auto.md).
-The separate adaptive `R_` recovery builds remain local-only bridges
-without LoRa bootloader self-update.
+The repaired adaptive `R_` recovery builds accept signed bootloader `.mota`
+packages for their exact historical `*_AUTO_DFU` identities after they have
+been installed locally. They cannot use normal `*_DFU` packages to migrate
+identity over LoRa.
 
 All curated profiles support application deltas. Full **application** `.mota`
 images require external NOR or microSD; internal-only staging, including the

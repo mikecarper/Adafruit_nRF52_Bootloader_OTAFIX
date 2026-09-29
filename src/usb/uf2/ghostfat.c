@@ -141,11 +141,19 @@ STATIC_ASSERT(FAT_ENTRIES_PER_SECTOR                       ==       256); // FAT
 #define STR0(x) #x
 #define STR(x) STR0(x)
 
+#if defined(RECOVERY_ALLOW_ALL_BOARDS) && defined(MOTA_RAK_AUTO_STORE)
+  // Leave out the build date in the two historical adaptive recovery bridges;
+  // their version marker identifies the source without using scarce flash.
+  #define UF2_BUILD_DATE_LINE ""
+#else
+  #define UF2_BUILD_DATE_LINE "Date: " __DATE__ "\r\n"
+#endif
+
 #define INFO_UF2_INITIAL_CONTENT                                                   \
   "UF2 Bootloader " UF2_VERSION "\r\n"                                             \
   "Model: " UF2_PRODUCT_NAME "\r\n"                                                \
   "Board-ID: " UF2_BOARD_ID "\r\n"                                                 \
-  "Date: " __DATE__ "\r\n"                                                         \
+  UF2_BUILD_DATE_LINE                                                              \
   "SoftDevice: S" STR(MOTA_SOFTDEVICE_FAMILY) " " STR(MOTA_SOFTDEVICE_FWID) "\r\n"
 
 static char const infoUf2File[] = INFO_UF2_INITIAL_CONTENT;

@@ -317,8 +317,11 @@ CLI guard and storage-policy host tests pass.
 The Rust package suite passes, including deployed identity aliases and malformed
 optional-capability rejection. Normal releases select 24 profiles, with one RAK
 image per model; historical RAK profiles remain in the recovery archive.
-Adaptive recovery images retain historical `*_AUTO_DFU` identities and omit
-LoRa bootloader self-update to fit the temporary allow-all recovery policy.
+The originally published adaptive recovery images retained historical
+`*_AUTO_DFU` identities and omitted LoRa bootloader self-update. A subsequent
+in-place repair adds that feature while keeping the same historical identity.
+The hardware results above describe the original build and do not establish
+physical qualification for the repaired recovery images.
 
 MeshCore Open's full current suite passed 838 tests with two skips. The Bluetooth
 reply and compatible RAK application-storage tests pass; changed-file analysis

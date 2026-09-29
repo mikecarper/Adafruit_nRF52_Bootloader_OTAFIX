@@ -124,6 +124,22 @@ bootloader_mota_rak_auto_3401_test bootloader_mota_rak_auto_4631_test: bootloade
 		-DTEST_TARGET_ID=$(RAK_AUTO_TARGET) $(INC) bootloader_mota_test.c \
 		$(SRC)/detools/detools.c $(SRC)/sha256.c $(SRC)/usb/uf2/bootloader_image.c -o $@
 
+bootloader_mota_rak_recovery_3401_test: RAK_AUTO_BOARD=3401
+bootloader_mota_rak_recovery_3401_test: RAK_AUTO_TARGET=0xD04AB3ABu
+bootloader_mota_rak_recovery_4631_test: RAK_AUTO_BOARD=4631
+bootloader_mota_rak_recovery_4631_test: RAK_AUTO_TARGET=0xFEEAFD1Bu
+bootloader_mota_rak_recovery_3401_test bootloader_mota_rak_recovery_4631_test: bootloader_mota_test.c \
+    $(SRC)/ota_delta.c $(SRC)/detools/detools.c $(SRC)/sha256.c \
+    $(SRC)/usb/uf2/bootloader_image.c $(SRC)/ota_bl_info.h $(SRC)/ota_layout.h
+	$(CC) $(CFLAGS) -DOTA_DELTA_HOST_TEST -DRECOVERY_ALLOW_ALL_BOARDS=1 \
+		-DMOTA_INTERNAL_BOOTLOADER_UPDATE \
+		-DMOTA_QSPI_FLASH -DMOTA_RAK_AUTO_STORE -DMOTA_RAK_AUTO_RAK$(RAK_AUTO_BOARD) \
+		-DMOTA_RAM_ARENA_SIZE=65536 -DUSB_DESC_VID=0x239A -DUSB_DESC_UF2_PID=0x0029 \
+		-DDEVICE_NAME='"$(RAK_AUTO_BOARD)_AUTO_DFU"' \
+		-DTEST_HW_ID='"NRF_BL_239A0029_$(RAK_AUTO_BOARD)_AUTO_DFU"' \
+		-DTEST_TARGET_ID=$(RAK_AUTO_TARGET) $(INC) bootloader_mota_test.c \
+		$(SRC)/detools/detools.c $(SRC)/sha256.c $(SRC)/usb/uf2/bootloader_image.c -o $@
+
 bootloader_mota_qspi_generic_test: override CFLAGS += -DUSB_DESC_VID=0x239A -DUSB_DESC_UF2_PID=0x0029 \
 	-DDEVICE_NAME='"3401_W25Q16_DFU"' -DTEST_HW_ID='"NRF_BL_239A0029_3401_W25Q16_DFU"' -DTEST_TARGET_ID=0xFEF255E8u
 bootloader_mota_qspi_generic_v7_test: override CFLAGS += -DUSB_DESC_VID=0x2886 -DUSB_DESC_UF2_PID=0x0044 \
@@ -280,6 +296,8 @@ check: apply_sim readback_test readback_test_v7 readback_internal_test bootloade
 	./bootloader_mota_internal_test
 	./bootloader_mota_rak_auto_3401_test
 	./bootloader_mota_rak_auto_4631_test
+	./bootloader_mota_rak_recovery_3401_test
+	./bootloader_mota_rak_recovery_4631_test
 	@echo
 	./bootloader_mota_sd_test
 	./bootloader_mota_qspi_generic_test
@@ -321,6 +339,7 @@ sanitize:
 
 clean:
 	rm -f bootloader_mota_rak_auto_3401_test bootloader_mota_rak_auto_4631_test
+	rm -f bootloader_mota_rak_recovery_3401_test bootloader_mota_rak_recovery_4631_test
 	rm -f rak_auto_apply_4631_test rak_auto_apply_3401_test rak_auto_hybrid_4631_test rak_auto_hybrid_3401_test
 	rm -f uf2_volume_test
 	rm -f bootloader_mota_techo_lite_test
@@ -339,7 +358,8 @@ bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test \
 bootloader_mota_qspi_generic_test bootloader_mota_qspi_generic_v7_test bootloader_mota_techo_lite_test \
 bootloader_mota_recovery_test dfu_image_policy_test dfu_image_policy_recovery_test: $(SRC)/crc32.h
 
-bootloader_mota_rak_auto_3401_test bootloader_mota_rak_auto_4631_test: \
+bootloader_mota_rak_auto_3401_test bootloader_mota_rak_auto_4631_test \
+bootloader_mota_rak_recovery_3401_test bootloader_mota_rak_recovery_4631_test: \
     $(SRC)/crc32.h $(SRC)/ota_hybrid_handoff.h $(SRC)/ota_ram_info.h \
     $(SRC)/usb/uf2/bootloader_image.h
 rak_auto_apply_4631_test rak_auto_apply_3401_test rak_auto_hybrid_4631_test rak_auto_hybrid_3401_test: \
@@ -348,5 +368,6 @@ rak_auto_apply_4631_test rak_auto_apply_3401_test rak_auto_hybrid_4631_test rak_
 check: bootloader_image_recovery_test dfu_image_policy_recovery_test bootloader_mota_recovery_test
 check: bootloader_mota_qspi_generic_test bootloader_mota_qspi_generic_v7_test bootloader_mota_techo_lite_test
 check: bootloader_mota_rak_auto_3401_test bootloader_mota_rak_auto_4631_test
+check: bootloader_mota_rak_recovery_3401_test bootloader_mota_rak_recovery_4631_test
 check: uf2_volume_test
 check: rak_auto_apply_4631_test rak_auto_apply_3401_test rak_auto_hybrid_4631_test rak_auto_hybrid_3401_test

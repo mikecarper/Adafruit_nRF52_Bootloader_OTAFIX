@@ -38,13 +38,17 @@ Installed `*_AUTO_DFU` bootloaders from 2.4.8/2.4.9 and dedicated external RAK
 identities still require the [local recovery bridge](recovery-allow-all.md).
 Use the bridge matching the installed identity, then the normal compatible
 image for the physical board. Recovery builds remain temporary local tools;
-the two adaptive recovery images do not support bootloader `.mota` themselves.
+the repaired RAK adaptive recovery images support signed, exact-identity
+bootloader `.mota` self-updates after local bridge installation. They still
+require a local updater to migrate from `*_AUTO_DFU` to normal `*_DFU`.
 
 ## Restored recovery information
 
 - `INFO_UF2.TXT` again contains bootloader version, model, board ID, build date
   and expected SoftDevice family/FWID. `INDEX.HTM` again opens the board's
   support page. `CURRENT.UF2` readback and drag-and-drop flashing remain.
+  The two repaired adaptive recovery images omit only the build-date line to
+  fit their LoRa bootloader self-update code.
 - Heltec T1, T096 and T114 again display model/version, USB versus Bluetooth
   mode, and USB update instructions or the Bluetooth DFU device name. A direct
   line renderer keeps this information within the fixed bootloader size.

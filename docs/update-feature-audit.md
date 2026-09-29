@@ -98,9 +98,10 @@ The normal compatible RAK images retain `3401_DFU` / `4631_DFU`, ABI 3 and flags
 is advertised separately. Existing standard board installations can update
 normally; released `*_AUTO_DFU` identities still need the local recovery bridge.
 
-The separate adaptive `R_` recovery builds deliberately retain those historical
-identities and omit LoRa bootloader self-update. They are temporary local
-recovery tools. No recovery `.mota` bundle is published.
+The repaired adaptive `R_` recovery builds retain those historical identities
+and support signed, exact-identity LoRa bootloader self-update. They remain
+temporary local recovery tools; the normal `*_DFU` identity still requires a
+local updater. The recovery ZIP includes two matching signed `.mota` packages.
 
 ## Evidence and limits
 

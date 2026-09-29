@@ -46,9 +46,16 @@ release preserves the installed identity. Use its ordinary signed bootloader
 `.mota` or matching local updater directly; no recovery bridge is needed.
 For historical `3401_AUTO_DFU` / `4631_AUTO_DFU` devices, the recovery `*_auto`
 images deliberately keep those old names. Install that temporary local bridge,
-then the normal compatible image. Recovery adaptive builds omit LoRa bootloader
-self-update and remain manual recovery tools. Dedicated external RAK identities
-also retain their matching bridges inside this archive.
+then the normal compatible image. Dedicated external RAK identities also retain
+their matching bridges inside this archive.
+
+The two adaptive recovery images in the repaired 2.4.10 archive also accept
+signed bootloader `.mota` packages over LoRa. Their packages must target the
+exact historical `*_AUTO_DFU` identity and retain the internal bootloader
+staging and optional application-storage capabilities. The recovery packages
+in this archive update only a device already running the matching recovery
+bridge. They do not migrate to the normal `*_DFU` identity; complete that
+one-time transition with the local updater above.
 
 ## Linux build
 
@@ -90,8 +97,9 @@ Normal releases can attach `OTAFIX-<version>-R_recovery.zip` alongside the
 separate signed bootloader mOTA ZIP. The recovery archive contains all board
 profiles under `boards/<board>/`, this guide, the hardware qualification report,
 an inventory, and checksums. These remain temporary recovery-only images even
-when attached to a stable normal release. They are never included in the normal
-bootloader mOTA bundle. Build them from the same clean normal tag with the
+when attached to a stable normal release. The repaired 2.4.10 archive carries
+two signed exact-identity RAK recovery `.mota` packages; neither belongs in the
+normal bootloader mOTA bundle. Build the images from a clean exact tag with the
 recovery flag; their filenames and on-device versions retain the `R_` prefix.
 
 The Build workflow's `release_build` manual input produces production artifacts
@@ -110,7 +118,8 @@ The dedicated **Recovery allow-all boards** workflow builds every board. A manua
 workflow run produces test artifacts only. A release event for a recovery tag
 uploads only recovery packages, these instructions, and checksums; it marks the
 release as a prerelease and does not make it latest. The normal release workflow
-skips recovery tags, and no recovery `.mota` bundles are published.
+skips recovery tags. The repaired 2.4.10 archive is an in-place asset update,
+not a separate recovery release.
 
 Creating a tag/release is a separate maintainer action. Building or committing
 these changes does not publish anything. Qualify the two-step process on actual
