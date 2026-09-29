@@ -45,6 +45,29 @@ caps `0A`, and released loader CRC `FEEB920F` before the test.
 - Application body 590,208 bytes and hash `0132AC4EF3532FE3` were unchanged.
 - Read-only SWD verification matched all 40,960 installed bootloader bytes.
 
+## Direct standard board update: RAK4631 PASS
+
+Released OTAFIX 2.4.9 `4631_DFU`, target `2D0DF000`, CRC `A957950E`, was
+installed locally before this test. The new unified application initially used
+`internal store:252K` despite the fitted header W25Q16, as required by that old
+loader's capabilities.
+
+- The T114 served signed package MID `488B8649`; all 40 blocks arrived over LoRa.
+- The ordinary install command authenticated image hash `D3CB96E58DCB1D2B`.
+- The loader advanced to `OTAFIX2.4.10-preview.3`, CRC `74AE5D02`, retaining
+  `4631_DFU`, ABI 3 and caps `0A`.
+- Application body 620,260 bytes and hash `D839E39490D0D6C2` were unchanged.
+- After reboot, the same application selected `QSPI store:2048K` by reading
+  the new optional application-storage capability. No identity migration or
+  application reinstall was required for this transition.
+
+The local baseline setup first used a hand-generated DFU package with the
+wrong Nordic device type. Serial nrfutil reported completion without activation.
+After the bootloader's DFU timeout reset, a correctly labelled `0x0052` package
+installed the recovery bridge, then the released board loader. Those local
+setup retries were not LoRa failures; all results above were checked on-device.
+Final source rebuilds of both compatible RAK binaries match the tested bytes.
+
 ## Hardware and applications
 
 - RAK3401 USB serial `0B81C9C68D8D01B4`, without external NOR.
@@ -129,13 +152,68 @@ The normal `ota bootloader install` command authenticated and approved it.
 - Application body remained 619,988 bytes with hash `1809003428588E08`.
 - After reboot the application automatically returned to `QSPI store:2048K`.
 
+## Compatible image: Nordic nRF Connect Bluetooth update PASS
+
+After the direct board update, Nordic nRF Connect 4.24.3 installed the corrected
+unified RAK4631 application on compatible preview.3 using the phone's real DFU
+flow. The package contained 620,300 application bytes. The phone received
+validation response `10-04-01`, sent Activate and Reset, and observed the device
+reboot. The bootloader remained preview.3; the installed application reported body
+620,244 bytes, hash `CE03698DC21A151D`, and `QSPI store:2048K`. This separately
+checks Bluetooth against the final compatible identity/capability design; the
+earlier standard 1.17.1.5-to-1.17.1.7 tests remain recorded above.
+
+## Compatible successor gate found during hardware testing
+
+The first preview.3 successor pull with the application using external NOR was
+rejected by a remaining application CLI guard: it compared the bootloader's
+internal `0A` capability against the current external application store. No
+package was staged or activated. The CLI now applies that application-storage
+check only to application packages; bootloader packages still pass their
+separate exact-identity, signed-format, ABI, codec and boot-capability checks,
+and the adaptive store selects internal staging before writing their payload.
+The regression test executes the actual CLI gate for internal, external and
+unsafe application stores, including rejection of unsupported application
+updates.
+
+## Compatible successor with external application storage: PASS
+
+With the corrected application using `QSPI store:2048K`, the RAK4631 fetched
+signed successor MID `251EF1DE` from the T114 over LoRa. All 40 bootloader
+blocks were staged in internal flash, independently of application storage.
+The ordinary `ota bootloader install 251EF1DE 6F58B09DBB64E4B9` command
+reported trusted bootloader verification and rebooted the device.
+
+- Installed version: `OTAFIX2.4.10-preview.4`.
+- Whole-image CRC: `D3F6A50A`, matching the signed successor manifest.
+- Identity remained `4631_DFU`, target `2D0DF000`, ABI 3, caps `0A`.
+- Application body remained 620,244 bytes, hash `CE03698DC21A151D`.
+- After reboot, application storage automatically returned to `QSPI store:2048K`.
+- No staged bootloader package remained.
+
+This verifies the final compatible contract through a second signed update,
+including the corrected CLI guard and the internal/external storage transition.
+
+## Hardware cleanup
+
+The temporary lab signing key was removed from both RAK boards. Their final
+trust-key lists are empty, and the local temporary signing seed and Bluetooth
+PIN file were deleted. Both boards retain the corrected unified applications;
+RAK3401 runs compatible preview.3 and RAK4631 runs compatible preview.4.
+
+The folder server was stopped. Normal radio settings were restored on both RAK
+boards and the T114. OTA reach was restored to 0 hops on RAK3401 and T114 and
+3 hops on RAK4631; the T114 advertisement interval was restored to 1,440 minutes.
+
 ## Software verification
 
 The full host bootloader suite and sanitizers pass, including adaptive internal,
 external, hybrid, privileged bootloader, rejection, and startup-vector tests.
-Both display-controller variants build. MeshCore native OTA tests passed 169
-cases; Python package validation passed 49 cases. Both unified RAK applications
-build, and the adaptive-store and storage-policy host tests pass.
+GitHub build run `36554377582` passed all 31 jobs, including all 29 board
+profiles, host tests, sanitizers, and signed/dual-bank/recovery display builds.
+MeshCore native OTA tests passed 169 cases; Python package validation passed
+49 cases. Both unified RAK applications build, and the adaptive-store,
+CLI guard and storage-policy host tests pass.
 
 The Rust package suite passes, including deployed identity aliases and malformed
 optional-capability rejection. Normal releases select 24 profiles, with one RAK
@@ -147,6 +225,7 @@ MeshCore Open's full current suite passed 838 tests with two skips. The Bluetoot
 reply and compatible RAK application-storage tests pass; changed-file analysis
 reports no issues. Published source commits:
 
-- MeshCore: `346cf2fd` on `keymindCascade`.
+- Bootloader: `b561e4b` on `feature/ota-delta-apply`.
+- MeshCore: `346cf2fd` plus CLI gate fix `5c4b6d63` on `keymindCascade`.
 - motatool: `97431e56` on `codex/rak-lora-bootloader-recovery`.
 - MeshCore Open: `5fee33f` on `android-5.1.1-compat`.
