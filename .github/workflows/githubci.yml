@@ -292,6 +292,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
       - name: Download build artifacts
         uses: actions/download-artifact@v8
         with:
@@ -310,3 +313,10 @@ jobs:
             _release/*.txt
             _release/*.sha256
             _release/*.py
+
+      - name: Label RAK4631 release profiles
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 tools/label_rak4631_release_assets.py \
+            --repo "$GITHUB_REPOSITORY" --tag "$GITHUB_REF_NAME"

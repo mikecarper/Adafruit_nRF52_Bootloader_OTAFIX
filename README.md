@@ -427,6 +427,17 @@ candidates are not release artifacts.
 
   The adaptive `wiscore_rak4631_auto` target pairs with MeshCore `RAK_4631_repeater_unified_lora_ota` and supports internal staging, W25Q16 on P0.31, or RAK15001 Slot C on P0.26. The adaptive `wiscore_rak3401_auto` target pairs with `RAK_3401_repeater_unified_lora_ota` and supports internal staging or W25Q16 on P0.31; it keeps radio NSS P0.26 high during flash access. W25Q16 may use the original WisBlock SPI bus (SCK P0.03, DI P0.30, DO P0.29) or only the 2.54 mm headers (CLK J10 TX1/P0.16, DO J10 RX1/P0.15, DI J11 IO1/P0.17, CS J11 AIN1/P0.31). The header layout gives up UART1 GPS/PPS, while I2C sensors remain available. Both layouts require a physical CS-to-3.3 V pull-up. The app detects the exact NOR ID, refuses ambiguous dual-NOR wiring, and sends separate handoff markers for RAK15001 and header W25Q16. The loader selects the indicated bus and checks the exact JEDEC ID before reading an update. Both targets reserve 64 KiB of retained RAM for internal hybrid updates. Their identities are `4631_AUTO_DFU` and `3401_AUTO_DFU`. A first migration from the previously installed merged OTAFIX 2.4.8 loader was verified on both RAK cores using the corresponding `update-wiscore_rak*_auto_bootloader-OTAFIX2.4.8_mbr.uf2` on the USB bootloader drive; see [the hardware record](docs/hardware-qualification-2.4.8-header-w25.md). Earlier serial combined and bootloader-only DFU trials on RAK3401 reported success while leaving the old loader and damaging the application vector. The target version for the merged local builds is OTAFIX 2.4.8 (packed version `0x020408FF`). These adaptive loaders support application full/delta updates but do not include bootloader self-update, because the full combination exceeds the fixed 40 KiB bootloader region. Keep the dedicated loaders when bootloader self-update is required.
 
+  For the unified RAK4631 MeshCore application, select
+  `update-wiscore_rak4631_auto_bootloader-..._mbr.uf2`. The similarly named
+  `wiscore_rak4631_board` release files are for the internal-only
+  `4631_DFU` profile used by lean MeshCore builds. Both profiles run on a
+  RAK4631 and share USB VID/PID, but only `auto` handles the unified
+  application's supported external storage
+  layouts. A current board-bound loader rejects a UF2 with the other profile's
+  device name. If `ota bootloader` reports `4631_DFU` after installing `board`,
+  follow the [two-step recovery bridge](docs/recovery-allow-all.md) to migrate
+  to `4631_AUTO_DFU`; copying the `auto` UF2 directly will be rejected.
+
 
   The ordinary RAK4631 and RAK3401 targets retain internal staging. Heltec T114 is excluded because its public schematics mark the MX25R1635F U9 footprint optional, so the standard target cannot assume it is populated.
 

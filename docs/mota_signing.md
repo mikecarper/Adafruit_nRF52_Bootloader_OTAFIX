@@ -32,6 +32,13 @@ RAK3401 test confirmed an MBR bus fault with the installed bootloader
 unchanged. Use the exact-board UF2 or local DFU package to migrate these
 profiles.
 
+For MeshCore `RAK_4631_repeater_unified_lora_ota`, select the
+`wiscore_rak4631_auto` bootloader (`4631_AUTO_DFU`). The
+`wiscore_rak4631_board` bootloader (`4631_DFU`) is a separate internal-only
+profile used by lean builds on the same physical RAK4631. Check the identity with
+`ota bootloader` before choosing an exact-profile file. If the installed
+identity must change, use the [two-step recovery bridge](recovery-allow-all.md).
+
 The SWD trace and restoration checks are in
 [the adaptive RAK hardware result](rak-adaptive-recovery-hardware-20260927.md).
 
