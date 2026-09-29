@@ -348,7 +348,7 @@ class BuildProfileTest(unittest.TestCase):
         self.assertIn(QUALIFICATION_VERSION, readme)
         self.assertIn(QUALIFICATION_VERSION, test_readme)
 
-    def test_rak_normal_and_recovery_keep_the_intended_identities(self) -> None:
+    def test_rak_normal_and_recovery_keep_identities_and_self_update(self) -> None:
         for model in (3401, 4631):
             board = f"BOARD=wiscore_rak{model}_auto"
             normal = self.make_variable("CFLAGS", board, "RECOVERY_ALLOW_ALL_BOARDS=0")
@@ -356,7 +356,11 @@ class BuildProfileTest(unittest.TestCase):
             self.assertIn(f'"{model}_DFU"', normal)
             self.assertIn("-DMOTA_INTERNAL_BOOTLOADER_UPDATE=1", normal)
             self.assertIn(f'"{model}_AUTO_DFU"', recovery)
-            self.assertNotIn("-DMOTA_INTERNAL_BOOTLOADER_UPDATE=1", recovery)
+            self.assertIn("-DMOTA_INTERNAL_BOOTLOADER_UPDATE=1", recovery)
+            cmake = (ROOT / "src" / "boards" / f"wiscore_rak{model}_auto" /
+                     "board.cmake").read_text(encoding="ascii")
+            self.assertIn("set(MOTA_INTERNAL_BOOTLOADER_UPDATE ON)", cmake)
+            self.assertNotIn("set(MOTA_INTERNAL_BOOTLOADER_UPDATE OFF)", cmake)
 
     def test_ci_pins_gcc_14_2_and_builds_the_tightest_profiles(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
