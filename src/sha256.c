@@ -73,6 +73,7 @@ void sha256_final(sha256_ctx_t* c, uint8_t out[32]) {
     bitlen >>= 8;
   }
   sha256_transform(c, c->data);
-  for (i = 0; i < 4; i++)
-    for (int k = 0; k < 8; k++) out[i + 4*k] = (uint8_t)(c->state[k] >> (24 - i*8));
+  for (i = 0; i < 32; i++) {
+    out[i] = (uint8_t)(c->state[i / 4] >> (24 - (i % 4) * 8));
+  }
 }

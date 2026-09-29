@@ -1,4 +1,4 @@
-# Update feature audit: OTAFIX 2.4.9 and the next release
+# Update feature audit: OTAFIX 2.4.9 and 2.4.10
 
 Audited on 2026-09-29. This is an inventory of compiled update capabilities and
 published packages, not a claim of new physical testing on every board.
@@ -7,8 +7,8 @@ published packages, not a claim of new physical testing on every board.
 
 - All 29 normal 2.4.9 profiles include application in-place delta support.
 - 27 include signed bootloader self-update. Only `wiscore_rak3401_auto` and
-  `wiscore_rak4631_auto` omit it. The new compatible normal RAK images restore
-  that capability; they have not yet been published as a release.
+  `wiscore_rak4631_auto` omit it. The compatible normal RAK images in 2.4.10
+  restore that capability.
 - Full application `.mota` installation requires an external source: NOR flash
   or microSD. The 14 internal-only profiles reject full application packages.
   The adaptive RAK profiles also reject them when using internal staging.
@@ -18,12 +18,15 @@ published packages, not a claim of new physical testing on every board.
   `INFO_UF2.TXT` and `INDEX.HTM` files to save code space. `CURRENT.UF2` readback,
   application/bootloader UF2 writes, and Legacy serial/Bluetooth DFU remain.
   The two released adaptive profiles retain populated info/index files. The
-  new normal compatible RAK images use the compact volume too.
-- Heltec T096, T114 and T1 show only a white `DFU` mark in USB and Bluetooth
+  2.4.10 images restore both files on every profile while retaining fixed
+  directory metadata to reduce code size.
+- In 2.4.9, Heltec T096, T114 and T1 show only a white `DFU` mark in USB and Bluetooth
   recovery. The richer display with model, version, USB instructions and a
   distinct `BLE OTA` label is compiled out to fit internal bootloader updates.
   The opt-in signed-plus-dual-bank build suppresses even that mark and uses
   the status LED. Normal releases do not select that special combination.
+  In 2.4.10, normal, signed-only and dual-only builds restore model/version,
+  USB versus Bluetooth mode, and update instructions or the DFU device name.
 - Standard releases use Legacy Bluetooth DFU and do not include the experimental
   Secure DFU resume implementation. That separate laboratory option replaces
   Legacy BLE DFU; it is not an extra transport in the release images.
@@ -82,7 +85,7 @@ does not automatically use an inserted card. Dedicated NOR profiles require
 that exact supported storage hardware; only the RAK adaptive profiles select
 internal versus external application storage automatically.
 
-## Next release and recovery builds
+## OTAFIX 2.4.10 and recovery builds
 
 Normal release packaging now selects 24 profiles, including one compatible
 `*_auto` image for each RAK model. Every selected normal profile requires signed

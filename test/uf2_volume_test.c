@@ -5,6 +5,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#define UF2_VERSION            "v0.11.0-OTAFIX2.4.10"
+#define MOTA_SOFTDEVICE_FAMILY 140
+#define MOTA_SOFTDEVICE_FWID   0x00B6
+
 static uint8_t flash_image[1024u * 1024u];
 static unsigned erases, programs, invalidations;
 
@@ -80,14 +84,27 @@ static void test_volume(void) {
   assert(memcmp(sector, "TECHOLITE  ", 11) == 0 && sector[11] == 0x28);
   assert(memcmp(sector + 32, "INFO_UF2TXT", 11) == 0);
   assert(memcmp(sector + 64, "INDEX   HTM", 11) == 0);
+  uint32_t info_sizes[2];
   for (unsigned entry = 1; entry <= 2; entry++) {
-    assert(le16(sector + 32u * entry + 26) == 0);
-    assert(le32(sector + 32u * entry + 28) == 0);
+    assert(le16(sector + 32u * entry + 26) == entry + 1);
+    info_sizes[entry - 1] = le32(sector + 32u * entry + 28);
+    assert(info_sizes[entry - 1] > 32 && info_sizes[entry - 1] < 512);
   }
   assert(memcmp(sector + 96, "CURRENT UF2", 11) == 0);
-  assert(le16(sector + 96 + 26) == 2 && sector[128] == 0);
+  assert(le16(sector + 96 + 26) == 4 && sector[128] == 0);
   uint32_t blocks = le32(sector + 96 + 28) / 512u;
   assert(blocks == (USER_FLASH_END - USER_FLASH_START) / 256u);
+  read_block(first_data, sector);
+  assert(strlen((const char *)sector) == info_sizes[0]);
+  assert(strstr((const char *)sector, "UF2 Bootloader v0.11.0-OTAFIX2.4.10\r\n"));
+  assert(strstr((const char *)sector, "Model: " UF2_PRODUCT_NAME "\r\n"));
+  assert(strstr((const char *)sector, "Board-ID: " UF2_BOARD_ID "\r\n"));
+  assert(strstr((const char *)sector, "SoftDevice: S140 0x00B6\r\n"));
+  read_block(first_data + 1, sector);
+  assert(strlen((const char *)sector) == info_sizes[1]);
+  assert(strstr((const char *)sector, UF2_INDEX_URL));
+  assert(strstr((const char *)sector, "</script>"));
+  first_data += 2;
   assert(first_data == CURRENT_UF2_FIRST_LBA);
 
   // Both FATs must agree, with one complete file chain and free space after it.
@@ -97,9 +114,9 @@ static void test_volume(void) {
     assert(memcmp(sector, copy, sizeof(sector)) == 0);
     for (uint32_t i = 0; i < 256u; i++) {
       uint32_t cluster = s * 256u + i;
-      uint16_t expected = cluster == 0 ? 0xFFF8u : cluster == 1 ? 0xFFFFu : 0u;
-      if (cluster >= 2 && cluster < blocks + 2) {
-        expected = cluster == blocks + 1 ? 0xFFFFu : (uint16_t)(cluster + 1);
+      uint16_t expected = cluster == 0 ? 0xFFF8u : cluster < 4 ? 0xFFFFu : 0u;
+      if (cluster >= 4 && cluster < blocks + 4) {
+        expected = cluster == blocks + 3 ? 0xFFFFu : (uint16_t)(cluster + 1);
       }
       assert(le16(sector + 2u * i) == expected);
     }
@@ -142,6 +159,6 @@ static void test_volume(void) {
 int main(void) {
   for (size_t i = 0; i < sizeof(flash_image); i++) flash_image[i] = (uint8_t)(i ^ (i >> 8));
   test_volume();
-  puts("T-Echo Lite UF2: empty INFO/INDEX, FAT, readback, cached-write guard and drag-and-drop PASS");
+  puts("T-Echo Lite UF2: INFO/INDEX contents, FAT, readback, cached-write guard and drag-and-drop PASS");
   return 0;
 }

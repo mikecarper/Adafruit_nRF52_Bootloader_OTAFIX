@@ -152,15 +152,14 @@ void usb_desc_init(bool cdc_only)
 //--------------------------------------------------------------------+
 
 // array of pointer to string descriptors
-char const* string_desc_arr [] =
-{
-  (const char[]) { 0x09, 0x04 }, // 0: is supported language is English (0x0409)
-  BLEDIS_MANUFACTURER,           // 1: Manufacturer
-  BLEDIS_MODEL,                  // 2: Product
-  desc_str_serial,               // 3: Serials, should use chip ID
-  "nRF Serial",                  // 4: CDC Interface
+const char *const string_desc_arr[] = {
+  (const char[]){0x09, 0x04}, // 0: is supported language is English (0x0409)
+  BLEDIS_MANUFACTURER,        // 1: Manufacturer
+  BLEDIS_MODEL,               // 2: Product
+  desc_str_serial,            // 3: Serials, should use chip ID
+  "nRF Serial",               // 4: CDC Interface
 #if CFG_TUD_MSC
-  "nRF UF2",                     // 5: MSC Interface
+  "nRF UF2",                  // 5: MSC Interface
 #endif
 };
 
@@ -186,17 +185,13 @@ uint16_t const* tud_descriptor_string_cb(uint8_t index, uint16_t langid)
     // Convert ASCII string into UTF-16
     const char* str = string_desc_arr[index];
 
-    // Cap while measuring so the bootloader does not pull in strlen just to
-    // discard the tail of an overlong descriptor.
+    // Bound and convert in one pass; descriptors are at most 31 characters.
     chr_count = 0;
     while (chr_count < 31 && str[chr_count] != '\0') {
+      _desc_str[1 + chr_count] = str[chr_count];
       chr_count++;
     }
 
-    for(uint8_t i=0; i<chr_count; i++)
-    {
-      _desc_str[1+i] = str[i];
-    }
   }
 
   // first byte is length (including header), second byte is string type

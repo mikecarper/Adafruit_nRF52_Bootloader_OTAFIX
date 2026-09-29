@@ -141,41 +141,38 @@ STATIC_ASSERT(FAT_ENTRIES_PER_SECTOR                       ==       256); // FAT
 #define STR0(x) #x
 #define STR(x) STR0(x)
 
-#if !defined(UF2_COMPACT_RECOVERY_VOLUME)
-  #define INFO_UF2_INITIAL_CONTENT \
-    "UF2 Bootloader " UF2_VERSION "\r\n" \
-    "Model: " UF2_PRODUCT_NAME "\r\n" \
-    "Board-ID: " UF2_BOARD_ID "\r\n" \
-    "Date: " __DATE__ "\r\n" \
-    "SoftDevice expected: S" STR(MOTA_SOFTDEVICE_FAMILY) " " \
-      STR(MOTA_SOFTDEVICE_FWID) "\r\n"
+#define INFO_UF2_INITIAL_CONTENT                                                   \
+  "UF2 Bootloader " UF2_VERSION "\r\n"                                             \
+  "Model: " UF2_PRODUCT_NAME "\r\n"                                                \
+  "Board-ID: " UF2_BOARD_ID "\r\n"                                                 \
+  "Date: " __DATE__ "\r\n"                                                         \
+  "SoftDevice: S" STR(MOTA_SOFTDEVICE_FAMILY) " " STR(MOTA_SOFTDEVICE_FWID) "\r\n"
 
 static char const infoUf2File[] = INFO_UF2_INITIAL_CONTENT;
 
 const char indexFile[] =
-    // HTML's root/head/body tags are optional; keep the UF2 redirect small
-    // enough for the auto-storage bootloaders' fixed flash envelope.
-    "<!doctype html>\n"
-    "<script>location.replace(\"" UF2_INDEX_URL "\");</script>\n";
+  // The browser accepts this standalone redirect without wrapper markup.
+  "<script>location=\"" UF2_INDEX_URL "\"</script>\n";
 
+STATIC_ASSERT(ARRAY_SIZE(infoUf2File) < BPB_SECTOR_SIZE);
+STATIC_ASSERT(ARRAY_SIZE(indexFile) < BPB_SECTOR_SIZE);
+
+#if !defined(UF2_COMPACT_RECOVERY_VOLUME)
 static struct TextFile const info[] = {
     {.name = "INFO_UF2TXT", .content = infoUf2File},
     {.name = "INDEX   HTM", .content = indexFile},
 
-#if defined(UF2_HAS_CURRENT_FILE)
+  #if defined(UF2_HAS_CURRENT_FILE)
     // current.uf2 must be the last element and its content must be NULL
     {.name = "CURRENT UF2", .content = NULL},
-#endif
+  #endif
 };
-STATIC_ASSERT(ARRAY_SIZE(infoUf2File) < BPB_SECTOR_SIZE); // GhostFAT requires files to fit in one sector
-STATIC_ASSERT(ARRAY_SIZE(indexFile)   < BPB_SECTOR_SIZE); // GhostFAT requires files to fit in one sector
 #define NUM_FILES          ARRAY_SIZE(info)
   #define NUM_INFO_SECTORS (NUM_FILES - 1u)
 #else
-  // Empty INFO/INDEX directory entries cost no data clusters. CURRENT keeps
-  // working readback; all three names remain visible on the recovery drive.
+  // Keep fixed directory metadata while exposing the standard information files.
   #define NUM_FILES 3u
-  #define NUM_INFO_SECTORS 0u
+  #define NUM_INFO_SECTORS 2u
 #endif
 #define NUM_DIRENTRIES     (NUM_FILES + 1) // Code adds volume label as first root directory entry
 #define REQUIRED_ROOT_DIRECTORY_SECTORS ( ((NUM_DIRENTRIES+1) / DIRENTRIES_PER_SECTOR) + \
@@ -221,18 +218,20 @@ STATIC_ASSERT(UF2_SECTORS == ((UF2_SIZE/2) / 256)); // Not a requirement ... ens
 
 #if defined(UF2_COMPACT_RECOVERY_VOLUME)
 // Emit fixed FAT metadata as bytes instead of synthesizing many packed-field
-// stores at runtime. Zero-length placeholders have cluster zero (no allocation).
+// stores at runtime. Each information file occupies one sector.
 static const DirEntry compactFiles[] = {
-  {.name = "INFO_UF2", .ext = "TXT"},
-  {.name = "INDEX   ", .ext = "HTM"},
-  {
-    .name = "CURRENT ", .ext = "UF2",
-    .createTimeFine = __SECONDS_INT__ % 2 * 100,
-    .createTime = __DOSTIME__, .createDate = __DOSDATE__,
-    .lastAccessDate = __DOSDATE__,
-    .updateTime = __DOSTIME__, .updateDate = __DOSDATE__,
-    .startCluster = UF2_FIRST_SECTOR, .size = UF2_SIZE
-  },
+  {.name = "INFO_UF2", .ext = "TXT", .startCluster = 2, .size = sizeof(infoUf2File) - 1},
+  {.name = "INDEX   ", .ext = "HTM", .startCluster = 3, .size = sizeof(indexFile) - 1},
+  {.name           = "CURRENT ",
+   .ext            = "UF2",
+   .createTimeFine = __SECONDS_INT__ % 2 * 100,
+   .createTime     = __DOSTIME__,
+   .createDate     = __DOSDATE__,
+   .lastAccessDate = __DOSDATE__,
+   .updateTime     = __DOSTIME__,
+   .updateDate     = __DOSDATE__,
+   .startCluster   = UF2_FIRST_SECTOR,
+   .size           = UF2_SIZE},
 };
 STATIC_ASSERT(ARRAY_SIZE(compactFiles) == NUM_FILES);
 #endif
@@ -399,7 +398,11 @@ __attribute__((noinline)) void read_block(uint32_t block_no, uint8_t *data) {
             memcpy(data, info[sectionIdx].content, strlen(info[sectionIdx].content));
         } else { // generate the UF2 file data on-the-fly
 #else
-        {
+        if (sectionIdx == 0) {
+          memcpy(data, infoUf2File, sizeof(infoUf2File) - 1);
+        } else if (sectionIdx == 1) {
+          memcpy(data, indexFile, sizeof(indexFile) - 1);
+        } else {
 #endif
             sectionIdx -= NUM_INFO_SECTORS;
             uint32_t addr = USER_FLASH_START + (sectionIdx * UF2_FIRMWARE_BYTES_PER_SECTOR);

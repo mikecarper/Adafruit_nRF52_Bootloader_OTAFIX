@@ -32,14 +32,15 @@ installed bootloader unchanged. These installed identities require the
 [local recovery bridge](recovery-allow-all.md) to change to the new compatible
 identity.
 
-The **next release's normal compatible RAK images** support signed bootloader
+The **OTAFIX 2.4.10 normal compatible RAK images** support signed bootloader
 mOTA and retain `3401_DFU` / `4631_DFU`, ABI 3, and storage flags `0A`.
 Existing standard board devices can install them as ordinary signed bootloader
 updates, without a migration bridge. There is one normal `*_auto` image per
 physical RAK model. Updated unified applications detect optional external NOR
 through a separate capability record; bootloader packages always stage
-internally. These changes are hardware-qualified but not yet a published
-release. The separate adaptive `R_` recovery builds remain local-only bridges
+internally. See the [release notes](release-2.4.10.md) and
+[hardware qualification](hardware-qualification-2.4.10-rak-auto.md).
+The separate adaptive `R_` recovery builds remain local-only bridges
 without LoRa bootloader self-update.
 
 All curated profiles support application deltas. Full **application** `.mota`

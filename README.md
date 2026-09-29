@@ -3,11 +3,11 @@
 ## Update capabilities by board
 
 See the [complete update feature audit](docs/update-feature-audit.md) for every
-released profile and the next compatible RAK images. All curated profiles have
+released profile and the compatible RAK images in OTAFIX 2.4.10. All curated profiles have
 application delta support. Full application `.mota` installs require external
-NOR or microSD. Released RAK `auto` images lack bootloader `.mota`; the new
-normal compatible images add it. Empty USB info files, compact display output,
-and the separate experimental Secure BLE profile are documented explicitly.
+NOR or microSD. RAK `auto` images from 2.4.8/2.4.9 lack bootloader `.mota`;
+2.4.10 adds it. The USB information files and detailed Heltec recovery screens
+are also restored in 2.4.10. See [release notes](docs/release-2.4.10.md).
 
 ## Separate allow-all recovery builds
 
@@ -21,11 +21,11 @@ separately labelled and must not be left installed for normal operation.
 ## Development build qualification
 
 Development pushes on `feature/ota-delta-apply`, as well as `master`, pull
-requests, and manual runs, build with packed test version `0x02040A03`
-(compatible RAK qualification). This is not a release tag or a production version override.
+requests, and manual runs, build with packed test version `0x02040A05`
+(restored recovery information qualification). This is not a release tag or a production version override.
 The board matrix checks Make and CMake for every curated board; host tests,
 sanitizers, and signed/dual-bank/recovery T096 and T114 profiles remain required.
-Explicit qualification overrides display `TEST_0x02040A03` on-device, with
+Explicit qualification overrides display `TEST_0x02040A05` on-device, with
 the full Git/test description retained in filenames. This keeps growing Git
 descriptions from overflowing the signed display builds; production version
 text, signature checks, and the fixed linker envelope are unchanged.
@@ -67,6 +67,9 @@ application `.mota` updates on internal-only nRF52840 profiles.
   The opt-in signed-plus-dual-bank compatibility build uses its board status
   LED only. MeshCore and the release artifacts do not enable dual-bank DFU;
   standard release builds retain the on-screen mark.
+  OTAFIX 2.4.10 restores the model, version, transport and update instructions
+  through a direct line renderer; the special signed-plus-dual-bank build
+  continues to use its status LED.
 - Make and CMake now both reserve the physical 64 KiB arena: the Make linker
   definition is ordered before GNU ld reads the linker script, with regression
   coverage preventing a hybrid build from silently retaining the old stack
@@ -177,16 +180,15 @@ the mounted drive.
   optional whole-program points-to pass. The wrapper-local IPA barriers replace
   the old image-wide `-fno-ipa-modref` workaround, allowing safe size recovery
   in ordinary code.
-- Targets with internal, QSPI, or microSD bootloader self-update support expose
+- In OTAFIX 2.4.4 through 2.4.9, targets with internal, QSPI, or microSD bootloader self-update support expose
   a compact UF2 recovery volume to keep the fail-closed updater inside the
   fixed bootloader envelope. `INFO_UF2.TXT` and `INDEX.HTM` are visible but
   intentionally zero bytes long; their directory entries do not allocate data
   clusters. This is expected, not a failed flash. `CURRENT.UF2` readback and
   UF2 drag-and-drop writes still work. Use the USB identity, signed bootloader
   manifest, or board-specific package name instead of the empty info file to
-  identify the installed bootloader. Adaptive RAK targets now use this compact
-  volume too. Targets without bootloader self-update retain populated info/index
-  files.
+  identify the installed bootloader. OTAFIX 2.4.10 restores populated info/index
+  files on every profile, using fixed directory metadata to keep the code small.
 - BLE application DATA reception now clears this bootloader's local connection
   latency and best-effort disables inherited slave latency for the active
   connection. This does **not** request a new GAP interval or override the
@@ -437,7 +439,7 @@ candidates are not release artifacts.
 
   The adaptive `wiscore_rak4631_auto` target pairs with MeshCore `RAK_4631_repeater_unified_lora_ota` and supports internal staging, W25Q16 on P0.31, or RAK15001 Slot C on P0.26. The adaptive `wiscore_rak3401_auto` target pairs with `RAK_3401_repeater_unified_lora_ota` and supports internal staging or W25Q16 on P0.31; it keeps radio NSS P0.26 high during flash access. W25Q16 may use the original WisBlock SPI bus (SCK P0.03, DI P0.30, DO P0.29) or only the 2.54 mm headers (CLK J10 TX1/P0.16, DO J10 RX1/P0.15, DI J11 IO1/P0.17, CS J11 AIN1/P0.31). The header layout gives up UART1 GPS/PPS, while I2C sensors remain available. Both layouts require a physical CS-to-3.3 V pull-up. The app detects the exact NOR ID, refuses ambiguous dual-NOR wiring, and sends separate handoff markers for RAK15001 and header W25Q16. The loader selects the indicated bus and checks the exact JEDEC ID before reading an update. Both targets reserve 64 KiB of retained RAM for internal hybrid updates.
 
-  **Next release: one compatible image per RAK model.** The normal `*_auto`
+  **OTAFIX 2.4.10: one compatible image per RAK model.** The normal `*_auto`
   images retain `3401_DFU` / `4631_DFU`, apply ABI 3, codecs `0x0005`, and
   bootloader storage flags `0x0A`. Existing standard `board` devices can install
   the matching signed `.mota` as an ordinary bootloader update. No identity

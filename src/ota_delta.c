@@ -729,8 +729,9 @@ static int dt_pr(void *a, uint8_t *dst, size_t n) {
 struct mota_min {
   uint32_t total, image_size, payload_size, payload_addr, approval_addr;
   uint32_t target_id, fw_version, block_count;
-  uint8_t  base_hash[8], image_hash[32], hw_id[32];
-  uint8_t  codec_id, is_full, approved, format_ver, flags, hash_algo, block_size_log2;
+  // Keep the byte-only image identity in wire order for one bounded copy.
+  uint8_t image_hash[32], codec_id, hw_id[32], base_hash[8];
+  uint8_t is_full, approved, format_ver, flags, hash_algo, block_size_log2;
 };
 
 // The manifest prefix is invariant and byte-oriented. Byte arrays keep every
@@ -758,6 +759,11 @@ typedef struct {
 
 typedef char mota_fixed_header_size_must_match_wire_format
   [(sizeof(mota_fixed_header_t) == 8u + MOTA_MFL) ? 1 : -1];
+typedef char mota_image_identity_layout_must_match_wire_format
+  [(offsetof(struct mota_min, is_full) - offsetof(struct mota_min, image_hash) ==
+    offsetof(mota_fixed_header_t, signer) - offsetof(mota_fixed_header_t, image_hash))
+     ? 1
+     : -1];
 
 // Decode the five unsigned sizes in an in-place detools header without starting the decoder. This lets
 // us reject impossible flash geometry while the running application and its boot settings are intact.
@@ -812,17 +818,17 @@ static int dt_geometry_values_ok(const struct mota_min *m, uint32_t body_len,
 
 static int dt_geometry_ok(const struct mota_min *m, uint32_t body_len, uint32_t ws_span) {
   uint8_t  fixed;
-  uint32_t p = 1, memory, segment, shift, from, to;
-  if (m->payload_size < 2 || !staged_read(m->payload_addr, &fixed, 1) ||
-      !dt_header_u32(m->payload_addr, m->payload_size, &p, &memory) ||
-      !dt_header_u32(m->payload_addr, m->payload_size, &p, &segment) ||
-      !dt_header_u32(m->payload_addr, m->payload_size, &p, &shift) ||
-      !dt_header_u32(m->payload_addr, m->payload_size, &p, &from) ||
-      !dt_header_u32(m->payload_addr, m->payload_size, &p, &to)) {
+  uint32_t p = 1, sizes[5];
+  if (m->payload_size < 2 || !staged_read(m->payload_addr, &fixed, 1)) {
     return 0;
   }
-  return dt_geometry_values_ok(m, body_len, ws_span, fixed, memory, segment,
-                               shift, from, to);
+  // memory, segment, shift, from and to use the same bounded decoder.
+  for (unsigned i = 0; i < sizeof(sizes) / sizeof(sizes[0]); ++i) {
+    if (!dt_header_u32(m->payload_addr, m->payload_size, &p, &sizes[i])) {
+      return 0;
+    }
+  }
+  return dt_geometry_values_ok(m, body_len, ws_span, fixed, sizes[0], sizes[1], sizes[2], sizes[3], sizes[4]);
 }
 
 // ---- `.mota` parse (fixed fields only) + EndF base location --------------------------------------
@@ -867,13 +873,12 @@ static int parse_mota_at(uint32_t addr, uint32_t limit, struct mota_min *o) {
   o->image_size      = rd_u32(header.image_size);
   o->payload_size    = rd_u32(header.payload_size);
   o->block_size_log2 = header.block_size_log2;
-  o->codec_id        = header.codec_id;
   o->is_full         = (o->flags & MFLAG_FULL) ? 1 : 0;
   o->approval_addr   = addr + offsetof(mota_fixed_header_t, approval);
   o->approved = memcmp(header.approval, APRV, sizeof(header.approval)) == 0;
-  memcpy(o->image_hash, header.image_hash, sizeof(o->image_hash));
-  memcpy(o->hw_id, header.hw_id, sizeof(o->hw_id));
-  memcpy(o->base_hash, header.base_hash, sizeof(o->base_hash));
+  memcpy((uint8_t *)o + offsetof(struct mota_min, image_hash),
+         (const uint8_t *)&header + offsetof(mota_fixed_header_t, image_hash),
+         offsetof(mota_fixed_header_t, signer) - offsetof(mota_fixed_header_t, image_hash));
 
   if (o->block_size_log2 == 0 || o->block_size_log2 > 24 || o->payload_size == 0) {
     return 0;
@@ -1070,6 +1075,13 @@ static int clear_approval(const struct mota_min *o) {
 }
 
 static bool finish_apply(bool result);
+
+// Share the diagnostic and peripheral cleanup tail across rejected updates.
+__attribute__((noinline, noclone)) static bool fail_apply(uint32_t result) {
+  gpregret2_set(result);
+  return finish_apply(false);
+}
+
 
 #if defined(MOTA_SD_CARD) || (defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0)
 static int sha256_staged_region_impl(
@@ -1335,8 +1347,6 @@ static int boot_image_ram_caps_valid(const uint8_t *image) {
 #endif
 
 static int boot_image_caps_valid(const uint8_t *image) {
-  static const uint8_t magic[8] = {MOTA_BL_MAGIC0, MOTA_BL_MAGIC1, MOTA_BL_MAGIC2, MOTA_BL_MAGIC3,
-                                   MOTA_BL_MAGIC4, MOTA_BL_MAGIC5, MOTA_BL_MAGIC6, MOTA_BL_MAGIC7};
   // Scan every aligned match: a magic copy in a literal pool must not hide the
   // real capability marker later in the image. Count every structurally valid
   // privileged marker before requiring the sole marker to match this build's
@@ -1352,11 +1362,9 @@ static int boot_image_caps_valid(const uint8_t *image) {
     const uint16_t apply_abi  = rd_u16(candidate + offsetof(mota_bl_info_t, apply_abi));
     const uint16_t codec_mask = rd_u16(candidate + offsetof(mota_bl_info_t, codec_mask));
     const uint8_t *storage    = candidate + offsetof(mota_bl_info_t, storage_flags);
-    if (memcmp(candidate, magic, sizeof(magic)) == 0 &&
-        apply_abi >= 3u && apply_abi != UINT16_MAX &&
-        (codec_mask & MOTA_BOOT_UPDATE_CODEC_MASK) == MOTA_BOOT_UPDATE_CODEC_MASK &&
-        (storage[0] & MOTA_BL_STORAGE_BOOT_UPDATE) != 0u &&
-        (storage[0] & (uint8_t)~MOTA_BL_STORAGE_KNOWN) == 0u &&
+    if (memcmp(candidate, g_mota_bl_info.magic, sizeof(g_mota_bl_info.magic)) == 0 && apply_abi >= 3u &&
+        apply_abi != UINT16_MAX && (codec_mask & MOTA_BOOT_UPDATE_CODEC_MASK) == MOTA_BOOT_UPDATE_CODEC_MASK &&
+        (storage[0] & MOTA_BL_STORAGE_BOOT_UPDATE) != 0u && (storage[0] & (uint8_t)~MOTA_BL_STORAGE_KNOWN) == 0u &&
         (storage[1] | storage[2] | storage[3]) == 0u) {
       if (++matches > 1u || storage[0] != MOTA_BOOT_UPDATE_STORAGE_FLAGS) {
         return 0;
@@ -1445,7 +1453,7 @@ static int mbr_copy_bootloader(void) {
 #endif
 }
 
-static bool boot_update_reject(const struct mota_min *m, uint32_t result) {
+__attribute__((noinline, noclone)) static bool boot_update_reject(const struct mota_min *m, uint32_t result) {
   gpregret2_set(result);
   if (m && m->approved && !clear_approval(m)) {
     gpregret2_set(GPREGRET2_BL_APPROVAL);
@@ -1482,18 +1490,15 @@ static bool apply_bootloader_update(void) {
   const int sd_authorized =
     sd_auth_take(MOTA_SD_AUTH_PURPOSE_BOOTLOADER, 3u);
   if (source != GPREGRET2_OTA_STAGE_SD) {
-    gpregret2_set(GPREGRET2_BL_CONTAINER);
-    return finish_apply(false);
+    return fail_apply(GPREGRET2_BL_CONTAINER);
   }
   if (!sd_authorized) {
-    gpregret2_set(GPREGRET2_BL_APPROVAL);
-    return finish_apply(false);
+    return fail_apply(GPREGRET2_BL_APPROVAL);
   }
 #endif
   struct mota_min m;
   if (!scan_bootloader_mota(&m, source) || !m.approved) {
-    gpregret2_set(GPREGRET2_BL_CONTAINER);
-    return finish_apply(false);
+    return fail_apply(GPREGRET2_BL_CONTAINER);
   }
 #if defined(MOTA_SD_BOOTLOADER_UPDATE)
   if (!sd_authorized_container_valid()) {
@@ -1532,20 +1537,17 @@ static bool apply_bootloader_update(void) {
 #endif
 #endif
   if (!clear_approval(&m)) {
-    gpregret2_set(GPREGRET2_BL_APPROVAL);
-    return finish_apply(false);
+    return fail_apply(GPREGRET2_BL_APPROVAL);
   }
   if (copy_staged_full_image(&m, BOOT_UPDATE_RAW_START) != 0u ||
       !full_image_hash_valid(&m, BOOT_UPDATE_RAW_START, false)) {
-    gpregret2_set(GPREGRET2_BL_COPY);
-    return finish_apply(false);
+    return fail_apply(GPREGRET2_BL_COPY);
   }
   // Revalidate the exact embedded board manifest/CRC and continuity capability
   // from the final raw MBR source. A reset before the MBR call boots the
   // unchanged application and old bootloader.
   if (!boot_image_metadata_valid_at(BOOT_UPDATE_RAW_START, &m)) {
-    gpregret2_set(GPREGRET2_BL_MANIFEST);
-    return finish_apply(false);
+    return fail_apply(GPREGRET2_BL_MANIFEST);
   }
 
   // External staging is no longer needed after the scratch copy. Release the
@@ -1650,8 +1652,7 @@ bool ota_delta_check_and_apply(void) {
 #if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
   if (stage_handoff == GPREGRET2_OTA_STAGE_HYBRID &&
       !hybrid_handoff_take()) {
-    gpregret2_set(0xBE);
-    return finish_apply(false);
+    return fail_apply(0xBE);
   }
 #endif
 #if defined(MOTA_QSPI_FLASH)
@@ -1701,24 +1702,21 @@ bool ota_delta_check_and_apply(void) {
 
 #if defined(MOTA_SD_CARD)
   if (!sd_auth_take(MOTA_SD_AUTH_PURPOSE_APP, 2u)) {
-    gpregret2_set(0xBD);
-    return finish_apply(false);
+    return fail_apply(0xBD);
   }
 #endif
 
 #if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
   if (g_hybrid.container_total != 0u &&
       !hybrid_authorized_container_valid()) {
-    gpregret2_set(0xBA);
-    return finish_apply(false);
+    return fail_apply(0xBA);
   }
 #endif
 
   struct mota_min m;
   uint32_t        mota_addr = scan_mota(&m, stage_ceiling);
   if (!mota_addr || !m.approved) {
-    gpregret2_set(0xB2);
-    return finish_apply(false);
+    return fail_apply(0xB2);
   } // nothing staged / unapproved
 
   // Format v3 is reserved for the distinct bootloader-update trigger. This is
@@ -1779,8 +1777,7 @@ bool ota_delta_check_and_apply(void) {
   // Consume approval before invalidating or modifying the application. A QSPI
   // program failure must leave the still-valid running image bootable.
   if (!clear_approval(&m)) {
-    gpregret2_set(0xBC);
-    return finish_apply(false);
+    return fail_apply(0xBC);
   }
 
   // Commit point: make every subsequent reset enter DFU BEFORE the first destructive application write.
@@ -1810,20 +1807,16 @@ bool ota_delta_check_and_apply(void) {
   int r = detools_apply_patch_in_place_callbacks(dt_mr, dt_mw, dt_me, NULL,
                                                 NULL, dt_pr, (size_t)m.payload_size, &c);
   if (r < 0) {
-    gpregret2_set(0x90 | ((uint32_t)(-r) & 0x0F));
-    return finish_apply(false);
+    return fail_apply(0x90 | ((uint32_t)(-r) & 0x0F));
   }
   if (!cache_flush()) {
-    gpregret2_set(0xBF);
-    return finish_apply(false);
+    return fail_apply(0xBF);
   }
   if (c.patch_pos != c.patch_len) {
-    gpregret2_set(0x99);
-    return finish_apply(false);
+    return fail_apply(0x99);
   }
   if ((uint32_t)r != m.image_size) {
-    gpregret2_set(0xB6);
-    return finish_apply(false);
+    return fail_apply(0xB6);
   }
 
   return finish_apply(finish_app_update(&m));

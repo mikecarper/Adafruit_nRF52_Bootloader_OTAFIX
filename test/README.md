@@ -350,7 +350,7 @@ changes to the SoftDevice, signing policy or public key, dual-bank/UF2/DFU/debug
 features, USB timeout, source selection, or compiler/linker flags rewrite a
 content-hashed stamp and force both recompilation and relinking. The persisted
 stamp contains only a SHA-256 digest. The same regression pins nonrelease CI to
-the documented `0x02040A03` compatible RAK qualification lineage and rejects
+the documented `0x02040A05` restored recovery information qualification lineage and rejects
 reuse of failed candidate ID `0x02040401` as an active override. It also pins
 bounded `TEST_<packed-version>` on-device qualification text while requiring
 full Git/test provenance in filenames (recovery retains its `R_` label), and

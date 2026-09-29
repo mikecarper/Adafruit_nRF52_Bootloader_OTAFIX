@@ -19,8 +19,8 @@ permissions:
 
 env:
   # 0x02040401 identifies the failed global TinyUSB-budget candidate.
-  # 0x02040A03 identifies compatible RAK qualification, not a release.
-  OTAFIX_QUALIFICATION_VERSION: '0x02040A03'
+  # 0x02040A05 identifies restored recovery information qualification, not a release.
+  OTAFIX_QUALIFICATION_VERSION: '0x02040A05'
   OTAFIX_RELEASE_BUILD: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.release_build) }}
 
 concurrency:

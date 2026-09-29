@@ -267,50 +267,55 @@ static void draw_screen(const uint8_t *fb) {
 #endif
 
 #if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
-// Draw a compact block "DFU" mark without pulling the font/icon renderer into
-// the space-constrained internal-update bootloader. Render it directly into
-// each RGB565 display line so this profile does not need the indexed-framebuffer
-// conversion path as well. Each byte describes one five-cell-tall column; zero
-// columns separate the letters.
-static void draw_dfu(void) {
-#if defined(SIGNED_FW) && defined(DUALBANK_FW)
-  // This opt-in combination carries both ECC and dual-bank code. Keep a
-  // safe linker margin by using the board LED as its recovery/progress signal.
-  // Standard, signed-only, and dual-only builds retain the white DFU mark.
-  return;
-#else
-  static const uint8_t columns[] = {
-    0x1f, 0x11, 0x0e, 0x00, // D
-    0x1f, 0x05, 0x01, 0x00, // F
-    0x1f, 0x10, 0x1f,       // U
-  };
-  enum {
-    CELL = DISPLAY_HEIGHT / 7,
-    LEFT = (DISPLAY_WIDTH - (int)sizeof(columns) * CELL) / 2,
-    TOP  = (DISPLAY_HEIGHT - 5 * CELL) / 2,
+// Render the model, version and transport instructions directly into display
+// lines. This preserves the useful recovery information without an indexed
+// framebuffer, palette or icon decoder in internal-update builds.
+__attribute__((noinline, noclone)) static void draw_dfu(bool ble) {
+    #if defined(SIGNED_FW) && defined(DUALBANK_FW)
+  // This optional combination uses the board status LED. Normal releases and
+  // signed-only or dual-only builds retain the recovery information.
+  (void)ble;
+    #else
+  const char *const rows[] = {
+    DISPLAY_TITLE,
+    UF2_VERSION_BASE,
+    ble ? "BLUETOOTH DFU" : "USB DFU",
+    ble ? DEVICE_NAME : "Copy firmware.uf2",
   };
 
   for (int x = 0; x < DISPLAY_WIDTH; ++x) {
-    uint8_t line[DISPLAY_HEIGHT * 2];
-    memset(line, 0, sizeof(line));
-
-    if ((unsigned)(x - LEFT) < sizeof(columns) * CELL) {
-      uint8_t bits = columns[(x - LEFT) / CELL];
-      for (unsigned row = 0; row < 5; ++row, bits >>= 1) {
-        if (bits & 1u) {
-          memset(line + 2 * (TOP + (int)row * CELL), 0xff, 2 * CELL);
+    uint16_t line[DISPLAY_HEIGHT] = {0};
+    for (unsigned row = 0; row < sizeof(rows) / sizeof(rows[0]); ++row) {
+      const char *text   = rows[row];
+      const int   length = (int)strlen(text);
+      const int   scale  = (row % 2 == 0 && length * 12 <= DISPLAY_WIDTH) ? 2 : 1;
+      const int   column = x - (DISPLAY_WIDTH - length * 6 * scale) / 2;
+      if (column < 0 || column >= length * 6 * scale) {
+        continue;
+      }
+      const unsigned cell = (unsigned)column / (unsigned)scale;
+      unsigned       ch   = (unsigned char)text[cell / 6];
+      if (ch < ' ' || ch >= 0x7f) {
+        ch = '?';
+      }
+      const uint8_t bits = font8[(ch - ' ') * 6 + cell % 6];
+      const int     top  = DISPLAY_HEIGHT * (int)(row + 1) / 5 - 4 * scale;
+      for (unsigned bit = 0; bit < 8; ++bit) {
+        if (bits & (1u << bit)) {
+          for (int repeat = 0; repeat < scale; ++repeat) {
+            line[top + (int)bit * scale + repeat] = 0xffff;
+          }
         }
       }
     }
-
-    board_display_draw_line(x, line, sizeof(line));
+    board_display_draw_line(x, (const uint8_t *)line, sizeof(line));
   }
-#endif
+    #endif
 }
-#endif
+  #endif
 
-// Draw a color bar, clipping a malformed board-specific layout to the buffer.
-#if !defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+  // Draw a color bar, clipping a malformed board-specific layout to the buffer.
+  #if !defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
 static void draw_bar(int y, int h, int color) {
   if (y < 0) {
     h += y;
@@ -332,8 +337,8 @@ static void draw_bar(int y, int h, int color) {
 // draw drag & drop screen
 void screen_draw_drag(void) {
 #if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
-  draw_dfu();
-#else
+  draw_dfu(false);
+  #else
   draw_bar(SCREEN_BAR1_Y, SCREEN_BAR1_H, COLOR_GREEN);
   draw_bar(SCREEN_BAR2_Y, SCREEN_BAR2_H, COLOR_BLUE);
   draw_bar(SCREEN_BAR3_Y, SCREEN_BAR3_H, COLOR_ORANGE);
@@ -345,19 +350,19 @@ void screen_draw_drag(void) {
   printicon(SCREEN_DRAG_X + SCREEN_FILE_LOGO_X, SCREEN_DRAG_Y + 5, COLOR_WHITE, fileLogo);
   printicon(SCREEN_DRAG_X + SCREEN_ARROW_LOGO_X, SCREEN_DRAG_Y, COLOR_WHITE, arrowLogo);
   printicon(SCREEN_DRAG_X + SCREEN_PENDRIVE_LOGO_X, SCREEN_DRAG_Y, COLOR_WHITE, pendriveLogo);
-  #ifndef SCREEN_HIDE_LABELS
+    #ifndef SCREEN_HIDE_LABELS
   print(22, SCREEN_DRAG_Y - 12, COLOR_WHITE, "firmware.uf2", 1);
   print(160, SCREEN_DRAG_Y - 12, COLOR_WHITE, UF2_VOLUME_LABEL, 1);
-  #endif
+    #endif
 
   draw_screen(frame_buf);
-#endif
+  #endif
 }
 
 void screen_draw_ble(void) {
 #if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
-  draw_dfu();
-#else
+  draw_dfu(true);
+  #else
   draw_bar(SCREEN_BAR1_Y, SCREEN_BAR1_H, COLOR_GREEN);
   draw_bar(SCREEN_BAR2_Y, SCREEN_BAR2_H, COLOR_BLUE);
   draw_bar(SCREEN_BAR3_Y, SCREEN_BAR3_H, COLOR_ORANGE);
@@ -368,7 +373,7 @@ void screen_draw_ble(void) {
   print_centered(SCREEN_BANNER_Y, COLOR_WHITE, BANNER_TEXT, 1);
 
   draw_screen(frame_buf);
-#endif
+  #endif
 }
 
 #endif

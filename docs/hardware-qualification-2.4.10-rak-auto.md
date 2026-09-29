@@ -3,6 +3,30 @@
 Development qualification for the next release, performed on 2026-09-29.
 The images below use explicit test versions; they are not release artifacts.
 
+## Recovery information restoration for 2.4.10
+
+The final release preparation also restores populated USB info/index files and
+the Heltec T1/T096/T114 model/version/transport screens. Fixed directory entries
+and direct display-line rendering avoid the previous empty-file/DFU-only tradeoff.
+The restored screen code was rendered for all three actual board definitions in
+USB and Bluetooth modes and checked with ASan/UBSan; these are software renders,
+not photographs of physical screens.
+
+Space is recovered by looping over the five bounded delta geometry fields,
+copying the contiguous byte-only manifest identity once, sharing rejection
+cleanup, and using equivalent single-pass USB string/SHA output loops. The
+full host and sanitizer suites pass after these changes, including image hashes,
+signatures/identity rejection, metadata, USB FAT chains/readback/writes, delta
+geometry and all update backends. Both display controllers also pass normal,
+signed, dual-bank, signed-plus-dual-bank and recovery CMake builds.
+
+A Make qualification using the production-length 2.4.10 strings and explicit
+test packed version `0x02040AFF` fits RAK4631 in 40,777 executable/data bytes,
+leaving seven bytes before CF2. It is a size check, not a release artifact.
+The final production artifacts must come from the clean exact release tag.
+Qualification builds of this restoration use `0x02040A05`; the earlier physical
+preview.1 through preview.4 results below describe their respective images.
+
 ## Image contract and size
 
 The compatible images keep `3401_DFU` / `4631_DFU`, ABI 3, codecs `0x0005`,

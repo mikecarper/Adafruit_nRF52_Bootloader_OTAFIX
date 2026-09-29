@@ -260,8 +260,9 @@ exact board and storage profile. In particular, heltec_mesh_tower_v2 and
 heltec_mesh_tower_v2_sdcard are not interchangeable even though they share a
 wire target ID.
 
-The USB drive exposes working CURRENT.UF2 readback and zero-byte INFO_UF2.TXT /
-INDEX.HTM placeholders. USB flashing and Legacy BLE DFU remain available.
+The USB drive exposes working CURRENT.UF2 readback, populated INFO_UF2.TXT
+with version/board/SoftDevice information, and a working INDEX.HTM redirect.
+USB flashing and Legacy BLE DFU remain available.
 
 New QSPI profiles need a compatible MeshCore application and a locally
 installed self-update-capable bootloader before their first remote update.

@@ -110,11 +110,11 @@ def source_guards() -> None:
         "#define UF2_COMPACT_RECOVERY_VOLUME 1",
         '#include "uf2_current_echo.h"',
         '{.name = "CURRENT UF2", .content = NULL}',
-        "#define NUM_INFO_SECTORS 0u",
+        "#define NUM_INFO_SECTORS 2u",
         "static const DirEntry compactFiles[]",
         '.name = "INFO_UF2", .ext = "TXT"',
         '.name = "INDEX   ", .ext = "HTM"',
-        "SoftDevice expected: S",
+        "SoftDevice: S",
         "#if defined(UF2_HAS_CURRENT_FILE)",
     ):
         if required not in GHOSTFAT_SOURCE:
