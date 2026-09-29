@@ -57,6 +57,13 @@ in this archive update only a device already running the matching recovery
 bridge. They do not migrate to the normal `*_DFU` identity; complete that
 one-time transition with the local updater above.
 
+For the in-place 2.4.10 repair, the two adaptive images were rebuilt from the
+exact source-only tag `R_v0.11.0-OTAFIX2.4.10` at commit `ff7959c`.
+The other 27 board images are unchanged. The archive manifest records the
+source tag, both signed package identities, and every artifact checksum.
+Host tests and package verification passed; these repaired images have not
+been installed on physical boards as part of this repair.
+
 ## Linux build
 
 Use the repository's Arm GNU 14.2.Rel1-or-newer toolchain and Python prerequisites,

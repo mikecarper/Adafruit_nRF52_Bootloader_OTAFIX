@@ -41,6 +41,11 @@ image for the physical board. Recovery builds remain temporary local tools;
 the repaired RAK adaptive recovery images support signed, exact-identity
 bootloader `.mota` self-updates after local bridge installation. They still
 require a local updater to migrate from `*_AUTO_DFU` to normal `*_DFU`.
+The repaired recovery archive records the exact source-only tag
+`R_v0.11.0-OTAFIX2.4.10` and includes two signed recovery-identity packages.
+The other 27 recovery board images were preserved byte-for-byte. The repaired
+images passed build and host verification; physical installation was not
+repeated for this in-place repair.
 
 ## Restored recovery information
 

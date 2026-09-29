@@ -7,14 +7,16 @@ import json
 from pathlib import Path
 import re
 import struct
+import subprocess
 import zipfile
 
 from intelhex import IntelHex
 
-from build_bootloader_mota_release import add_to_zip, sha256, version_from_tag
+from build_bootloader_mota_release import add_to_zip, parse_package, sha256, version_from_tag
 from patch_bootloader_manifest import find_manifest, verify_manifest
 
 ROOT = Path(__file__).resolve().parents[1]
+RAK_RECOVERY_BOARDS = ("wiscore_rak3401_auto", "wiscore_rak4631_auto")
 
 
 def inspect_profile(artifacts, board, tag, packed):
@@ -80,7 +82,8 @@ def inspect_profile(artifacts, board, tag, packed):
                    "files": {path.name: sha256(path) for path in files}}
 
 
-def build(artifacts, output, tag):
+def build(artifacts, output, tag, recovery_mota_dir=None, source_tag=None,
+          motatool=None, public_key=None):
     label, _, packed = version_from_tag(tag)
     boards = sorted(path.name for path in (ROOT / "src/boards").iterdir() if path.is_dir())
     inventory, entries = [], []
@@ -88,16 +91,50 @@ def build(artifacts, output, tag):
         files, item = inspect_profile(artifacts, board, tag, packed)
         inventory.append(item)
         entries.extend((path, f"boards/{board}/{path.name}") for path in files)
+    board_paths = {path for path, _ in entries}
+    recovery_mota = []
+    if recovery_mota_dir is not None:
+        if source_tag != "R_" + tag or motatool is None or public_key is None:
+            raise ValueError("repaired recovery bundle requires its exact R_ source tag, motatool and public key")
+        public_text = public_key.read_text(encoding="ascii").strip()
+        if not re.fullmatch(r"[0-9A-Fa-f]{64}", public_text):
+            raise ValueError("recovery signing public key must be 32 hex bytes")
+        expected_signer = bytes.fromhex(public_text)
+        expected_files = {
+            recovery_mota_dir / f"update-R_{board}_bootloader-{tag}.mota"
+            for board in RAK_RECOVERY_BOARDS
+        }
+        if {path for path in recovery_mota_dir.iterdir() if path.is_file()} != expected_files:
+            raise ValueError("recovery mOTA directory must contain exactly the two RAK packages")
+        for board in RAK_RECOVERY_BOARDS:
+            path = recovery_mota_dir / f"update-R_{board}_bootloader-{tag}.mota"
+            item = next(item for item in inventory if item["board"] == board)
+            package = parse_package(path, board, packed, expected_signer)
+            hw_id = f"NRF_BL_239A0029_{item['device_name']}"
+            wire = hw_id.encode("ascii").ljust(32, b"\0")
+            target_id = int.from_bytes(hashlib.sha256(wire).digest()[:4], "little")
+            if (package["hardware_id"] != hw_id or
+                    package["target_id"] != f"0x{target_id:08X}" or
+                    package["image_sha256"] != item["bootloader_sha256"]):
+                raise ValueError(f"{board}: recovery package does not match the rebuilt image")
+            recovery_mota.append(package)
+            entries.append((path, f"mota/{path.name}"))
+        subprocess.run([str(motatool), "verify",
+                        *(str(path) for path in sorted(expected_files)),
+                        "--pub", str(public_key)], check=True)
     actual = {path for path in artifacts.iterdir() if path.is_file()}
-    if actual != {path for path, _ in entries}:
+    if actual != board_paths:
         raise ValueError("unexpected or stale artifacts in recovery input directory")
     output.mkdir(parents=True, exist_ok=True)
     if any(output.iterdir()):
         raise ValueError("recovery output directory must be empty")
     manifest = output / "manifest.json"
-    manifest.write_text(json.dumps({"tag": tag, "recovery_only": True,
+    manifest_data = {"tag": tag, "recovery_only": True,
         "packed_bootloader_version": f"0x{packed:08X}", "board_count": len(boards),
-        "boards": inventory}, indent=2) + "\n", encoding="ascii")
+        "boards": inventory}
+    if recovery_mota:
+        manifest_data.update(source_tag=source_tag, recovery_mota=recovery_mota)
+    manifest.write_text(json.dumps(manifest_data, indent=2) + "\n", encoding="ascii")
     entries += [(manifest, manifest.name),
         (ROOT / "docs/recovery-allow-all.md", "RECOVERY-README.md"),
         (ROOT / "docs/recovery-rak3401-hardware-20260912.md", "recovery-rak3401-hardware-20260912.md")]
@@ -118,5 +155,10 @@ if __name__ == "__main__":
     parser.add_argument("--artifacts-dir", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--tag", required=True)
+    parser.add_argument("--recovery-mota-dir", type=Path)
+    parser.add_argument("--source-tag")
+    parser.add_argument("--motatool", type=Path)
+    parser.add_argument("--public-key", type=Path)
     args = parser.parse_args()
-    build(args.artifacts_dir, args.output_dir, args.tag)
+    build(args.artifacts_dir, args.output_dir, args.tag, args.recovery_mota_dir,
+          args.source_tag, args.motatool, args.public_key)
