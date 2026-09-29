@@ -1,5 +1,14 @@
 # Adafruit nRF52 Bootloader with Enhanced OTA DFU
 
+## Update capabilities by board
+
+See the [complete update feature audit](docs/update-feature-audit.md) for every
+released profile and the next compatible RAK images. All curated profiles have
+application delta support. Full application `.mota` installs require external
+NOR or microSD. Released RAK `auto` images lack bootloader `.mota`; the new
+normal compatible images add it. Empty USB info files, compact display output,
+and the separate experimental Secure BLE profile are documented explicitly.
+
 ## Separate allow-all recovery builds
 
 For devices stuck with another board's OTAFIX bootloader, an opt-in

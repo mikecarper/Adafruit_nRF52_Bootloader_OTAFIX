@@ -24,22 +24,32 @@ The second command lists the trusted keys so the addition can be confirmed.
 Only the public key is distributed. The official private key is stored outside
 the source tree and in the repository's release-only GitHub Actions secret.
 
-The adaptive RAK3401 and RAK4631 profiles do not support bootloader mOTA.
-On OTAFIX 2.4.8, the bootloader locks `0xF4000..0x100000` before starting the
-application, including the MBR parameter page at `0xFE000`. A signed package
-verified by MeshCore cannot invoke the MBR copy through that lock. A physical
-RAK3401 test confirmed an MBR bus fault with the installed bootloader
-unchanged. Use the exact-board UF2 or local DFU package to migrate these
-profiles.
+The **released 2.4.8/2.4.9** adaptive RAK3401 and RAK4631 profiles
+(`*_AUTO_DFU`, ABI 2) do not support bootloader mOTA. They lock
+`0xF4000..0x100000` before starting the application, including the MBR parameter
+page at `0xFE000`. A physical RAK3401 test confirmed an MBR bus fault with the
+installed bootloader unchanged. These installed identities require the
+[local recovery bridge](recovery-allow-all.md) to change to the new compatible
+identity.
 
-For MeshCore `RAK_4631_repeater_unified_lora_ota`, select the
-`wiscore_rak4631_auto` bootloader (`4631_AUTO_DFU`). The
-`wiscore_rak4631_board` bootloader (`4631_DFU`) is a separate internal-only
-profile used by lean builds on the same physical RAK4631. Check the identity with
-`ota bootloader` before choosing an exact-profile file. If the installed
-identity must change, use the [two-step recovery bridge](recovery-allow-all.md).
-The unified application can fall back to internal staging with `4631_DFU`,
-but external storage requires `4631_AUTO_DFU`. MeshCore 1.17.1.5's lean LoRa
+The **next release's normal compatible RAK images** support signed bootloader
+mOTA and retain `3401_DFU` / `4631_DFU`, ABI 3, and storage flags `0A`.
+Existing standard board devices can install them as ordinary signed bootloader
+updates, without a migration bridge. There is one normal `*_auto` image per
+physical RAK model. Updated unified applications detect optional external NOR
+through a separate capability record; bootloader packages always stage
+internally. These changes are hardware-qualified but not yet a published
+release. The separate adaptive `R_` recovery builds remain local-only bridges
+without LoRa bootloader self-update.
+
+All curated profiles support application deltas. Full **application** `.mota`
+images require external NOR or microSD; internal-only staging, including the
+adaptive RAK fallback, supports deltas only. The retained RAM arena increases
+delta capacity without enabling internal full application installs. See the
+[complete board feature audit](update-feature-audit.md) for the released matrix
+and other omitted features.
+
+MeshCore 1.17.1.5's lean LoRa
 target and 1.17.1.7's unified target have different mOTA target IDs. Use an
 exact-base delta for lean-to-lean LoRa upgrades only when it fits staging.
 An exact-base delta from the published `26303793` 1.17.1.5 lean image to
