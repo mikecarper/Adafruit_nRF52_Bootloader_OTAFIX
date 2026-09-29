@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "repository": "mikecarper/Adafruit_nRF52_Bootloader_OTAFIX",
+  "profiles": [
+    {"id": "gat562", "label": "MTools Tec GAT562", "meshcoreHardware": ["GAT562_30S_Mesh_Kit", "GAT562_Mesh_EVB_Pro", "GAT562_Mesh_Tracker_Pro"]},
+    {"id": "heltec_mesh_pocket", "label": "Heltec MeshPocket", "meshcoreHardware": ["Mesh_pocket"]},
+    {"id": "heltec_mesh_tower_v2", "label": "Heltec MeshTower V2 - internal storage", "meshcoreHardware": ["Heltec_tower_v2"]},
+    {"id": "heltec_mesh_tower_v2_sdcard", "label": "Heltec MeshTower V2 - microSD", "meshcoreHardware": ["Heltec_tower_v2_sdcard"]},
+    {"id": "heltec_t096", "label": "Heltec T096", "meshcoreHardware": ["Heltec_t096"]},
+    {"id": "heltec_t1", "label": "Heltec T1", "meshcoreHardware": ["Heltec_t1"]},
+    {"id": "heltec_t114", "label": "Heltec T114", "meshcoreHardware": ["Heltec_t114", "Heltec_t114_without_display"]},
+    {"id": "keepteen_lt1", "label": "Keepteen LT1", "meshcoreHardware": ["KeepteenLT1"]},
+    {"id": "lilygo_techo", "label": "LilyGo T-Echo", "meshcoreHardware": ["LilyGo_T-Echo"]},
+    {"id": "lilygo_techo_lite", "label": "LilyGo T-Echo Lite", "meshcoreHardware": ["LilyGo_T-Echo-Lite", "LilyGo_T-Echo-Lite_non_shell"]},
+    {"id": "minewsemi_mx25le01", "label": "MinewSemi MX25LE01", "meshcoreHardware": ["Minewsemi_me25ls01"]},
+    {"id": "pca10056", "label": "Nordic nRF52840 DK PCA10056", "meshcoreHardware": ["PCA10056"]},
+    {"id": "promicro_nrf52840", "label": "ProMicro nRF52840", "meshcoreHardware": ["ProMicro"]},
+    {"id": "sensecap_solar_p1", "label": "SenseCAP Solar Node P1", "meshcoreHardware": ["SenseCap_Solar"]},
+    {"id": "t1000_e", "label": "Seeed Tracker T1000-E", "meshcoreHardware": ["t1000e"]},
+    {"id": "thinknode_m1", "label": "ThinkNode M1", "meshcoreHardware": ["ThinkNode_M1"]},
+    {"id": "thinknode_m3", "label": "ThinkNode M3", "meshcoreHardware": ["ThinkNode_M3"]},
+    {"id": "thinknode_m6", "label": "ThinkNode M6", "meshcoreHardware": ["ThinkNode_M6"]},
+    {"id": "wio_tracker_l1", "label": "Seeed Wio Tracker L1", "meshcoreHardware": ["WioTrackerL1"]},
+    {"id": "wiscore_rak3401_auto", "label": "RAK3401 - adaptive internal / W25Q16 / RAK15001", "meshcoreHardware": ["RAK_3401"]},
+    {"id": "wiscore_rak4631_auto", "label": "RAK4631 - adaptive internal / W25Q16 / RAK15001", "meshcoreHardware": ["RAK_4631", "R1Neo"]},
+    {"id": "wismesh_tag", "label": "RAK WisMesh Tag", "meshcoreHardware": ["RAK_WisMesh_Tag"]},
+    {"id": "xiao_nrf52840_ble", "label": "Seeed XIAO nRF52840 BLE", "meshcoreHardware": ["Xiao_nrf52"]},
+    {"id": "xiao_nrf52840_ble_sense", "label": "Seeed XIAO nRF52840 BLE Sense", "meshcoreHardware": ["Xiao_nrf52_Sense"]}
+  ]
+}

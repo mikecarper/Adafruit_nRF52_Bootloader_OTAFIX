@@ -326,3 +326,13 @@ jobs:
         run: |
           python3 tools/label_rak4631_release_assets.py \
             --repo "$GITHUB_REPOSITORY" --tag "$GITHUB_REF_NAME"
+
+      - name: Publish exact-board bootloader download manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" > _release-metadata.json
+          python3 tools/build_bootloader_download_manifest.py \
+            --release-json _release-metadata.json --output _release/bootloader-manifest.json
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber \
+            _release/bootloader-manifest.json _release/bootloader-manifest.json.sha256
