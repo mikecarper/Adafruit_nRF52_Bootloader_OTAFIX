@@ -1,7 +1,82 @@
 # RAK adaptive bootloader update qualification
 
-Development qualification for the next release, performed on 2026-09-29.
-The images below use explicit test versions; they are not release artifacts.
+Qualification performed on 2026-09-29. The production-tag checks are listed
+first; the later preview sections describe separate development images.
+
+## Final production tag: 2.4.10
+
+Source tag `v0.11.0-OTAFIX2.4.10` points to
+`936c4174f6d115cd64a0430c7b44af3edab1a533`.
+[Production workflow 36561372143](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/actions/runs/36561372143)
+passed all 33 jobs: Make/CMake for all 29 boards, host/sanitizer tests, both
+display-controller feature families, signed mOTA packaging and recovery
+archive validation. Independent local production builds of both RAK images
+match the downloaded CI bootloader bytes exactly.
+
+The downloaded and uploaded artifacts were checked for all 24 normal profiles,
+24 signed exact-profile bootloader packages and 29 separate recovery profiles.
+Every archive checksum, package signature, image hash, identity, capability
+record and packed version was verified. All 80 original release asset sizes
+and GitHub SHA-256 digests match the verified local files.
+
+### Official signed LoRa packages: both RAK boards PASS
+
+The T114 served the official release packages; both boards fetched all 40
+blocks and authenticated the official public signing key before installation.
+
+| Device | Package MID | Image hash prefix | Installed CRC | Preserved application hash |
+| --- | --- | --- | --- | --- |
+| RAK3401 | 7EA13BD2 | 6106857BE49670DB | 3053C49A | 5CA252565696C1D4 |
+| RAK4631 | 168DB259 | E0839208859B0C6A | 9D4C29ED | CE03698DC21A151D |
+
+Both report `v0.11.0-OTAFIX2.4.10`, their standard `3401_DFU` / `4631_DFU`
+identities, ABI 3 and caps `0A`. RAK3401 retains its 590,176-byte application
+body and internal store. RAK4631 retains its 620,244-byte application body and
+returns to its fitted 2 MB QSPI application store after internal bootloader
+staging. Read-only SWD verification matched all 40,960 RAK3401 release bytes.
+
+### Final bootloader applying a successor: RAK3401 PASS
+
+The application correctly refused a same-version reinstall with
+`candidate bootloader is not newer`. To exercise the final bootloader apply
+code, a separate temporary-key-signed qualification image used packed version
+`0x02040B01` (2.4.11-preview.1), MID `4A36605C`, image hash prefix
+`64DF995881858CA3`. The device fetched all 40 blocks over LoRa, authenticated
+and installed it through the ordinary bootloader command, and reported CRC
+`D50E0B92` while retaining application hash `5CA252565696C1D4`.
+
+That successor is a disposable hardware test, not a published release. The
+RAK3401 was restored to official 2.4.10 through identity-guarded SWD and its
+application hash checked again. The temporary trusted key and local signing
+seed were removed.
+
+### Physical USB information: RAK3401 PASS
+
+In UF2 mode, the actual drive exposed a 114-byte `INFO_UF2.TXT` with the
+2.4.10 version, RAK3401 model, `3401A` board ID, build date and S140 FWID
+`0x00B6`. Its 52-byte `INDEX.HTM` redirects to `https://rakwireless.com`.
+`CURRENT.UF2` is present with size 1,908,736 bytes. The independent host
+volume tests also verify FAT chains, readback and guarded writes.
+
+### Final-tag Nordic Bluetooth DFU: RAK4631 PASS
+
+Nordic nRF Connect 4.24.3 on the Android 5.1.1 phone installed the 620,300-byte
+unified application ZIP on the official 2.4.10 RAK4631 bootloader. The first
+attempt timed out before the first DFU opcode (GATT connection timeout/error
+133); reconnecting and retrying the same file completed initialization,
+transfer, validation response `10-04-01`, and activate/reset opcode `05`.
+
+After reboot the device still reports the official bootloader CRC `9D4C29ED`,
+ABI 3/caps `0A`, application body 620,244 bytes, hash `CE03698DC21A151D` and
+`QSPI store:2048K`. The earlier exact standard 1.17.1.5-to-1.17.1.7 and
+MeshCore Open phone tests below remain separately labelled prototype checks.
+The Open test used the fixed local APK; the published RC2 APK does not contain
+that app-side reply fix.
+
+The folder source was stopped, temporary signer keys were removed from both
+boards, normal radios were restored, RAK4631 OTA reach returned to three hops,
+and the T114 advertisement interval returned to 1440 minutes. Both RAKs were
+left on official 2.4.10 with their verified applications.
 
 ## Recovery information restoration for 2.4.10
 

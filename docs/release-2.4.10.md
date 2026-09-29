@@ -69,6 +69,14 @@ builds remain separate options. The special signed-plus-dual-bank display
 combination continues to use the status LED.
 
 The [complete feature audit](update-feature-audit.md) lists every 2.4.9 profile
-and the corrections in 2.4.10. Release publication requires the full board
-matrix, host/sanitizer tests, both display-controller build families, signed
-package verification and separate recovery archive verification to pass.
+and the corrections in 2.4.10. All 33 production CI jobs passed: the full
+Make/CMake board matrix, host/sanitizer tests, both display-controller build
+families, signed package verification and separate recovery archive checks.
+
+Official signed release packages installed over LoRa on both RAK models with
+unchanged application hashes. The final RAK3401 bootloader also installed a
+newer temporary signed test image, then was restored to official 2.4.10.
+Physical USB information files and the complete installed RAK3401 image were
+verified. Nordic nRF Connect also completed application transfer, validation
+and reboot on the final RAK4631 release, after one initial connection retry. See the [hardware qualification](hardware-qualification-2.4.10-rak-auto.md)
+for exact artifacts, identities, CRCs and development-versus-release test scope.
