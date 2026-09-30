@@ -12,7 +12,7 @@ import zipfile
 
 from intelhex import IntelHex
 
-from build_bootloader_mota_release import add_to_zip, parse_package, sha256, version_from_tag
+from build_bootloader_mota_release import add_to_zip, parse_package, pending_boards, sha256, version_from_tag
 from patch_bootloader_manifest import find_manifest, verify_manifest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -85,7 +85,9 @@ def inspect_profile(artifacts, board, tag, packed):
 def build(artifacts, output, tag, recovery_mota_dir=None, source_tag=None,
           motatool=None, public_key=None):
     label, _, packed = version_from_tag(tag)
-    boards = sorted(path.name for path in (ROOT / "src/boards").iterdir() if path.is_dir())
+    pending = pending_boards(ROOT / "src/boards")
+    boards = sorted(path.name for path in (ROOT / "src/boards").iterdir()
+                    if path.is_dir() and path.name not in pending)
     inventory, entries = [], []
     for board in boards:
         files, item = inspect_profile(artifacts, board, tag, packed)

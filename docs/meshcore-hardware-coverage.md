@@ -29,7 +29,8 @@ and [MeshCore board variants](https://github.com/mikecarper/MeshCore/tree/keymin
 
 These four source ports have `OTAFIX_BOARD_QUALIFICATION_PENDING ON`. CI builds
 them but normal release uploads, download manifests and signed release bundles
-exclude them. Remove that marker only after the checks below pass. They do not
+exclude them. Recovery release archives also exclude pending profiles. Remove
+that marker only after the checks below pass. They do not
 add or replace binaries in the already published 2.4.10 release.
 
 | New target | Confirmed difference from existing targets | Source contract |

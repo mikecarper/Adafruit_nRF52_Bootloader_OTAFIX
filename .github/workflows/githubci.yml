@@ -103,7 +103,7 @@ jobs:
     - name: Select normal release profile
       id: release-profile
       run: |
-        python3 -c 'import sys; sys.path.insert(0, "tools"); from build_bootloader_mota_release import QUALIFIED_BOARDS; print("publish=" + str(sys.argv[1] in QUALIFIED_BOARDS).lower())' "${{ matrix.board }}" >> "$GITHUB_OUTPUT"
+        python3 -c 'import sys; sys.path.insert(0, "tools"); from build_bootloader_mota_release import QUALIFIED_BOARDS, PENDING_BOARDS; print("publish=" + str(sys.argv[1] in QUALIFIED_BOARDS).lower()); print("publish_recovery=" + str(sys.argv[1] not in PENDING_BOARDS).lower())' "${{ matrix.board }}" >> "$GITHUB_OUTPUT"
 
     - uses: actions/upload-artifact@v7
       if: ${{ env.OTAFIX_RELEASE_BUILD != 'true' || steps.release-profile.outputs.publish == 'true' }}
@@ -113,12 +113,12 @@ jobs:
         if-no-files-found: error
 
     - name: Build separately labelled recovery bridge
-      if: ${{ env.OTAFIX_RELEASE_BUILD == 'true' }}
+      if: ${{ env.OTAFIX_RELEASE_BUILD == 'true' && steps.release-profile.outputs.publish_recovery == 'true' }}
       run: |
         make BOARD=${{ matrix.board }} RECOVERY_ALLOW_ALL_BOARDS=1 SECURE_DFU_TEST=0 all copy-artifact
 
     - uses: actions/upload-artifact@v7
-      if: ${{ env.OTAFIX_RELEASE_BUILD == 'true' }}
+      if: ${{ env.OTAFIX_RELEASE_BUILD == 'true' && steps.release-profile.outputs.publish_recovery == 'true' }}
       with:
         name: recovery-${{ matrix.board }}
         path: _bin/recovery-allow-all/${{ matrix.board }}/
