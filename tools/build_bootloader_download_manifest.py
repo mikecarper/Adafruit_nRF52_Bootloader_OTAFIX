@@ -26,6 +26,14 @@ def build_manifest(release, mapping):
             {item["id"] for item in definitions} != set(QUALIFIED_BOARDS)):
         raise ValueError("mapping must cover every normal release profile exactly once")
     aliases = [name for item in definitions for name in item["meshcoreHardware"]]
+    unavailable = mapping.get("unavailableProfiles", [])
+    unavailable_ids = [item["id"] for item in unavailable]
+    if (len(unavailable_ids) != len(set(unavailable_ids)) or
+            set(unavailable_ids).intersection(QUALIFIED_BOARDS) or
+            any(not item.get("reason") or not item.get("meshcoreHardware")
+                for item in unavailable)):
+        raise ValueError("invalid unavailable bootloader profile")
+    aliases += [name for item in unavailable for name in item["meshcoreHardware"]]
     if len(aliases) != len(set(aliases)):
         raise ValueError("ambiguous hardware alias")
     profiles = []
@@ -59,7 +67,8 @@ def build_manifest(release, mapping):
                          "storage": storage, "files": files})
     return {"schemaVersion": 1, "repository": repo, "tag": tag,
             "version": label, "releaseUrl": release_url,
-            "prerelease": bool(release.get("prerelease")), "profiles": profiles}
+            "prerelease": bool(release.get("prerelease")), "profiles": profiles,
+            "unavailableProfiles": unavailable}
 
 
 def main():

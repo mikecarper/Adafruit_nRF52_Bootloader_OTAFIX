@@ -17,6 +17,15 @@ generator checks that it covers every normal profile in
 verifying its physical bootloader compatibility. A hardware name absent from
 the mapping has no automatic download recommendation.
 
+The [MeshCore hardware audit](meshcore-hardware-coverage.md) records carrier
+aliases, physical pin differences and genuine gaps in released coverage.
+Optional `unavailableProfiles` describe boards without a released download;
+each has an ID, label, hardware names and reason, but no files. Their aliases
+must be unique across both lists. Source ports marked
+`OTAFIX_BOARD_QUALIFICATION_PENDING ON` build in CI but stay outside normal
+releases until hardware qualification. A new board name alone does not justify
+a new bootloader variant.
+
 The MeshCore web picker mirrors the release manifest during each Pages build
 and checks the latest stable GitHub release at runtime. It resolves exact
 assets for the same explicitly mapped profiles, so a new stable version can

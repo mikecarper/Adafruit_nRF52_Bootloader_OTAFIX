@@ -63,8 +63,8 @@ def define_hex(text: str, key: str) -> int:
 class QualifiedReleaseInventoryTest(unittest.TestCase):
     def test_inventory_covers_every_release_board(self) -> None:
         boards = {path.name for path in (ROOT / "src" / "boards").iterdir() if path.is_dir()}
-        self.assertEqual(set(release.QUALIFIED_BOARDS), boards - release.LEGACY_RAK_PROFILES)
-        self.assertEqual(len(release.QUALIFIED_BOARDS), len(boards) - 5)
+        self.assertEqual(set(release.QUALIFIED_BOARDS), boards - release.LEGACY_RAK_PROFILES - release.PENDING_BOARDS)
+        self.assertEqual(len(release.QUALIFIED_BOARDS), len(boards) - 5 - len(release.PENDING_BOARDS))
         self.assertEqual({name for name in release.QUALIFIED_BOARDS if name.startswith("wiscore_rak")},
                          {"wiscore_rak3401_auto", "wiscore_rak4631_auto"})
 

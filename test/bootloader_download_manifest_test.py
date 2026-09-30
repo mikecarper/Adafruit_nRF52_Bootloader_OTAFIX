@@ -45,6 +45,30 @@ class DownloadManifestTests(unittest.TestCase):
         manifest = build_manifest(self.release, self.mapping)
         self.assertNotIn("update-R_", manifest["profiles"][0]["files"]["uf2"]["name"])
 
+    def test_carrier_aliases_and_real_port_gaps(self):
+        manifest = build_manifest(self.release, self.mapping)
+        aliases = {h: p["id"] for p in manifest["profiles"] for h in p["meshcoreHardware"]}
+        for h in ("ikoka_stick_nrf_33dbm", "ikoka_nano_nrf_30dbm",
+                  "ikoka_handheld_nrf_e22_30dbm_096", "solarxiao_33S"):
+            self.assertEqual("xiao_nrf52840_ble", aliases[h])
+        for h in ("WioTrackerL1-1W", "WioTrackerL1Eink"):
+            self.assertEqual("wio_tracker_l1", aliases[h])
+        gaps = {h: p for p in manifest["unavailableProfiles"] for h in p["meshcoreHardware"]}
+        self.assertEqual(14, len(gaps))
+        for h in ("wio_wm1110", "GAT562_Mesh_Watch13", "ThinkNode_M8", "LilyGo_T-Echo_Card"):
+            self.assertNotIn(h, aliases)
+            self.assertTrue(gaps[h]["reason"])
+            self.assertNotIn("files", gaps[h])
+
+    def test_unavailable_profile_cannot_shadow_a_download(self):
+        self.mapping["unavailableProfiles"][0]["meshcoreHardware"].append("Xiao_nrf52")
+        with self.assertRaisesRegex(ValueError, "ambiguous hardware"):
+            build_manifest(self.release, self.mapping)
+        self.mapping["unavailableProfiles"][0]["meshcoreHardware"].pop()
+        self.mapping["unavailableProfiles"][0]["reason"] = ""
+        with self.assertRaisesRegex(ValueError, "invalid unavailable"):
+            build_manifest(self.release, self.mapping)
+
     def test_missing_or_ambiguous_file_rejected(self):
         self.release["assets"].append(copy.deepcopy(self.release["assets"][0]))
         with self.assertRaisesRegex(ValueError, "expected one exact uf2"):
