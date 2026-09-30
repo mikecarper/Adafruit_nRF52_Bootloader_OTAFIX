@@ -41,9 +41,15 @@ def build_manifest(release, mapping):
         board = definition["id"]
         cmake = (ROOT / "src/boards" / board / "board.cmake").read_text(encoding="ascii")
         identity = re.search(r"set\(DEVICE_NAME\s+(\S+)\)", cmake).group(1)
-        storage = "adaptive" if "set(MOTA_RAK_AUTO_STORE ON)" in cmake else next(
-            kind.lower() for kind in ("INTERNAL", "QSPI", "SD")
-            if f"set(MOTA_{kind}_BOOTLOADER_UPDATE ON)" in cmake)
+        if "set(MOTA_RAK_AUTO_STORE ON)" in cmake:
+            storage = "adaptive"
+        elif "set(MOTA_SD_DUAL_STORE ON)" in cmake:
+            # The combined Tower can also stage internally, but its primary
+            # bootloader identity and published download are the SD profile.
+            storage = "sd"
+        else:
+            storage = next(kind.lower() for kind in ("INTERNAL", "QSPI", "SD")
+                           if f"set(MOTA_{kind}_BOOTLOADER_UPDATE ON)" in cmake)
         files = {}
         for kind in ("uf2", "zip", "hex"):
             pattern = (f"update-{board}_bootloader-{tag}_mbr.uf2" if kind == "uf2"
