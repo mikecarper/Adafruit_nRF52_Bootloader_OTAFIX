@@ -27,9 +27,10 @@ and [MeshCore board variants](https://github.com/mikecarper/MeshCore/tree/keymin
 
 ## New variants with confirmed need
 
-These six source ports have `OTAFIX_BOARD_QUALIFICATION_PENDING ON`. CI builds
-them but normal release uploads, download manifests and signed release bundles
-exclude them. Recovery release archives also exclude pending profiles. Remove
+These seven source ports have `OTAFIX_BOARD_QUALIFICATION_PENDING ON`.
+Qualification CI builds them but production CI, normal release uploads, download
+manifests and signed release bundles exclude them. Recovery release archives
+also exclude pending profiles. Remove
 that marker only after the checks below pass. They do not
 add or replace binaries in the already published 2.4.10 release.
 
@@ -41,6 +42,7 @@ add or replace binaries in the already published 2.4.10 release.
 | `muzi_base` | Manufacturer bootloader has active-low LEDs and its own 239A:0081 identity, unlike GAT562/RAK. Uno/Duo/SuperIO share the Base PCB. | LEDs P1.04/03 active low; button P0.10; QSPI P0.03/26/30/29/28/02. Retain the manufacturer identity with unique `MUZIB_DFU`. |
 | `nano_g2_ultra` | Designer schematic confirms a distinct flash layout, one user button and no ordinary LEDs. Factory HEX uses 4251:8695, unlike the generic application HWIDs. | No PWM LEDs; button P1.06; QSPI P0.08/P1.07/P0.06/26/P1.04/02; unique `NANOG2_DFU`. Preserve factory `nRF52840-BQ-rev1` identity. |
 | `meshtiny` | Manufacturer specifies IS25LP080D and explicitly moves three flash pins away from encoder/buzzer pins. GAT562's flash and second button mappings cannot be reused. | LEDs P1.03/04 active high; side/down buttons P0.09/04; QSPI P0.03/22/27/29/21/02; factory 239A:0029 and `Meshtiny-MT001-Board`; unique `MT001_DFU`. |
+| `thinknode_m8` | V0.3-tested source confirms M1's button is M8's display enable and M1's LED is M8's GPS PPS. | Compile-only draft: no PWM LEDs, button P0.12 active low, QSPI P1.14/15/12/13/P0.07/05; unique `TNM8_DFU`. Factory USB identity is unknown; invalid 0000:0000 fixtures prevent a valid bootloader update identity. |
 
 Primary references:
 [Watch13 schematic](https://github.com/gat-iot/GAT562-family/blob/main/GAT562%20Mesh%20Watch13%20V1.0%20SCH.pdf),
@@ -50,7 +52,7 @@ Primary references:
 
 The follow-up [seven-board pin provenance audit](seven-board-pin-provenance.md)
 records manufacturer references, factory download inspection, git blame,
-commit diffs and associated PR discussions for Nano, Meshtiny and the five
+commit diffs and associated PR discussions for Nano, Meshtiny, M8 and the four
 remaining omissions. It distinguishes source confirmation from hardware tests.
 
 Verification on 2026-09-29: all four ports build successfully with GCC 14.2.1
@@ -65,11 +67,27 @@ compiled pin-contract tests and normal/recovery release inventory tests pass.
 The complete bootloader `make -C test check` suite also passes. Its Secure DFU
 inventory count now follows the actual board directories while continuing to
 check every board's unique identity and SoftDevice layout.
+M8 also passes Make and CMake with that explicit test version: 38748 of 40784
+executable flash bytes used. T096 and T114 were rebuilt successfully with CMake.
+The full host suite passes with M8 included. Its regressions check the V0.3 pins,
+peripheral output order, build/version guards and production CI exclusion.
+
+M8 is retained as a compile-only port until its factory USB identity is recorded.
+It requires `MOTA_BOOTLOADER_TEST_BUILD=1` and an explicit test version with Make,
+or the equivalent CMake options. Its zero USB IDs are invalid compiler fixtures,
+not allocated IDs or a claim of factory UF2 compatibility. Do not flash its
+generated images. The V0.3 pin contract holds display power, frontlight, GPS
+power, ADC power and buzzer low, sets their latches before enabling output, and
+leaves the disputed P0.13 rail/power-enable control untouched. It does not drive
+GPS PPS, use the encoder press as an active-low button, or infer USB presence
+from the marginal VBUS divider. Factory entry, power behavior and physical
+flash/update testing remain promotion gates.
 
 Most of these vendor bootloaders already use legacy Adafruit USB IDs. Nano G2
 Ultra instead uses its factory 4251:8695 identity. The ports retain the exact
 manufacturer identities for factory UF2 compatibility, rather than allocate
-new Adafruit IDs. OTAFIX whole-image manifests bind the board ID and unique
+new Adafruit IDs. M8 has no verified factory identity and cannot use this claim.
+OTAFIX whole-image manifests bind the board ID and unique
 device name, including for boards that share a legacy USB identity.
 
 ### Hardware checks before promotion
@@ -92,7 +110,6 @@ catalog entry has a specific reason instead of silently guessing another board.
 | Heltec Mesh Solar | Git blame finds the manufacturer hardware/watchdog change in Meshtastic PR 9337. Heltec's carrier pin map labels P1.03 as battery shutdown, contradicting its Arduino BSP LED. Flash definitions also conflict with BMS/indicator pins. Exact revision schematic and DFU watchdog behavior are still needed; factory CF2 239A:0071 alone is insufficient. |
 | MeshTracker X1 | MeshCore and Meshtastic confirm LEDs and active-high button. Seeed's factory ZIP confirms 2886:0057. MeshCore's separate flash PR specifies QSPI P0.19/20/21/22/23/P1.00 and rail P0.15, but independent manufacturer flash-rail and complete reset/power behavior remain unverified. L1 is not a substitute. |
 | ThinkNode M4 | The Meshtastic port author identifies a bespoke PCB rather than M3's module. Manufacturer specifies 2 MB external flash but both application variants omit its routing. Establish that routing, factory bootloader identity and safe rail states before adding a port. |
-| ThinkNode M8 | Meshtastic PR 11226 reports V0.3 hardware and traces pins to its schematic and the vendor V0.1 submission. M1's button/LED would touch M8's display enable/GPS PPS. Factory bootloader identity and power-latch/DFU entry behavior remain unverified. |
 | Wio WM1110 | Carrier resolved: MeshCore PR 982 targets the Wio-WM1110 Dev Kit, matching Meshtastic's SDK layout. Tracker 1110 has different LED/button/rail pins. Manufacturer diagram shows CH340C USB-to-UART, so native USB DFU must not be assumed. Confirm the Dev Kit bootloader identity, installation route and NFC configuration. |
 
 ## Complete released mapping

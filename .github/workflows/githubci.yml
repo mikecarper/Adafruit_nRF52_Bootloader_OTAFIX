@@ -48,9 +48,8 @@ jobs:
 
       - name: Set matrix
         id: set-matrix
-        working-directory: src/boards
         run: |
-          MATRIX_JSON=$(ls -d */ | sed 's/\/$//' | jq -R -s -c 'split("\n")[:-1]')
+          MATRIX_JSON=$(python3 -c 'import json, os, sys; sys.path.insert(0, "tools"); from build_bootloader_mota_release import ci_boards; print(json.dumps(ci_boards(production=os.environ["OTAFIX_RELEASE_BUILD"] == "true")))')
           echo "matrix=$MATRIX_JSON"
           echo "matrix=$MATRIX_JSON" >> $GITHUB_OUTPUT
 

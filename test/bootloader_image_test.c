@@ -86,6 +86,15 @@ static void make_valid_image(void) {
 }
 
 int main(void) {
+  // A compile-only board draft has an unknown (zero) USB/CF2 identity.
+  // It must not match a qualified target, even through the manual bridge.
+  make_valid_image();
+  write_u32(MANIFEST_OFFSET + offsetof(bootloader_update_manifest_t, board_id), 0U);
+  seal_manifest(MANIFEST_OFFSET);
+  assert(!bootloader_image_validate(image, IMAGE_START, IMAGE_SIZE, EXPECTED_BOARD_ID, expected_device_name));
+  assert(bootloader_image_classify_manual(image, IMAGE_START, IMAGE_SIZE,
+                                          EXPECTED_BOARD_ID, expected_device_name, NULL) == BOOTLOADER_IMAGE_INVALID);
+
   // The manual bridge relaxes identity only. Remote/strict APIs must reject
   // cross-board images even when linked into a recovery bootloader.
   make_valid_image();

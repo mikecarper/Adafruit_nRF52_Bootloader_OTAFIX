@@ -62,6 +62,14 @@ def release_boards(root: Path = Path(__file__).resolve().parents[1] / "src" / "b
 QUALIFIED_BOARDS = release_boards()
 PENDING_BOARDS = pending_boards()
 
+
+def ci_boards(*, production: bool = False) -> tuple[str, ...]:
+    """Compile pending ports only in qualification CI, not production builds."""
+    root = Path(__file__).resolve().parents[1] / "src" / "boards"
+    return tuple(path.name for path in sorted(root.iterdir()) if path.is_dir() and
+                 (not production or path.name not in PENDING_BOARDS))
+
+
 TAG_PATTERN = re.compile(
     r"^(?:v?[0-9]+\.[0-9]+\.[0-9]+-)?"
     r"OTAFIX(?P<major>[0-9]+)\.(?P<minor>[0-9]+)\.(?P<patch>[0-9]+)"

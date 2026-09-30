@@ -18,13 +18,13 @@ Review bots and generated PR summaries are not hardware evidence.
 | Nano G2 Ultra | Designer-authored Meshtastic pins match MeshCore and the published schematic. Factory HEX has USB identity **4251:8695**, unlike the generic application board JSON. | Add `nano_g2_ultra` as a source port with external flash, pending hardware qualification. |
 | Meshtiny | The manufacturer's Meshtastic port changes three flash pins to avoid encoder/buzzer conflicts. Manufacturer product and downloadable bootloader confirm external flash and MT001 identity. | Add `meshtiny` as a source port with external flash, pending hardware qualification. Do not alias GAT562. |
 | MeshTracker X1 | Both firmware projects agree on the active-high button and LEDs. MeshCore adds powered QSPI in a separate PR; Seeed's factory ZIP confirms **2886:0057**. | Need a dedicated profile. Keep unpublished until the flash rail and complete boot-time power/reset behavior are corroborated for the production revision. |
-| ThinkNode M8 | Initial vendor V0.1 work and a newer V0.3-tested port establish the separate controls. M1's bootloader button would use M8's display-enable pin. | Need a dedicated profile. Factory bootloader identity and the power-latch/DFU entry behavior remain unverified. |
+| ThinkNode M8 | Initial vendor V0.1 work and a newer V0.3-tested port establish the separate controls. M1's bootloader button would use M8's display-enable pin. | Add `thinknode_m8` as a compile-only source port, pending factory USB identity, power/entry verification and physical qualification. |
 | ThinkNode M4 | The port author explicitly says M4 has a bespoke MCU/radio PCB, rather than M3's module. Manufacturer says it has 2 MB external flash, but neither current firmware variant provides that flash map. | Need a dedicated profile. Do not infer M3 flash wiring; obtain the actual flash routing and factory bootloader identity. |
 | Wio WM1110 | MeshCore's original PR identifies the **Wio-WM1110 Dev Kit**, which matches Meshtastic's SDK carrier, not Tracker 1110 or XIAO. | Carrier identity is resolved. No existing OTAFIX alias fits. Verify the Dev Kit installation path and bootloader identity before adding a port. |
 | Heltec Mesh Solar | The same Heltec contributor introduced the original definitions and later reported a compatible watchdog hardware revision. Manufacturer pin map contradicts its Arduino BSP LED/button definitions. | Keep unpublished. Do not choose between the conflicting LED/flash definitions or reuse a T114/T1 profile. |
 
 None of these seven gained a released OTAFIX download from this research.
-The two new ports have `OTAFIX_BOARD_QUALIFICATION_PENDING ON`, so release
+The three new ports have `OTAFIX_BOARD_QUALIFICATION_PENDING ON`, so release
 manifests and normal/recovery archives continue to exclude them. Adding a port
 does not change the storage backend of an already released MeshCore application.
 
@@ -135,6 +135,28 @@ The checked public manufacturer repositories/wiki did not provide an exact
 M8 factory bootloader file or a directly downloadable revision schematic.
 Generic application USB HWIDs are not proof of factory bootloader identity.
 
+The retained `thinknode_m8` draft uses the V0.3 QSPI tuple, no PWM LED, and the
+separate active-low P0.12 button for the existing single-button DFU convention.
+The active-high encoder press on P0.06 is not treated as a second active-low
+button. DFU holds display power P1.10, frontlight P1.11, GPS power P0.16, ADC
+power P1.08 and buzzer P1.01 low. The output latch is cleared before enabling
+each output. P0.13 remains untouched because MeshCore calls it power enable
+while the newer V0.3 Meshtastic port calls it I2C power. GPS PPS P0.14 and the
+VBUS divider P1.03 remain untouched too. Common USBREGSTATUS handling remains
+in use; the V0.3 source explicitly cautions against digital VBUS-divider reads.
+
+Make and CMake require test-build mode and an explicit test version. The
+header additionally requires the compile-only definition from that build
+configuration. **0000:0000 is an invalid compiler fixture, not an allocated or
+verified USB identity**; zero CF2/BLMF identity cannot match a qualified target
+and is also rejected by manual recovery validation. The UF2 product and board
+strings are explicitly marked as draft.
+Generated images must not be flashed or published. Before hardware testing,
+record the exact factory USB descriptor and INFO_UF2 board string, replace the
+fixtures with that verified identity, and resolve safe rail/entry behavior.
+Keep the qualification marker until the physical checks pass. Production CI
+excludes pending ports; qualification CI can still check the draft compiles.
+
 ## ThinkNode M4
 
 - MeshCore `0a15c487d8b8`,
@@ -220,9 +242,12 @@ watchdog behavior during lengthy DFU before promotion.
 
 ## Verification scope
 
-The new Nano and Meshtiny source ports are build/test candidates, not hardware
+The new Nano, Meshtiny and M8 source ports are build/test candidates, not hardware
 qualified downloads. Pin-contract host tests compile their actual headers
-and verify exact buttons, flash pins, LED polarity and factory CF2 identities.
+and verify exact buttons, flash pins, LED polarity and factory CF2 identities
+where known. M8 instead asserts the invalid draft identity and verifies that
+its build cannot run without test mode/version, that its peripheral hooks avoid
+PPS, encoder, QSPI and disputed power pins, and that production CI excludes it.
 Release inventory tests ensure pending ports stay excluded from normal and
 recovery releases. Physical qualification remains the gate documented in
 [the coverage audit](meshcore-hardware-coverage.md#hardware-checks-before-promotion).
