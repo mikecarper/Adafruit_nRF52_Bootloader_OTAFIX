@@ -40,9 +40,17 @@ def release_boards(root: Path = Path(__file__).resolve().parents[1] / "src" / "b
                 raise ValueError(f"{directory.name}: inconsistent adaptive bootloader profile")
         backends = [name for name in ("INTERNAL", "QSPI", "SD")
                     if f"set(MOTA_{name}_BOOTLOADER_UPDATE ON)" in cmake]
-        if len(backends) != 1 or "set(MCU_VARIANT nrf52840)" not in cmake:
+        tower_dual = "set(MOTA_SD_DUAL_STORE ON)" in cmake
+        if tower_dual and (directory.name != "heltec_mesh_tower_v2_sdcard" or
+                           backends != ["INTERNAL", "SD"] or
+                           "set(MOTA_SD_CARD ON)" not in cmake or
+                           "set(MOTA_QSPI_FLASH ON)" in cmake or
+                           "-DMOTA_SD_CARD=1" not in make or
+                           "-DMOTA_SD_DUAL_STORE=1" not in make):
+            raise ValueError(f"{directory.name}: inconsistent combined Tower profile")
+        if (not tower_dual and len(backends) != 1) or "set(MCU_VARIANT nrf52840)" not in cmake:
             raise ValueError(f"{directory.name}: missing exact bootloader mOTA profile")
-        if f"-DMOTA_{backends[0]}_BOOTLOADER_UPDATE=1" not in make:
+        if any(f"-DMOTA_{backend}_BOOTLOADER_UPDATE=1" not in make for backend in backends):
             raise ValueError(f"{directory.name}: Make/CMake bootloader mOTA disagreement")
         if directory.name not in LEGACY_RAK_PROFILES:
             boards.append(directory.name)
@@ -259,6 +267,14 @@ Then follow the explicit bootloader installation workflow. Always select the
 exact board and storage profile. In particular, heltec_mesh_tower_v2 and
 heltec_mesh_tower_v2_sdcard are not interchangeable even though they share a
 wire target ID.
+
+The default combined MeshTower profile is heltec_mesh_tower_v2_sdcard. It
+preserves the existing SD identity and 0x09 update contract, adding internal
+staging as an optional capability. Existing self-update-capable SD units keep
+their signed SD upgrade path. Internal-only units require a one-time local
+USB/BLE DFU or SWD migration to this profile. Compatible MeshCore firmware
+defaults SD on; set sdcard off followed by reboot disables card use and selects
+internal staging. Never cross-flash a .mota based only on the shared target ID.
 
 The USB drive exposes working CURRENT.UF2 readback, populated INFO_UF2.TXT
 with version/board/SoftDevice information, and a working INDEX.HTM redirect.

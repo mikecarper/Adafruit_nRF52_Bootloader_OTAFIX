@@ -51,8 +51,8 @@ set(DFU_USB_ENUMERATION_TIMEOUT_MS "30000" CACHE STRING
 set(SIGNED_FW_QX "" CACHE STRING "Public key Qx (comma-separated bytes)")
 set(SIGNED_FW_QY "" CACHE STRING "Public key Qy (comma-separated bytes)")
 
-# Internal-only and RAK adaptive nRF52840 targets use the fixed top-of-SRAM
-# mOTA arena. Other QSPI/SD targets retain their historical full-RAM layout.
+# Internal-only, RAK adaptive, and combined Tower nRF52840 bootloaders use the
+# fixed top-of-SRAM mOTA arena. Other QSPI/SD profiles retain full RAM.
 if (MOTA_INTERNAL_BOOTLOADER_UPDATE OR MOTA_RAK_AUTO_STORE)
   set(MOTA_RAM_ARENA_SIZE_DEFAULT 65536)
 else ()
@@ -66,7 +66,7 @@ endif ()
 math(EXPR MOTA_RAM_ARENA_SIZE_BYTES "${MOTA_RAM_ARENA_SIZE}")
 if (MOTA_RAM_ARENA_SIZE_BYTES GREATER 0 AND
     (NOT (MOTA_INTERNAL_BOOTLOADER_UPDATE OR MOTA_RAK_AUTO_STORE) OR
-     (MOTA_QSPI_FLASH AND NOT MOTA_RAK_AUTO_STORE) OR MOTA_SD_CARD OR
+     (MOTA_QSPI_FLASH AND NOT MOTA_RAK_AUTO_STORE) OR (MOTA_SD_CARD AND NOT MOTA_SD_DUAL_STORE) OR
      NOT MCU_VARIANT STREQUAL "nrf52840"))
   message(FATAL_ERROR
     "The mOTA SRAM arena requires an internal or RAK adaptive nRF52840 target")
@@ -158,6 +158,18 @@ if (MOTA_SD_CARD)
   target_compile_definitions(bootloader PUBLIC MOTA_SD_CARD=1)
 endif ()
 
+if (MOTA_SD_DUAL_STORE)
+  if (NOT BOARD STREQUAL "heltec_mesh_tower_v2_sdcard" OR NOT MOTA_SD_CARD OR
+      NOT MOTA_SD_BOOTLOADER_UPDATE OR NOT MOTA_INTERNAL_BOOTLOADER_UPDATE OR MOTA_QSPI_FLASH)
+    message(FATAL_ERROR "SD dual storage requires the combined MeshTower V2 profile")
+  endif ()
+  target_compile_definitions(bootloader PUBLIC MOTA_SD_DUAL_STORE=1)
+  # GCC's caller-save optimization grows this fixed-space dual backend.
+  # Keep every USB/BLE recovery and validation path, but use normal call saves.
+  target_compile_options(bootloader PRIVATE -fno-caller-saves)
+  target_link_options(bootloader PRIVATE -fno-caller-saves)
+endif ()
+
 if (MOTA_QSPI_FLASH)
   target_sources(bootloader PUBLIC src/ota_qspi.c)
   target_compile_definitions(bootloader PUBLIC MOTA_QSPI_FLASH=1)
@@ -187,7 +199,7 @@ if (MOTA_SD_BOOTLOADER_UPDATE)
 endif ()
 
 if (MOTA_INTERNAL_BOOTLOADER_UPDATE)
-  if ((MOTA_QSPI_FLASH AND NOT MOTA_RAK_AUTO_STORE) OR MOTA_SD_CARD)
+  if ((MOTA_QSPI_FLASH AND NOT MOTA_RAK_AUTO_STORE) OR (MOTA_SD_CARD AND NOT MOTA_SD_DUAL_STORE))
     message(FATAL_ERROR "MOTA_INTERNAL_BOOTLOADER_UPDATE requires internal or RAK adaptive OTA storage")
   endif ()
   if (NOT MCU_VARIANT STREQUAL "nrf52840")

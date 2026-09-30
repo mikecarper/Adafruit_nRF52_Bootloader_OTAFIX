@@ -67,6 +67,26 @@ sd_apply_test: sd_apply_test.c $(SRC)/ota_delta.c $(SRC)/detools/detools.c $(SRC
 	$(CC) $(CFLAGS) -DOTA_DELTA_HOST_TEST -DMOTA_SD_CARD $(INC) sd_apply_test.c \
 		$(SRC)/detools/detools.c $(SRC)/sha256.c -o $@
 
+TOWER_DUAL_FLAGS = -DOTA_DELTA_HOST_TEST -DMOTA_SD_CARD -DMOTA_SD_DUAL_STORE \
+	-DMOTA_SD_BOOTLOADER_UPDATE -DMOTA_INTERNAL_BOOTLOADER_UPDATE -DMOTA_RAM_ARENA_SIZE=65536 \
+	-DUSB_DESC_VID=0x239A -DUSB_DESC_UF2_PID=0x0071 -DDEVICE_NAME='"TOWER_V2_OTA"'
+tower_dual_sd_test: TOWER_TEST_SRC=sd_apply_test.c
+tower_dual_internal_test: TOWER_TEST_SRC=readback_test.c
+tower_dual_boot_sd_test tower_dual_boot_internal_test: TOWER_TEST_SRC=bootloader_mota_test.c
+tower_dual_boot_internal_test: override CFLAGS += -DTEST_DUAL_INTERNAL=1
+tower_dual_sd_test tower_dual_internal_test tower_dual_boot_sd_test tower_dual_boot_internal_test: \
+    sd_apply_test.c readback_test.c bootloader_mota_test.c $(wildcard $(SRC)/ota*.h) \
+    $(SRC)/ota_delta.c $(SRC)/detools/detools.c $(SRC)/sha256.c $(SRC)/usb/uf2/bootloader_image.c
+	$(CC) $(CFLAGS) $(TOWER_DUAL_FLAGS) $(INC) $(TOWER_TEST_SRC) \
+		$(SRC)/detools/detools.c $(SRC)/sha256.c $(SRC)/usb/uf2/bootloader_image.c -o $@
+
+.PHONY: check-tower-dual
+check-tower-dual: tower_dual_sd_test tower_dual_internal_test tower_dual_boot_sd_test tower_dual_boot_internal_test
+	./tower_dual_sd_test
+	./tower_dual_internal_test
+	./tower_dual_boot_sd_test
+	./tower_dual_boot_internal_test
+
 qspi_apply_test: sd_apply_test.c $(SRC)/ota_delta.c $(SRC)/detools/detools.c $(SRC)/sha256.c \
                  $(SRC)/ota_delta.h $(SRC)/ota_layout.h $(SRC)/ota_qspi.h
 	$(CC) $(CFLAGS) -DOTA_DELTA_HOST_TEST -DMOTA_QSPI_FLASH $(INC) sd_apply_test.c \
@@ -338,6 +358,7 @@ sanitize:
 	$(MAKE) CFLAGS="$(SANITIZER_CFLAGS)" check
 
 clean:
+	rm -f tower_dual_sd_test tower_dual_internal_test tower_dual_boot_sd_test tower_dual_boot_internal_test
 	rm -f bootloader_mota_rak_auto_3401_test bootloader_mota_rak_auto_4631_test
 	rm -f bootloader_mota_rak_recovery_3401_test bootloader_mota_rak_recovery_4631_test
 	rm -f rak_auto_apply_4631_test rak_auto_apply_3401_test rak_auto_hybrid_4631_test rak_auto_hybrid_3401_test
@@ -370,4 +391,5 @@ check: bootloader_mota_qspi_generic_test bootloader_mota_qspi_generic_v7_test bo
 check: bootloader_mota_rak_auto_3401_test bootloader_mota_rak_auto_4631_test
 check: bootloader_mota_rak_recovery_3401_test bootloader_mota_rak_recovery_4631_test
 check: uf2_volume_test
+check: check-tower-dual
 check: rak_auto_apply_4631_test rak_auto_apply_3401_test rak_auto_hybrid_4631_test rak_auto_hybrid_3401_test

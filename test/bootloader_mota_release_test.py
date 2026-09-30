@@ -110,6 +110,32 @@ class QualifiedReleaseInventoryTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "inconsistent adaptive"):
                 release.release_boards(root)
 
+    def test_combined_tower_requires_exact_board_and_matching_backends(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            board = root / "heltec_mesh_tower_v2_sdcard"
+            board.mkdir()
+            cmake = (ROOT / "src/boards/heltec_mesh_tower_v2_sdcard/board.cmake").read_text()
+            make = (ROOT / "src/boards/heltec_mesh_tower_v2_sdcard/board.mk").read_text()
+            (board / "board.cmake").write_text(cmake)
+            (board / "board.mk").write_text(make)
+            self.assertEqual(release.release_boards(root), (board.name,))
+            for flag in ("SD_DUAL_STORE", "SD_CARD", "INTERNAL_BOOTLOADER_UPDATE", "SD_BOOTLOADER_UPDATE"):
+                (board / "board.mk").write_text(make.replace(f"-DMOTA_{flag}=1", ""))
+                with self.assertRaises(ValueError):
+                    release.release_boards(root)
+            (board / "board.mk").write_text(make)
+            for change in (cmake.replace("set(MOTA_SD_DUAL_STORE ON)", ""),
+                           cmake.replace("set(MOTA_SD_CARD ON)", ""),
+                           cmake + "\nset(MOTA_QSPI_FLASH ON)\n"):
+                (board / "board.cmake").write_text(change)
+                with self.assertRaises(ValueError):
+                    release.release_boards(root)
+            (board / "board.cmake").write_text(cmake)
+            board.rename(root / "unqualified_tower")
+            with self.assertRaisesRegex(ValueError, "inconsistent combined"):
+                release.release_boards(root)
+
     def test_gat562_exact_internal_profile_is_qualified(self) -> None:
         self.assertIn("gat562", release.QUALIFIED_BOARDS)
 

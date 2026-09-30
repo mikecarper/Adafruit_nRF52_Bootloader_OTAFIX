@@ -50,9 +50,8 @@ endif
 # Board specific
 -include src/boards/$(BOARD)/board.mk
 
-# The existing internal-bootloader-update profile is the curated set of
-# nRF52840 boards with no SD/QSPI OTA backend. Reserve the fixed 64 KiB arena
-# there by default; external-storage boards retain the complete historical RAM.
+# Internal-update profiles (including adaptive RAK and combined Tower) reserve
+# the fixed 64 KiB arena; external-only profiles retain historical full RAM.
 ifneq ($(findstring -DMOTA_INTERNAL_BOOTLOADER_UPDATE=1,$(CFLAGS)),)
 MOTA_RAM_ARENA_SIZE ?= 65536
 else

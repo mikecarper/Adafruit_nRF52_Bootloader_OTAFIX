@@ -11,7 +11,8 @@
 | --- | --- | --- | --- |
 | gat562 | MTools Tec GAT562 | 0x239A:0x0029 | https://github.com/gat-iot/GAT562-family |
 | heltec_mesh_pocket | Heltec Mesh Pocket | 0x239A:0x0071 | https://heltec.org/project/mesh-pocket/ |
-| heltec_mesh_tower_v2 | Heltec MeshTower V2 | 0x239A:0x0071 | https://heltec.org/project/meshtower/ |
+| heltec_mesh_tower_v2_sdcard | Heltec MeshTower V2, default combined SD/internal profile | 0x239A:0x0071 | https://heltec.org/project/meshtower/ |
+| heltec_mesh_tower_v2 | Heltec MeshTower V2, legacy internal-only profile | 0x239A:0x0071 | https://heltec.org/project/meshtower/ |
 | heltec_t096 | HT-n5262G | 0x239A:0x0071 | https://heltec.org/project/t096/ |
 | heltec_t1 | Heltec Mesh Node T1 | 0x239A:0x0071 | https://heltec.org/project/mesh-node-t1/ |
 | heltec_t114 | HT-n5262 | 0x239A:0x0071 | https://heltec.org/project/mesh-node-t114/ |
@@ -35,6 +36,10 @@
 | wismesh_tag | WisMesh Tag | 0x239A:0x0029 | https://store.rakwireless.com/products/wismesh-tag-meshtastic-gps-lora-tracker-ip66 |
 | xiao_nrf52840_ble | Seeed XIAO nRF52840 | 0x2886:0x0044 | https://www.seeedstudio.com/ |
 | xiao_nrf52840_ble_sense | Seeed XIAO nRF52840 | 0x2886:0x0045 | https://www.seeedstudio.com/ |
+
+See [combined MeshTower migration and qualification](docs/meshtower-dual-storage.md)
+before changing a Tower's storage profile. The shared identity does not make
+internal-only and SD bootloader packages interchangeable over OTA.
 
 ## Internal app-preserving bootloader-update identities
 
