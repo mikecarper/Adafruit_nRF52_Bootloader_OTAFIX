@@ -2,6 +2,14 @@
 
 ## Update capabilities by board
 
+Firmware pickers can use the release's [exact-board JSON download manifest](docs/bootloader-download-manifest.md)
+for individual bootloader UF2, DFU ZIP and SWD HEX links, sizes and checksums.
+
+The [MeshCore hardware coverage audit](docs/meshcore-hardware-coverage.md)
+includes verified XIAO/Ikoka/SolarXiao and Wio L1 carrier aliases. New Watch13,
+T-Echo Card, T-Impulse Plus and Muzi Base source ports build with Make and
+CMake but remain excluded from normal releases pending hardware tests.
+
 See the [complete update feature audit](docs/update-feature-audit.md) for every
 released profile and the compatible RAK images in OTAFIX 2.4.10. All curated profiles have
 application delta support. Full application `.mota` installs require external

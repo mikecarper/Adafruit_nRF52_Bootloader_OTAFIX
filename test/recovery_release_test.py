@@ -92,6 +92,16 @@ class RecoveryReleaseTest(unittest.TestCase):
                 digest, name = line.split("  ")
                 self.assertEqual(hashlib.sha256(archive.read(name)).hexdigest(), digest)
 
+    def test_pending_source_port_is_excluded_from_recovery_bundle(self):
+        pending = self.root / "src/boards/pending_test_board"
+        pending.mkdir()
+        (pending / "board.cmake").write_text("set(OTAFIX_BOARD_QUALIFICATION_PENDING ON)\n")
+        bundle = release.build(self.input, self.root / "out", TAG)
+        with zipfile.ZipFile(bundle) as archive:
+            manifest = json.loads(archive.read("manifest.json"))
+            self.assertEqual(manifest["board_count"], 1)
+            self.assertFalse(any("pending_test_board" in name for name in archive.namelist()))
+
     def test_mistagged_binary_rejected(self):
         with self.assertRaisesRegex(ValueError, "version/layout"):
             release.inspect_profile(self.input, "gat562", TAG, VERSION-1)

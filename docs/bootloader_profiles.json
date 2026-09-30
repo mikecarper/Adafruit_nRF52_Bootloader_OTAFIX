@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "repository": "mikecarper/Adafruit_nRF52_Bootloader_OTAFIX",
+  "profiles": [
+    {"id": "gat562", "label": "MTools Tec GAT562", "meshcoreHardware": ["GAT562_30S_Mesh_Kit", "GAT562_Mesh_EVB_Pro", "GAT562_Mesh_Tracker_Pro"]},
+    {"id": "heltec_mesh_pocket", "label": "Heltec MeshPocket", "meshcoreHardware": ["Mesh_pocket"]},
+    {"id": "heltec_mesh_tower_v2", "label": "Heltec MeshTower V2 - internal storage", "meshcoreHardware": ["Heltec_tower_v2"]},
+    {"id": "heltec_mesh_tower_v2_sdcard", "label": "Heltec MeshTower V2 - microSD", "meshcoreHardware": ["Heltec_tower_v2_sdcard"]},
+    {"id": "heltec_t096", "label": "Heltec T096", "meshcoreHardware": ["Heltec_t096"]},
+    {"id": "heltec_t1", "label": "Heltec T1", "meshcoreHardware": ["Heltec_t1"]},
+    {"id": "heltec_t114", "label": "Heltec T114", "meshcoreHardware": ["Heltec_t114", "Heltec_t114_without_display"]},
+    {"id": "keepteen_lt1", "label": "Keepteen LT1", "meshcoreHardware": ["KeepteenLT1"]},
+    {"id": "lilygo_techo", "label": "LilyGo T-Echo", "meshcoreHardware": ["LilyGo_T-Echo"]},
+    {"id": "lilygo_techo_lite", "label": "LilyGo T-Echo Lite", "meshcoreHardware": ["LilyGo_T-Echo-Lite", "LilyGo_T-Echo-Lite_non_shell"]},
+    {"id": "minewsemi_mx25le01", "label": "MinewSemi MX25LE01", "meshcoreHardware": ["Minewsemi_me25ls01"]},
+    {"id": "pca10056", "label": "Nordic nRF52840 DK PCA10056", "meshcoreHardware": ["PCA10056"]},
+    {"id": "promicro_nrf52840", "label": "ProMicro nRF52840", "meshcoreHardware": ["ProMicro"]},
+    {"id": "sensecap_solar_p1", "label": "SenseCAP Solar Node P1", "meshcoreHardware": ["SenseCap_Solar"]},
+    {"id": "t1000_e", "label": "Seeed Tracker T1000-E", "meshcoreHardware": ["t1000e"]},
+    {"id": "thinknode_m1", "label": "ThinkNode M1", "meshcoreHardware": ["ThinkNode_M1"]},
+    {"id": "thinknode_m3", "label": "ThinkNode M3", "meshcoreHardware": ["ThinkNode_M3"]},
+    {"id": "thinknode_m6", "label": "ThinkNode M6", "meshcoreHardware": ["ThinkNode_M6"]},
+    {"id": "wio_tracker_l1", "label": "Seeed Wio Tracker L1", "meshcoreHardware": ["WioTrackerL1", "WioTrackerL1-1W", "WioTrackerL1Eink"]},
+    {"id": "wiscore_rak3401_auto", "label": "RAK3401 - adaptive internal / W25Q16 / RAK15001", "meshcoreHardware": ["RAK_3401"]},
+    {"id": "wiscore_rak4631_auto", "label": "RAK4631 - adaptive internal / W25Q16 / RAK15001", "meshcoreHardware": ["RAK_4631", "R1Neo"]},
+    {"id": "wismesh_tag", "label": "RAK WisMesh Tag", "meshcoreHardware": ["RAK_WisMesh_Tag"]},
+    {"id": "xiao_nrf52840_ble", "label": "Seeed XIAO nRF52840 BLE", "meshcoreHardware": ["Xiao_nrf52", "ikoka_handheld_nrf_e22_30dbm", "ikoka_handheld_nrf_e22_30dbm_096", "ikoka_nano_nrf_22dbm", "ikoka_nano_nrf_30dbm", "ikoka_nano_nrf_33dbm", "ikoka_stick_nrf_22dbm", "ikoka_stick_nrf_30dbm", "ikoka_stick_nrf_33dbm", "solarxiao_30S", "solarxiao_33S"]},
+    {"id": "xiao_nrf52840_ble_sense", "label": "Seeed XIAO nRF52840 BLE Sense", "meshcoreHardware": ["Xiao_nrf52_Sense"]}
+  ],
+  "unavailableProfiles": [
+    {"id": "gat562_mesh_watch13", "label": "GAT562 Mesh Watch13", "meshcoreHardware": ["GAT562_Mesh_Watch13"], "reason": "The watch routes a GAT562 bootloader LED output to its vibration motor and has onboard flash. It needs a watch-specific profile."},
+    {"id": "heltec_mesh_solar", "label": "Heltec Mesh Solar", "meshcoreHardware": ["Heltec_mesh_solar"], "reason": "Mesh Solar has different LED and peripheral pins from the supported Heltec boards. It needs its own profile."},
+    {"id": "lilygo_t_impulse_plus", "label": "LilyGo T-Impulse Plus", "meshcoreHardware": ["LilyGo_T_Impulse_Plus"], "reason": "T-Impulse Plus has different flash data pins and LED wiring from T-Echo Lite. It needs its own profile."},
+    {"id": "lilygo_techo_card", "label": "LilyGo T-Echo Card", "meshcoreHardware": ["LilyGo_T-Echo_Card"], "reason": "T-Echo Card has its own NFC configuration, buttons and LED hardware. It needs a Card-specific profile."},
+    {"id": "meshtiny", "label": "Meshtiny", "meshcoreHardware": ["Meshtiny"], "reason": "Meshtiny has its own factory bootloader identity and controls. A dedicated Meshtiny profile has not been qualified."},
+    {"id": "meshtracker_x1", "label": "MeshTracker X1", "meshcoreHardware": ["MeshTracker_X1"], "reason": "MeshTracker X1 has different flash wiring, power control and button polarity from Wio Tracker L1. It needs its own profile."},
+    {"id": "muzi_base", "label": "Muzi Base", "meshcoreHardware": ["muzi_base_duo", "muzi_base_duo_superIO", "muzi_base_uno", "muzi_base_uno_superIO"], "reason": "These four variants share Muzi Base hardware, which needs its own bootloader identity, LED polarity and flash configuration."},
+    {"id": "nano_g2_ultra", "label": "Nano G2 Ultra", "meshcoreHardware": ["Nano_G2_Ultra"], "reason": "Nano G2 Ultra has its own flash and button wiring. It needs a dedicated profile."},
+    {"id": "thinknode_m4", "label": "ThinkNode M4", "meshcoreHardware": ["ThinkNode_M4"], "reason": "ThinkNode M4 has different LED, button and power-control pins from the supported ThinkNodes. It needs its own profile."},
+    {"id": "thinknode_m8", "label": "ThinkNode M8", "meshcoreHardware": ["ThinkNode_M8"], "reason": "ThinkNode M8 shares some flash wiring with M1 but has different buttons and peripheral controls. It needs an M8-specific profile."},
+    {"id": "wio_wm1110", "label": "Seeed Wio WM1110", "meshcoreHardware": ["wio_wm1110"], "reason": "This firmware targets the Wio WM1110 Dev Kit (SDK carrier), whose LEDs and controls differ from Wio Tracker 1110 and XIAO. Its bootloader identity and installation route still need qualification."}
+  ]
+}

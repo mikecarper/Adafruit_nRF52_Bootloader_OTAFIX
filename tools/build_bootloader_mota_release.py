@@ -23,6 +23,13 @@ LEGACY_RAK_PROFILES = frozenset((
 ))
 
 
+def pending_boards(root: Path = Path(__file__).resolve().parents[1] / "src" / "boards") -> frozenset[str]:
+    """Build source-verified ports in CI without publishing untested board images."""
+    return frozenset(path.name for path in root.iterdir() if path.is_dir() and
+                     "set(OTAFIX_BOARD_QUALIFICATION_PENDING ON)" in
+                     (path / "board.cmake").read_text(encoding="ascii"))
+
+
 def release_boards(root: Path = Path(__file__).resolve().parents[1] / "src" / "boards") -> tuple[str, ...]:
     """Require complete release coverage, never silently omit a new board."""
     boards = []
@@ -52,7 +59,8 @@ def release_boards(root: Path = Path(__file__).resolve().parents[1] / "src" / "b
             raise ValueError(f"{directory.name}: missing exact bootloader mOTA profile")
         if any(f"-DMOTA_{backend}_BOOTLOADER_UPDATE=1" not in make for backend in backends):
             raise ValueError(f"{directory.name}: Make/CMake bootloader mOTA disagreement")
-        if directory.name not in LEGACY_RAK_PROFILES:
+        if (directory.name not in LEGACY_RAK_PROFILES and
+                "set(OTAFIX_BOARD_QUALIFICATION_PENDING ON)" not in cmake):
             boards.append(directory.name)
     if not boards:
         raise ValueError("empty bootloader release inventory")
@@ -60,6 +68,7 @@ def release_boards(root: Path = Path(__file__).resolve().parents[1] / "src" / "b
 
 
 QUALIFIED_BOARDS = release_boards()
+PENDING_BOARDS = pending_boards()
 
 TAG_PATTERN = re.compile(
     r"^(?:v?[0-9]+\.[0-9]+\.[0-9]+-)?"
