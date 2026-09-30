@@ -38,6 +38,6 @@
     {"id": "nano_g2_ultra", "label": "Nano G2 Ultra", "meshcoreHardware": ["Nano_G2_Ultra"], "reason": "Nano G2 Ultra has its own flash and button wiring. It needs a dedicated profile."},
     {"id": "thinknode_m4", "label": "ThinkNode M4", "meshcoreHardware": ["ThinkNode_M4"], "reason": "ThinkNode M4 has different LED, button and power-control pins from the supported ThinkNodes. It needs its own profile."},
     {"id": "thinknode_m8", "label": "ThinkNode M8", "meshcoreHardware": ["ThinkNode_M8"], "reason": "ThinkNode M8 shares some flash wiring with M1 but has different buttons and peripheral controls. It needs an M8-specific profile."},
-    {"id": "wio_wm1110", "label": "Seeed Wio WM1110", "meshcoreHardware": ["wio_wm1110"], "reason": "Wio WM1110 is a separate tracker board with different LED and peripheral pins. Its XIAO build setting does not make it XIAO hardware."}
+    {"id": "wio_wm1110", "label": "Seeed Wio WM1110", "meshcoreHardware": ["wio_wm1110"], "reason": "This firmware targets the Wio WM1110 Dev Kit (SDK carrier), whose LEDs and controls differ from Wio Tracker 1110 and XIAO. Its bootloader identity and installation route still need qualification."}
   ]
 }

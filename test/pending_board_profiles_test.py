@@ -15,7 +15,8 @@ from build_bootloader_mota_release import PENDING_BOARDS, QUALIFIED_BOARDS
 
 class PendingBoardTests(unittest.TestCase):
     def test_pending_ports_have_no_released_download(self):
-        expected = {"gat562_mesh_watch13", "lilygo_techo_card", "lilygo_t_impulse_plus", "muzi_base"}
+        expected = {"gat562_mesh_watch13", "lilygo_techo_card", "lilygo_t_impulse_plus",
+                    "muzi_base", "meshtiny", "nano_g2_ultra"}
         self.assertEqual(expected, PENDING_BOARDS)
         self.assertFalse(expected.intersection(QUALIFIED_BOARDS))
         mapping = json.loads((ROOT / "docs/bootloader_profiles.json").read_text())
@@ -38,6 +39,8 @@ class PendingBoardTests(unittest.TestCase):
             "lilygo_techo_card": [0, 0, 24, 24, 4, 12, 6, 8, 41, 26, 0x239A00DA],
             "lilygo_t_impulse_plus": [1, 0, 24, 24, 4, 12, 6, 41, 8, 26, 0x239A00DA],
             "muzi_base": [2, 0, 10, 10, 3, 26, 30, 29, 28, 2, 0x239A0081],
+            "meshtiny": [2, 1, 9, 4, 3, 22, 27, 29, 21, 2, 0x239A0029],
+            "nano_g2_ultra": [0, 0, 38, 38, 8, 39, 6, 26, 36, 34, 0x42518695],
         }
         source = '''#include <stdio.h>
 #define PINNUM(p,n) ((p)*32+(n))
