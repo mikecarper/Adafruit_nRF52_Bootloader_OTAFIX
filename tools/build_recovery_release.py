@@ -17,6 +17,9 @@ from patch_bootloader_manifest import find_manifest, verify_manifest
 
 ROOT = Path(__file__).resolve().parents[1]
 RAK_RECOVERY_BOARDS = ("wiscore_rak3401_auto", "wiscore_rak4631_auto")
+RELEASE_BLOCKED_BOARDS = {
+    "thinknode_m8": "Compile-only: factory USB identity is not verified.",
+}
 
 
 def inspect_profile(artifacts, board, tag, packed):
@@ -87,7 +90,8 @@ def build(artifacts, output, tag, recovery_mota_dir=None, source_tag=None,
     label, _, packed = version_from_tag(tag)
     pending = pending_boards(ROOT / "src/boards")
     boards = sorted(path.name for path in (ROOT / "src/boards").iterdir()
-                    if path.is_dir() and (include_pending or path.name not in pending))
+                    if path.is_dir() and path.name not in RELEASE_BLOCKED_BOARDS
+                    and (include_pending or path.name not in pending))
     inventory, entries = [], []
     for board in boards:
         files, item = inspect_profile(artifacts, board, tag, packed)
@@ -135,7 +139,11 @@ def build(artifacts, output, tag, recovery_mota_dir=None, source_tag=None,
         "packed_bootloader_version": f"0x{packed:08X}", "board_count": len(boards),
         "boards": inventory}
     if include_pending:
-        manifest_data["qualification_pending_boards"] = sorted(pending)
+        manifest_data["qualification_pending_boards"] = sorted(set(boards) & set(pending))
+    excluded = {board: reason for board, reason in RELEASE_BLOCKED_BOARDS.items()
+                if (ROOT / "src/boards" / board).is_dir()}
+    if excluded:
+        manifest_data["excluded_boards"] = excluded
     if recovery_mota:
         manifest_data.update(source_tag=source_tag, recovery_mota=recovery_mota)
     manifest.write_text(json.dumps(manifest_data, indent=2) + "\n", encoding="ascii")

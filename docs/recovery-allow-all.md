@@ -135,13 +135,17 @@ release as a prerelease and does not make it latest. The normal release workflow
 skips recovery tags. The repaired 2.4.10 archive is an in-place asset update,
 not a separate recovery release.
 
-The standalone 2.4.11 recovery release includes all 38 source board profiles.
-Seven ports remain pending hardware qualification: `gat562_mesh_watch13`,
+The standalone 2.4.11 recovery release includes all 35 releasable board profiles.
+Six included ports remain pending hardware qualification: `gat562_mesh_watch13`,
 `lilygo_t_impulse_plus`, `lilygo_techo_card`, `meshtiny`, `muzi_base`,
-`nano_g2_ultra`, and `thinknode_m8`. They are identified in the archive inventory
+and `nano_g2_ultra`. They are identified in the archive inventory
 as `qualification_pending_boards`; inclusion does not establish hardware support.
 The archive builder's explicit `--include-pending` option includes these ports.
 Normal release bundles continue to exclude them.
+The 36th source profile, `thinknode_m8`, remains compile-only because its factory
+USB identity is not verified; it is recorded under `excluded_boards` and has no
+published recovery image. For a local production build, explicitly supply
+`--exclude-board thinknode_m8` to `tools/build_all.py`.
 
 Creating a tag/release is a separate maintainer action. Building or committing
 these changes does not publish anything. Qualify the two-step process on actual

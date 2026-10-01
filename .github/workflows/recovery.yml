@@ -25,7 +25,12 @@ jobs:
       - id: boards
         working-directory: src/boards
         run: |
-          echo "boards=$(ls -d */ | sed 's/\/$//' | jq -R -s -c 'split("\n")[:-1]')" >> "$GITHUB_OUTPUT"
+          # M8 has no verified factory USB identity; keep it compile-only.
+          boards=$(ls -d */ | sed 's/\/$//')
+          if [[ "$GITHUB_EVENT_NAME" == "release" ]]; then
+            boards=$(echo "$boards" | grep -v '^thinknode_m8$')
+          fi
+          echo "boards=$(echo "$boards" | jq -R -s -c 'split("\n")[:-1]')" >> "$GITHUB_OUTPUT"
       - name: Validate normal and recovery policies
         run: |
           make -C test bootloader_image_test bootloader_image_recovery_test dfu_image_policy_test dfu_image_policy_recovery_test

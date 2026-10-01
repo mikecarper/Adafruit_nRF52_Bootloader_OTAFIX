@@ -57,6 +57,10 @@ def parse_args():
     )
     parser.add_argument("--secure-dfu-test", action="store_true",
                         help="replace Legacy BLE with resumable Secure BLE in test builds")
+    parser.add_argument("--exclude-board", action="append", default=[],
+                        choices=sorted(path.name for path in (REPO_ROOT / "src/boards").iterdir()
+                                       if path.is_dir()),
+                        help="explicitly omit a board (repeatable); report the omission")
     parser.add_argument(
         "--keep-build",
         action="store_true",
@@ -209,10 +213,16 @@ def main():
             return 2
         shutil.rmtree(build_root, ignore_errors=True)
 
-    boards = sorted(entry.name for entry in (REPO_ROOT / "src" / "boards").iterdir() if entry.is_dir())
+    boards = sorted(entry.name for entry in (REPO_ROOT / "src" / "boards").iterdir()
+                    if entry.is_dir() and entry.name not in args.exclude_board)
+    if not boards:
+        print("error: no boards selected", file=sys.stderr)
+        return 2
     worker_count = min(args.jobs, len(boards))
 
     print(f"Arm GNU Toolchain {compiler_version}; {worker_count} board workers")
+    for board in sorted(set(args.exclude_board)):
+        print(f"Explicitly excluded board: {board}")
     if args.recovery_allow_all_boards:
         print("RECOVERY ONLY: manual bootloader board-identity checks are disabled.")
         print("Packages: _bin/recovery-allow-all/<board>/; restore a normal bootloader after recovery.")

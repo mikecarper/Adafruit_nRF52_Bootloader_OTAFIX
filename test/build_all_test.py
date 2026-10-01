@@ -24,6 +24,14 @@ SPEC.loader.exec_module(BUILD_ALL)
 
 
 class BuildAllTest(unittest.TestCase):
+    def test_exclusions_are_explicit_and_require_known_boards(self) -> None:
+        with mock.patch.object(sys, "argv", ["build_all.py", "--exclude-board", "thinknode_m8"]):
+            args = BUILD_ALL.parse_args()
+        self.assertEqual(args.exclude_board, ["thinknode_m8"])
+        with mock.patch.object(sys, "argv", ["build_all.py", "--exclude-board", "typo"]), \
+             mock.patch.object(sys, "stderr", io.StringIO()), self.assertRaises(SystemExit):
+            BUILD_ALL.parse_args()
+
     def test_secure_profile_is_isolated_and_requires_a_test_version(self) -> None:
         with mock.patch.object(sys, "argv", ["build_all.py", "--secure-dfu-test", "--test-version", "0x02040709"]):
             args = BUILD_ALL.parse_args()

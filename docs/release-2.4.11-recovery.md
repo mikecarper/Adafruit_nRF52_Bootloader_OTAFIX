@@ -1,6 +1,6 @@
 # OTAFIX 2.4.11 recovery only
 
-This is a standalone recovery prerelease for all 38 source board profiles.
+This is a standalone recovery prerelease for all 35 releasable board profiles.
 It is not marked latest; the normal 2.4.10 release remains latest.
 
 ## Recovery policy
@@ -35,10 +35,13 @@ matching `wiscore_rak4631_board` or `wiscore_rak3401` recovery package first.
 
 ## Coverage and verification
 
-All 38 profiles are included. Seven source ports remain pending hardware
+All 35 releasable profiles are included. Six included source ports remain pending hardware
 qualification: `gat562_mesh_watch13`, `lilygo_t_impulse_plus`,
-`lilygo_techo_card`, `meshtiny`, `muzi_base`, `nano_g2_ultra`, and `thinknode_m8`.
+`lilygo_techo_card`, `meshtiny`, `muzi_base`, and `nano_g2_ultra`.
 The archive inventory identifies them as `qualification_pending_boards`.
+The remaining source profile, `thinknode_m8`, is compile-only and cannot produce
+a production image until its factory USB identity is verified. It is excluded
+and the reason is recorded in the inventory as `excluded_boards`.
 
 Recovery policy tests cover the original 2.3 payload, manifest-free images,
 normal-policy rejection, bounds, and invalid startup vectors. Every release
