@@ -2,14 +2,24 @@ name: Recovery allow-all boards
 
 on:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Rebuild and repair an existing R_ recovery release (blank for test artifacts)
+        type: string
+        required: false
+        default: ''
   release:
     types: [created]
 
 permissions:
   contents: read
 
+env:
+  RECOVERY_PRODUCTION: ${{ github.event_name == 'release' || inputs.release_tag != '' }}
+  RECOVERY_RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ inputs.release_tag || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
@@ -18,19 +28,34 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       boards: ${{ steps.boards.outputs.boards }}
+      source_commit: ${{ steps.boards.outputs.source_commit }}
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ inputs.release_tag || github.ref }}
+          fetch-depth: 0
           submodules: true
+      - name: Require an existing exact recovery release tag
+        if: ${{ env.RECOVERY_PRODUCTION == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          [[ "$RECOVERY_RELEASE_TAG" == R_* ]]
+          git rev-parse --verify "refs/tags/$RECOVERY_RELEASE_TAG"
+          test "$(git describe --dirty --always --tags)" = "$RECOVERY_RELEASE_TAG"
+          python3 tools/derive_otafix_version.py "$RECOVERY_RELEASE_TAG" --hex --recovery-allow-all-boards
+          gh release view "$RECOVERY_RELEASE_TAG" --json tagName
       - id: boards
         working-directory: src/boards
         run: |
           # M8 has no verified factory USB identity; keep it compile-only.
           boards=$(ls -d */ | sed 's/\/$//')
-          if [[ "$GITHUB_EVENT_NAME" == "release" ]]; then
+          if [[ "$RECOVERY_PRODUCTION" == "true" ]]; then
             boards=$(echo "$boards" | grep -v '^thinknode_m8$')
           fi
           echo "boards=$(echo "$boards" | jq -R -s -c 'split("\n")[:-1]')" >> "$GITHUB_OUTPUT"
+          echo "source_commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Validate normal and recovery policies
         run: |
           make -C test bootloader_image_test bootloader_image_recovery_test dfu_image_policy_test dfu_image_policy_recovery_test
@@ -51,6 +76,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ needs.prepare.outputs.source_commit }}
           fetch-depth: 0
           submodules: true
       - uses: carlosperate/arm-none-eabi-gcc-action@v1
@@ -63,7 +89,7 @@ jobs:
         run: |
           export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
           version_args=()
-          if [[ "$GITHUB_EVENT_NAME" != "release" ]]; then
+          if [[ "$RECOVERY_PRODUCTION" != "true" ]]; then
             version_args=(MOTA_BOOTLOADER_TEST_BUILD=1 MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE=0x02040703)
           fi
           make BOARD=${{ matrix.board }} RECOVERY_ALLOW_ALL_BOARDS=1 "${version_args[@]}" all copy-artifact
@@ -74,13 +100,15 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: ${{ github.event_name == 'release' && startsWith(github.ref_name, 'R_') }}
-    needs: build
+    if: ${{ (github.event_name == 'release' && startsWith(github.ref_name, 'R_')) || (github.event_name == 'workflow_dispatch' && startsWith(inputs.release_tag, 'R_')) }}
+    needs: [prepare, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.source_commit }}
       - uses: actions/download-artifact@v8
         with:
           pattern: R_*
@@ -91,7 +119,7 @@ jobs:
           pip3 install intelhex
           python3 tools/build_recovery_release.py \
             --artifacts-dir _recovery-release --output-dir _recovery-bundle \
-            --tag "${GITHUB_REF_NAME#R_}" --include-pending
+            --tag "${RECOVERY_RELEASE_TAG#R_}" --include-pending
       - name: Include recovery instructions and checksums
         run: |
           cp docs/recovery-allow-all.md _recovery-release/RECOVERY-README.md
@@ -102,9 +130,35 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh release edit "$GITHUB_REF_NAME" --prerelease --latest=false
-          gh release upload "$GITHUB_REF_NAME" --clobber \
-            _recovery-release/* \
-            _recovery-bundle/OTAFIX-*-R_recovery.zip \
-            _recovery-bundle/OTAFIX-*-R_recovery.zip.sha256 \
-            _recovery-bundle/manifest.json
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import time
+
+          tag = os.environ["RECOVERY_RELEASE_TAG"]
+          repo = os.environ["GH_REPO"]
+          patterns = ("_recovery-release/*", "_recovery-bundle/OTAFIX-*-R_recovery.zip",
+                      "_recovery-bundle/OTAFIX-*-R_recovery.zip.sha256",
+                      "_recovery-bundle/manifest.json")
+          files = []
+          for pattern in patterns:
+              matches = sorted(Path(".").glob(pattern))
+              if not matches:
+                  raise RuntimeError(f"Missing recovery upload files: {pattern}")
+              files.extend(matches)
+          subprocess.run(["gh", "release", "edit", tag, "--prerelease", "--latest=false"], check=True)
+          release = json.loads(subprocess.check_output(
+              ["gh", "api", f"repos/{repo}/releases/tags/{tag}"], text=True))
+          existing = {asset["name"]: asset["digest"] for asset in release["assets"]}
+          for path in files:
+              digest = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+              if existing.get(path.name) == digest:
+                  print(f"Verified unchanged asset: {path.name}", flush=True)
+                  continue
+              subprocess.run(["gh", "release", "upload", tag, "--clobber", str(path)], check=True)
+              print(f"Uploaded verified asset: {path.name}", flush=True)
+              time.sleep(1)
+          PY

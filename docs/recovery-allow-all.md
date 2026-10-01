@@ -129,7 +129,12 @@ OTAFIX version; the `R_` prefix is a distribution/policy label, not a new ABI.
 Normal builds reject these tags unless an explicit test-version override is used.
 
 The dedicated **Recovery allow-all boards** workflow builds every board. A manual
-workflow run produces test artifacts only. A release event for a recovery tag
+workflow run with a blank `release_tag` produces test artifacts only. To rebuild
+and repair an existing recovery prerelease using the current workflow, set
+`release_tag` to its exact `R_` tag. This preserves the published source tag,
+builds its exact source commit without test-version overrides, and uploads only
+changed or missing assets sequentially. The release remains a non-latest
+prerelease. A release event for a recovery tag
 uploads only recovery packages, these instructions, and checksums; it marks the
 release as a prerelease and does not make it latest. The normal release workflow
 skips recovery tags. The repaired 2.4.10 archive is an in-place asset update,

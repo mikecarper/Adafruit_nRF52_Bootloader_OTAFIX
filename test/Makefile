@@ -271,6 +271,7 @@ check: apply_sim readback_test readback_test_v7 readback_internal_test bootloade
 	python3 bootloader_download_manifest_test.py
 	python3 pending_board_profiles_test.py
 	python3 recovery_release_test.py
+	python3 recovery_workflow_test.py
 	python3 ../tools/check_internal_bootloader_targets.py
 	@echo
 	./apply_sim vectors/base.img vectors/delta.mota vectors/new.img
