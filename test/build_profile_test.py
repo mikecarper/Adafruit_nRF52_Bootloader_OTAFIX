@@ -317,8 +317,8 @@ class BuildProfileTest(unittest.TestCase):
         recovery = (ROOT / ".github/workflows/recovery.yml").read_text(encoding="utf-8")
         self.assertIn("RECOVERY_ALLOW_ALL_BOARDS=1", recovery)
         self.assertIn("_bin/recovery-allow-all/", recovery)
-        self.assertIn("prerelease: true", recovery)
-        self.assertIn("make_latest: false", recovery)
+        # recovery_workflow_test.py executes the publisher to verify that
+        # recovery releases remain prereleases and are not marked latest.
         self.assertNotIn("build_bootloader_mota_release.py", recovery)
 
         cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
