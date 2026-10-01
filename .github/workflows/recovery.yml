@@ -97,13 +97,14 @@ jobs:
           cp docs/recovery-allow-all.md _recovery-release/RECOVERY-README.md
           cd _recovery-release
           sha256sum *.zip *.hex *.uf2 RECOVERY-README.md > SHA256SUMS.txt
-      - uses: softprops/action-gh-release@v3
-        with:
-          fail_on_unmatched_files: true
-          prerelease: true
-          make_latest: false
-          files: |
-            _recovery-release/*
-            _recovery-bundle/OTAFIX-*-R_recovery.zip
-            _recovery-bundle/OTAFIX-*-R_recovery.zip.sha256
+      - name: Publish recovery assets with bounded upload concurrency
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release edit "$GITHUB_REF_NAME" --prerelease --latest=false
+          gh release upload "$GITHUB_REF_NAME" --clobber \
+            _recovery-release/* \
+            _recovery-bundle/OTAFIX-*-R_recovery.zip \
+            _recovery-bundle/OTAFIX-*-R_recovery.zip.sha256 \
             _recovery-bundle/manifest.json
