@@ -106,6 +106,29 @@ class RecoveryReleaseTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "version/layout"):
             release.inspect_profile(self.input, "gat562", TAG, VERSION-1)
 
+    def test_all_board_bundle_requires_pending_profile_artifacts(self):
+        pending = self.root / "src/boards/pending_test_board"
+        pending.mkdir()
+        (pending / "board.cmake").write_text("set(OTAFIX_BOARD_QUALIFICATION_PENDING ON)\n")
+        with self.assertRaisesRegex(ValueError, "pending_test_board: expected one"):
+            release.build(self.input, self.root / "out", TAG, include_pending=True)
+
+    def test_all_board_bundle_identifies_pending_profiles(self):
+        pending = self.root / "src/boards/pending_test_board"
+        pending.mkdir()
+        (pending / "board.cmake").write_text(
+            "set(OTAFIX_BOARD_QUALIFICATION_PENDING ON)\nset(DEVICE_NAME GAT562_DFU)\n")
+        for path in (self.hex, self.zip, self.uf2):
+            (self.input / path.name.replace("gat562", "pending_test_board")).write_bytes(
+                path.read_bytes())
+        bundle = release.build(self.input, self.root / "out", TAG, include_pending=True)
+        with zipfile.ZipFile(bundle) as archive:
+            manifest = json.loads(archive.read("manifest.json"))
+            self.assertEqual(manifest["board_count"], 2)
+            self.assertEqual(manifest["qualification_pending_boards"], ["pending_test_board"])
+            self.assertTrue(any(name.startswith("boards/pending_test_board/")
+                                for name in archive.namelist()))
+
     def test_crc_corruption_rejected(self):
         image = IntelHex(str(self.hex))
         image[0xF4200] ^= 1

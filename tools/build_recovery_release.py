@@ -83,11 +83,11 @@ def inspect_profile(artifacts, board, tag, packed):
 
 
 def build(artifacts, output, tag, recovery_mota_dir=None, source_tag=None,
-          motatool=None, public_key=None):
+          motatool=None, public_key=None, include_pending=False):
     label, _, packed = version_from_tag(tag)
     pending = pending_boards(ROOT / "src/boards")
     boards = sorted(path.name for path in (ROOT / "src/boards").iterdir()
-                    if path.is_dir() and path.name not in pending)
+                    if path.is_dir() and (include_pending or path.name not in pending))
     inventory, entries = [], []
     for board in boards:
         files, item = inspect_profile(artifacts, board, tag, packed)
@@ -134,6 +134,8 @@ def build(artifacts, output, tag, recovery_mota_dir=None, source_tag=None,
     manifest_data = {"tag": tag, "recovery_only": True,
         "packed_bootloader_version": f"0x{packed:08X}", "board_count": len(boards),
         "boards": inventory}
+    if include_pending:
+        manifest_data["qualification_pending_boards"] = sorted(pending)
     if recovery_mota:
         manifest_data.update(source_tag=source_tag, recovery_mota=recovery_mota)
     manifest.write_text(json.dumps(manifest_data, indent=2) + "\n", encoding="ascii")
@@ -161,6 +163,8 @@ if __name__ == "__main__":
     parser.add_argument("--source-tag")
     parser.add_argument("--motatool", type=Path)
     parser.add_argument("--public-key", type=Path)
+    parser.add_argument("--include-pending", action="store_true",
+                        help="include unqualified source ports and identify them in the inventory")
     args = parser.parse_args()
     build(args.artifacts_dir, args.output_dir, args.tag, args.recovery_mota_dir,
-          args.source_tag, args.motatool, args.public_key)
+          args.source_tag, args.motatool, args.public_key, args.include_pending)

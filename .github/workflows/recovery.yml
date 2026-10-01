@@ -56,6 +56,7 @@ jobs:
       - name: Build recovery bridge
         shell: bash
         run: |
+          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
           version_args=()
           if [[ "$GITHUB_EVENT_NAME" != "release" ]]; then
             version_args=(MOTA_BOOTLOADER_TEST_BUILD=1 MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE=0x02040703)
@@ -80,6 +81,12 @@ jobs:
           pattern: R_*
           path: _recovery-release
           merge-multiple: true
+      - name: Verify and bundle every recovery profile
+        run: |
+          pip3 install intelhex
+          python3 tools/build_recovery_release.py \
+            --artifacts-dir _recovery-release --output-dir _recovery-bundle \
+            --tag "${GITHUB_REF_NAME#R_}" --include-pending
       - name: Include recovery instructions and checksums
         run: |
           cp docs/recovery-allow-all.md _recovery-release/RECOVERY-README.md
@@ -92,3 +99,6 @@ jobs:
           make_latest: false
           files: |
             _recovery-release/*
+            _recovery-bundle/OTAFIX-*-R_recovery.zip
+            _recovery-bundle/OTAFIX-*-R_recovery.zip.sha256
+            _recovery-bundle/manifest.json
