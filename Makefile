@@ -12,7 +12,7 @@
 # - DUALBANK_FW        : If bootloader will implement a dual bank feature to allow autorecover from failed
 # - FORCE_UF2          : if SIGNED_FW is 1, will force to include UF2 support (UNSECURE, UF2 does NOT validate signature!)
 # - DEFAULT_TO_OTA_DFU : if entering DFU, by default enter OTA DFU instead of Serial DFU
-# - RECOVERY_ALLOW_ALL_BOARDS : recovery-only manual cross-board bootloader updates
+# - RECOVERY_ALLOW_ALL_BOARDS : recovery-only manual bootloader updates without manifest restrictions
 # - DFU_USB_ENUMERATION_TIMEOUT_MS : no-valid-image USB grace period while VBUS is present
 #------------------------------------------------------------------------------
 
@@ -30,7 +30,7 @@ ifneq ($(RECOVERY_ALLOW_ALL_BOARDS),0)
 endif
 ifeq ($(RECOVERY_ALLOW_ALL_BOARDS),1)
   RECOVERY_VERSION_ARG := --recovery-allow-all-boards
-  $(warning RECOVERY BUILD: manual bootloader board-identity checks are disabled)
+  $(warning RECOVERY BUILD: manual bootloader manifest/identity checks are disabled)
 endif
 
 # Select the board before loading board-specific configuration.

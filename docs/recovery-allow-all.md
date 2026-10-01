@@ -1,18 +1,25 @@
 # Allow-all board recovery release
 
 These are temporary **recovery bridges**, not normal bootloader upgrades.
-`RECOVERY_ALLOW_ALL_BOARDS=1` permits manual cross-board bootloader installs
+`RECOVERY_ALLOW_ALL_BOARDS=1` permits arbitrary manual bootloader installs
 over Legacy serial/BLE DFU and bootloader-family UF2. It is available for every
 board profile; each profile still supports only its normal transports.
 
-The flag waives only the incoming bootloader manifest's VID/PID and `DEVICE_NAME`
-equality check. It does not permit arbitrary binaries: manifest CRC, vectors,
-image bounds, transfer validation, and existing SoftDevice/layout checks remain.
-Legacy DFU signatures remain required when `SIGNED_FW=1`; UF2 retains its existing
-unsigned policy. Remote authenticated `.mota` updates remain exact-board-bound.
-This is not a universal image or a way to migrate between incompatible chips.
-Legacy BLMF-only images retain their existing, more limited compatibility checks;
-prefer a current BLM2 bootloader and its matching SoftDevice package.
+New recovery builds ignore the incoming bootloader's board, name, version,
+BLMF/BLM2 manifest, manifest CRC and layout declarations. They accept older
+manifest-free binaries and shorter word-aligned bootloader images, including
+the original 39,000-byte RAK4631 OTAFIX 2.3 ZIP, without a host wrapper.
+Flash-region bounds and startup vectors for the chip remain checked. An
+included SoftDevice must still pass the chip-family, vector and size checks;
+an SD-only reinstall retains its runtime-layout check. Legacy DFU packet CRC
+and signatures when `SIGNED_FW=1` remain required. UF2 retains its framing,
+address and transfer-completion checks. Remote signed `.mota` updates still
+require their exact board identity, whole-image CRC and layout metadata.
+
+The previously published 2.4.10 recovery archive predates this policy change
+and rejects the original manifest-free 2.3 ZIP. Rebuild the bridge with this
+code before attempting the direct downgrade; repackaging old binaries does
+not add the new behavior.
 
 ## Two-step USB recovery
 

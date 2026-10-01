@@ -108,12 +108,20 @@ static bool softdevice_info(uint8_t const* image, uint32_t image_size,
 
 static bool bootloader_info(uint8_t const* image, uint32_t image_size,
                             softdevice_image_info_t const* incoming_sd) {
-#ifdef DFU_IMAGE_POLICY_HOST_TEST
-  static char const expected_name[BOOTLOADER_UPDATE_DEVICE_NAME_SIZE] = DEVICE_NAME;
+#if RECOVERY_ALLOW_ALL_BOARDS
+  // A local recovery bridge accepts any bootloader, including pre-manifest
+  // releases with shorter images. Transport integrity is checked separately;
+  // require only a bounded image with usable vectors for this chip/region.
+  (void)incoming_sd;
+  return image_size <= DFU_BL_IMAGE_MAX_SIZE &&
+         bootloader_image_vectors_valid(image, image_size, BOOTLOADER_REGION_START, image_size);
 #else
+  #ifdef DFU_IMAGE_POLICY_HOST_TEST
+  static char const expected_name[BOOTLOADER_UPDATE_DEVICE_NAME_SIZE] = DEVICE_NAME;
+  #else
   extern const bootloader_update_envelope_t bootloaderUpdateManifest;
   char const* expected_name = bootloaderUpdateManifest.manifest.device_name;
-#endif
+  #endif
   uint32_t const expected_board = ((uint32_t)USB_DESC_VID << 16) | USB_DESC_UF2_PID;
 
   if (image_size != DFU_BL_IMAGE_MAX_SIZE) {
@@ -145,6 +153,7 @@ static bool bootloader_info(uint8_t const* image, uint32_t image_size,
   return incoming_sd == NULL ||
          (incoming_sd->fwid == dfu_policy_runtime_softdevice_fwid() &&
           incoming_sd->app_base == dfu_policy_runtime_app_base());
+#endif
 }
 
 uint32_t dfu_image_policy_validate(uint8_t const* image, uint32_t image_len,
