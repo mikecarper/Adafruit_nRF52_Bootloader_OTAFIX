@@ -68,11 +68,13 @@ Bluetooth connection, then reinstall the application. Use the board's
 hardware DFU entry procedure if the installed application's handoff cannot
 start DFU. Do not interpret a completed file copy as proof of activation.
 
-## Verification scope
+## Verification
 
-The production build gates include Make and CMake for all 29 production
-profiles, T096/ST7735S and T114/ST7789 feature variants, host and sanitizer
-tests, signed package verification, and a separate recovery archive audit.
+All 33 production build/validation jobs passed, including Make and CMake for
+all 29 production profiles, T096/ST7735S and T114/ST7789 feature variants,
+host and sanitizer tests, signed package verification, and the separate
+recovery archive audit. Downloaded HEX/ZIP/UF2 sets, all 24 signatures,
+identities/capabilities and archive checksums passed an independent audit.
 Normal release policy excludes the seven hardware-pending ports, including
 `thinknode_m8` with its unverified factory USB identity. They are not added
 as normal downloads by this release.
@@ -88,6 +90,20 @@ are not relabelled as tests of the normal release artifacts. They cover the
 tested RAK4631 and phones, not all boards, physical charge-only cables, or
 battery-only operation. The earlier normal 2.4.10 release separately passed
 signed LoRa bootloader installation on both RAK models.
+
+The actual normal production 2.4.11 RAK4631 signed package also installed
+over LoRa from normal 2.4.10. All 40 blocks arrived. Post-reboot queries
+confirmed `4631_DFU`, CRC `CD0863E0`, ABI 3/caps `0A`, and `blup:C8`.
+The application body/hash prefix, seven checked settings and saved radio
+were unchanged. The RAK3401 package was verified but not physically installed
+in this run. The full hardware report records the successful fast transfer,
+an earlier cancelled slow-link attempt and restoration of the test setup:
+
+https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/blob/feature/ota-delta-apply/docs/hardware-qualification-2.4.11-full.md
+
+Production workflow:
+
+https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/actions/runs/37066565552
 
 Recovery correction and physical test details:
 

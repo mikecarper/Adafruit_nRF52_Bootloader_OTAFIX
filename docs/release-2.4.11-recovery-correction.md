@@ -8,7 +8,8 @@ physical qualification passed with a corrected 2.4.11 qualification image.
 The corrected production assets passed the clean-tag build, package validation,
 and full download audit described below. Download the assets again if you have
 an earlier copy of recovery 2.4.11. This correction creates no 2.4.12 release. The normal latest
-release remains OTAFIX 2.4.10.
+release is now the separately published full normal OTAFIX 2.4.11 release.
+The recovery-only release remains a non-latest prerelease.
 
 The original distribution tag `R_0.11.0-OTAFIX2.4.11` remains unchanged.
 Corrected production binaries are built from the clean, exact
@@ -258,7 +259,8 @@ was repaired using all 110 unchanged asset filenames. Its original
 distribution tag remains unchanged: tag object
 `b3784854e72b1d3d68e6bef04c1890f251256f59`, source commit
 `d6b3edf7d8b58c15187ccae54ea212cfa806d01c`. The release remains a non-latest
-prerelease; the normal latest release remains OTAFIX 2.4.10.
+prerelease; at this recovery publication check the normal latest release was
+OTAFIX 2.4.10. The subsequently published full normal release is OTAFIX 2.4.11.
 
 Downloaded asset verification passed for all 110 digests, the recovery
 archive and its checksums, source/distribution provenance, and all 35
