@@ -5,8 +5,9 @@
 This correction repairs the existing recovery-only prerelease
 `R_0.11.0-OTAFIX2.4.11` in place. Both MeshCore Open and Nordic nRF Connect
 physical qualification passed with a corrected 2.4.11 qualification image.
-Production release assets require the clean-tag build and package validation
-described below. This correction creates no 2.4.12 release. The normal latest
+The corrected production assets passed the clean-tag build, package validation,
+and full download audit described below. Download the assets again if you have
+an earlier copy of recovery 2.4.11. This correction creates no 2.4.12 release. The normal latest
 release remains OTAFIX 2.4.10.
 
 The original distribution tag `R_0.11.0-OTAFIX2.4.11` remains unchanged.
@@ -244,3 +245,58 @@ companion primary radio persistence suites passed all seven tests. Those
 protections and the preserved settings in the Nordic test do not establish
 the cause of the earlier setup-page error. This release adds no automatic
 erase and does not prescribe one as a Bluetooth repair.
+
+## Production publication verification: PASS
+
+On 2 October 2026, [recovery workflow run 36997468388](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/actions/runs/36997468388)
+completed all 37 jobs successfully: preparation, 35 board builds, and release
+packaging/publication. The source-only tag `R_v0.11.0-OTAFIX2.4.11` resolves
+to commit `de88c5fcae72bb00992ac9db7fd144fec150835e`.
+
+The [existing recovery release](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/R_0.11.0-OTAFIX2.4.11)
+was repaired using all 110 unchanged asset filenames. Its original
+distribution tag remains unchanged: tag object
+`b3784854e72b1d3d68e6bef04c1890f251256f59`, source commit
+`d6b3edf7d8b58c15187ccae54ea212cfa806d01c`. The release remains a non-latest
+prerelease; the normal latest release remains OTAFIX 2.4.10.
+
+Downloaded asset verification passed for all 110 digests, the recovery
+archive and its checksums, source/distribution provenance, and all 35
+profile inventories. Every HEX, Legacy DFU ZIP, and updater UF2 reconstructs
+the same raw bootloader for its profile, and every published
+`bootloader_manifest_crc32` matches that reconstructed image. The six
+hardware-unqualified profiles listed above remain marked as pending;
+`thinknode_m8` remains excluded.
+
+The published `OTAFIX-2.4.11-R_recovery.zip` SHA-256 is:
+
+`803dffcfed20331205d1fbe581593865785a4e53988efd20d777e5fe19b05b3d`
+
+### Production and physically tested RAK4631 images
+
+The physical Bluetooth tests above used the qualification image, not the
+subsequently published production file. Both images use packed version
+`0x02040BFF` and identity `4631_DFU`, but their full raw images are not identical.
+
+| RAK4631 `board` image | Manifest CRC32 | Raw bootloader SHA-256 |
+| --- | --- | --- |
+| Physically tested qualification | `C2A4B64B` | `239c23fabcee8478475b3bc3e1c2fc94daa79f386c5fd7ccf980c689220eda7a` |
+| Published production | `AA30573D` | `13188cc150682a23bdee1ed7d2340a4ff0e6701b6d18dc347b75803c9ae53ae2` |
+
+The 40,960-byte images differ in exactly eight data bytes: four bytes in the
+`CURRENT.UF2` FAT create/update time fields and four bytes in the resulting
+whole-image manifest CRC. The remaining 40,952 bytes match, including all
+executable instructions, vectors, CF2, version, and update-policy guards.
+The production timestamp matches the clean source commit's timestamp.
+Production DFU ZIP, published HEX, and workflow artifact comparisons also
+passed. This connects the tested implementation to the production image
+without relabeling the qualification test as a physical test of the published
+artifact or claiming that the complete raw binaries are identical.
+
+### Test node restored
+
+After qualification, the RAK4631 was restored to the published normal 2.4.10
+bootloader and the fixed `v1.17.1.8-ble-dfu-test` application. Final CLI
+verification confirmed those versions, the saved radio tuple
+`869.6179809,62.5,8,5`, and all seven unchanged settings digests. USB data
+was re-enabled. No erase firmware was used.
