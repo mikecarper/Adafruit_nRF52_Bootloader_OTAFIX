@@ -289,7 +289,9 @@ The default combined MeshTower profile is heltec_mesh_tower_v2_sdcard. It
 preserves the existing SD identity and 0x09 update contract, adding internal
 staging as an optional capability. Existing self-update-capable SD units keep
 their signed SD upgrade path. Internal-only units require a one-time local
-USB/BLE DFU or SWD migration to this profile. Compatible MeshCore firmware
+installation of the normal combined image via USB/BLE DFU or SWD, not a
+recovery bridge. The SD-card update path does not require an R_ recovery
+image. Compatible MeshCore firmware
 defaults SD on; set sdcard off followed by reboot disables card use and selects
 internal staging. Never cross-flash a .mota based only on the shared target ID.
 

@@ -113,6 +113,13 @@ their bundle inventories/checksums are replaced; unaffected firmware keeps
 its original bytes and provenance. Exact production verification is recorded
 with the refreshed release assets.
 
+Clean-tag production checks subsequently passed: combined normal CMake uses
+40,763 bytes (21 spare), and recovery uses 40,578 bytes (206 spare).
+The exact Make release image has manifest CRC `AAC09D85`. See the
+[production refresh report](meshtower-2.4.11-refresh.md) for cross-platform
+reproduction, exact-package host checks and the distinction from preview
+hardware testing.
+
 Run the targeted checks from `test/`:
 
 ```sh

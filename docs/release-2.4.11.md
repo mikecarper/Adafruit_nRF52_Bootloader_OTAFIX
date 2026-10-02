@@ -27,6 +27,15 @@ firmware is unchanged; the mOTA and recovery archives retain their inventories
 with the affected Tower entries refreshed. Recovery files remain optional
 repair tools, not a required step for normal SD updates.
 
+The refreshed normal Tower image reports manifest CRC `AAC09D85`; version
+alone cannot distinguish it from the earlier SD-only 2.4.11 download.
+[All 33 production checks passed](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/actions/runs/37072081200),
+and the Windows/Linux builds match within each build system. The exact signed
+package passed both SD-only and combined-profile host validators. Earlier
+physical combined-storage tests used preview images; this refresh does not
+claim a new physical test of the production files. See the
+[refresh verification report](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/blob/feature/ota-delta-apply/docs/meshtower-2.4.11-refresh.md).
+
 ## Downloads
 
 - `OTAFIX-2.4.11-bootloader-mota.zip`: 24 signed, exact-profile bootloader
@@ -138,5 +147,7 @@ https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/blob/feature/ota-
 
 The separately published all-board recovery-only 2.4.11 prerelease remains
 available with its hardware-pending profiles explicitly identified. Its
-original tag and repaired asset provenance remain unchanged.
+original tag remains unchanged. Its Tower SD-profile files receive the same
+combined-storage refresh, recorded as a per-profile source override; all
+other recovery firmware and its provenance remain unchanged.
 
