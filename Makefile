@@ -259,6 +259,7 @@ endif
 C_SRC += \
   src/dfu_ble_svc.c \
   src/dfu_init.c \
+  src/dfu_hardfault.c \
   src/dfu_image_policy.c \
   src/bootloader_settings_guard.c \
   src/flash_nrf5x.c \
@@ -316,7 +317,7 @@ C_SRC += src/boards/boards.c
 # nrfx
 C_SRC += $(NRFX_PATH)/drivers/src/nrfx_power.c
 C_SRC += $(NRFX_PATH)/drivers/src/nrfx_nvmc.c
-C_SRC += $(NRFX_PATH)/mdk/system_$(MCU_SUB_VARIANT).c
+C_SRC += src/system_nrf52.c
 
 # SDK 11 files: serial + OTA DFU
 C_SRC += $(SDK11_PATH)/libraries/bootloader_dfu/bootloader.c

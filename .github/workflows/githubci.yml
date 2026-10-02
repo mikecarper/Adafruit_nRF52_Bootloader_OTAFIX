@@ -126,6 +126,8 @@ jobs:
   feature-builds:
     if: ${{ !startsWith(github.ref_name, 'R_') }}
     runs-on: ubuntu-latest
+    env:
+      OTAFIX_REQUIRE_DFU_EMULATOR: '1'
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -143,7 +145,7 @@ jobs:
 
       - name: Install Tools
         run: |
-          pip3 install adafruit-nrfutil cryptography uritemplate requests intelhex setuptools
+          pip3 install adafruit-nrfutil cryptography uritemplate requests intelhex setuptools unicorn==2.1.4
 
       - name: Run host tests
         run: |

@@ -56,7 +56,15 @@ jobs:
           fi
           echo "boards=$(echo "$boards" | jq -R -s -c 'split("\n")[:-1]')" >> "$GITHUB_OUTPUT"
           echo "source_commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Install ARM GCC for recovery regression
+        uses: carlosperate/arm-none-eabi-gcc-action@v1
+        with:
+          release: '14.2.Rel1'
+      - name: Install DFU emulator
+        run: python3 -m pip install unicorn==2.1.4
       - name: Validate normal and recovery policies
+        env:
+          OTAFIX_REQUIRE_DFU_EMULATOR: '1'
         run: |
           make -C test bootloader_image_test bootloader_image_recovery_test dfu_image_policy_test dfu_image_policy_recovery_test
           test/bootloader_image_test
@@ -65,6 +73,7 @@ jobs:
           test/dfu_image_policy_recovery_test
           python3 test/version_derivation_test.py
           python3 test/build_all_test.py
+          python3 test/dfu_hardfault_test.py
 
   build:
     needs: prepare

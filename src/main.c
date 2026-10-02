@@ -66,6 +66,7 @@
 #include "pstorage.h"
 
 #include "dfu_entry.h"
+#include "system_reset.h"
 #include "ota_delta.h"   // MeshCore .mota delta-apply (single-slot, in-place)
 
 #ifdef NRF_USBD
@@ -178,7 +179,7 @@ int main(void) {
   uint8_t const reset_entry = dfu_entry_reset_magic(requested_entry);
   if (reset_entry != requested_entry) {
     NRF_POWER->GPREGRET = reset_entry;
-    NVIC_SystemReset();
+    otafix_system_reset();
   }
 
   // Populate Boot Address and MBR Param into MBR if not already
@@ -210,7 +211,7 @@ int main(void) {
     // request left by reset_callback() before resetting, or the replacement
     // bootloader re-enters BLE DFU instead of launching the application.
     NRF_POWER->GPREGRET = 0;
-    NVIC_SystemReset();
+    otafix_system_reset();
   }
 
   // Check all inputs and enter DFU if needed
@@ -232,14 +233,14 @@ int main(void) {
   board_teardown();
 
   if (reset_after_app_update) {
-    NVIC_SystemReset();
+    otafix_system_reset();
   }
 
   // MeshCore OTA: if a verified+approved .mota was staged for this firmware, apply it in place now
   // (SoftDevice is off here; safe to rewrite the single app slot). On success, reset to boot the new
   // image; on any failure the app region is left for the validity check below to route to DFU.
   if ( ota_delta_check_and_apply() ) {
-    NVIC_SystemReset();
+    otafix_system_reset();
   }
   board_watchdog_teardown();
 
@@ -278,7 +279,7 @@ int main(void) {
     NRF_POWER->GPREGRET = DFU_MAGIC_OTA_RESET;
   }
 
-  NVIC_SystemReset();
+  otafix_system_reset();
 }
 
 static void check_dfu_mode(void) {
@@ -686,7 +687,7 @@ void app_error_fault_handler(uint32_t id, uint32_t pc, uint32_t info) {
   if ((*ARM_CM_DHCSR) & 1UL) {
     __asm("BKPT #0\n");                                                  /* Only halt mcu if debugger is attached */
   }
-  NVIC_SystemReset();
+  otafix_system_reset();
 }
 
 void assert_nrf_callback(uint16_t line_num, const uint8_t *p_file_name) {

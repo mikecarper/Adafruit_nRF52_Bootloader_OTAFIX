@@ -23,6 +23,7 @@
  */
 
 #include "boards.h"
+#include "system_reset.h"
 #include "nrf_pwm.h"
 #include "app_scheduler.h"
 #include "app_timer.h"
@@ -172,7 +173,7 @@ __attribute__((noinline)) void board_init(void) {
     while (NRF_NVMC->READY == NVMC_READY_READY_Busy){}
     // to avoid infinity boot loop reset only if REGOUT0 was set correctly
     if((NRF_UICR->REGOUT0 & UICR_REGOUT0_VOUT_Msk) == (UICR_REGOUT0_VALUE << UICR_REGOUT0_VOUT_Pos)){
-      NVIC_SystemReset();
+      otafix_system_reset();
     }
   }
 #endif

@@ -24,7 +24,7 @@ sequence = (
     "bootloader_dfu_sd_update_finalize();",
     "led_state(STATE_WRITING_FINISHED);",
     "NRF_POWER->GPREGRET = 0;",
-    "NVIC_SystemReset();",
+    "otafix_system_reset();",
 )
 position = -1
 for statement in sequence:
@@ -38,7 +38,7 @@ app_update = source.index(
     copy_end,
 )
 teardown = source.index("board_teardown();", app_update)
-app_reset = source.index("NVIC_SystemReset();", teardown)
+app_reset = source.index("otafix_system_reset();", teardown)
 delta_apply = source.index("ota_delta_check_and_apply()", app_reset)
 if not (app_update < teardown < app_reset < delta_apply):
     raise AssertionError("completed application updates must reset after teardown and before app launch")

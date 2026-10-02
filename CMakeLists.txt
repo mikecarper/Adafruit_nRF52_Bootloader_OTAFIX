@@ -103,6 +103,7 @@ add_executable(bootloader
   # src
   src/dfu_ble_svc.c
   src/dfu_init.c
+  src/dfu_hardfault.c
   src/dfu_image_policy.c
   src/bootloader_settings_guard.c
   src/flash_nrf5x.c
@@ -117,7 +118,7 @@ add_executable(bootloader
   # nrfx
   ${NRFX_DIR}/drivers/src/nrfx_power.c
   ${NRFX_DIR}/drivers/src/nrfx_nvmc.c
-  ${NRFX_DIR}/mdk/system_${MCU_VARIANT}.c
+  src/system_nrf52.c
   # sdk 11
   ${SDK11_DIR}/libraries/bootloader_dfu/bootloader.c
   ${SDK11_DIR}/libraries/bootloader_dfu/bootloader_settings.c
