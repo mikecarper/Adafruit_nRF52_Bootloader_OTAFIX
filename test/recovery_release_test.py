@@ -88,6 +88,9 @@ class RecoveryReleaseTest(unittest.TestCase):
             self.assertTrue(manifest["recovery_only"])
             self.assertEqual(manifest["board_count"], 1)
             self.assertEqual(manifest["packed_bootloader_version"], "0x020407FF")
+            expected_crc = release.verify_manifest(str(self.hex))
+            self.assertEqual(manifest["boards"][0]["bootloader_manifest_crc32"],
+                             f"0x{expected_crc:08X}")
             self.assertFalse(any(name.endswith(".mota") for name in archive.namelist()))
             for line in archive.read("SHA256SUMS.txt").decode().splitlines():
                 digest, name = line.split("  ")

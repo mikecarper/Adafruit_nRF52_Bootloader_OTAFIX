@@ -26,13 +26,20 @@ before using it: first install the bridge matching the **installed bootloader**,
 then the normal bootloader matching the **physical board**. Recovery packages are
 separately labelled and must not be left installed for normal operation.
 
-The planned [2.4.12 recovery-only correction](docs/release-2.4.12-recovery.md) handles
+The [in-place 2.4.11 recovery correction](docs/release-2.4.11-recovery-correction.md) handles
 the legacy MeshCore Bluetooth DFU stack fault through a narrow reset fallback.
-It will be a non-latest prerelease after physical qualification; the normal
-latest release remains 2.4.10.
-Its notes include the completed Nordic DFU qualification, the one-time DFU ZIP
-bootstrap for older applications without `EndF`, and the remaining hardware
-test limits. The release adds no automatic erase or Open kit.
+It repairs the existing non-latest recovery prerelease. The original
+distribution tag `R_0.11.0-OTAFIX2.4.11` stays unchanged; corrected binaries
+use the clean source-only tag
+`R_v0.11.0-OTAFIX2.4.11`. The 110 existing asset names remain unchanged.
+This correction creates no 2.4.12 release; the normal latest release remains 2.4.10.
+Its notes record successful corrected 2.4.11 qualification with Nordic nRF
+Connect and MeshCore Open, including unchanged settings. Clean production
+builds and artifact validation are required by the release workflow. The notes
+also preserve the earlier lab-only 2.4.12 Nordic result and explain the
+one-time DFU ZIP bootstrap
+for older applications without `EndF` and the hardware test limits.
+The release adds no automatic erase or Open kit.
 
 ## Development build qualification
 

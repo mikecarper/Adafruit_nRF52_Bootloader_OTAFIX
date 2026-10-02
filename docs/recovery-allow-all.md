@@ -5,12 +5,24 @@ These are temporary **recovery bridges**, not normal bootloader upgrades.
 over Legacy serial/BLE DFU and bootloader-family UF2. It is available for every
 board profile; each profile still supports only its normal transports.
 
-The planned [2.4.12 recovery correction](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/blob/feature/ota-delta-apply/docs/release-2.4.12-recovery.md) adds a narrow
-Bluetooth handoff fault fallback for older MeshCore applications. Its release
-tag will be `R_0.11.0-OTAFIX2.4.12`; publication awaits the remaining physical
-test. The normal latest release remains 2.4.10.
+The [in-place 2.4.11 recovery correction](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/blob/feature/ota-delta-apply/docs/release-2.4.11-recovery-correction.md) adds a narrow
+Bluetooth handoff fault fallback for older MeshCore applications. Corrected
+assets replace files on the existing `R_0.11.0-OTAFIX2.4.11` prerelease after
+the required production checks. That original distribution tag remains unchanged;
+production builds use the clean source-only tag
+`R_v0.11.0-OTAFIX2.4.11`. All 110 existing asset names remain unchanged,
+with replacement checksums and source provenance recorded in the inventory.
+This correction creates no 2.4.12 release. The normal latest release remains 2.4.10.
 It includes the local recovery packages without an Open kit or signed
 bootloader mOTA bundle. Existing mOTA features remain enabled.
+
+The corrected 2.4.11 RAK4631 qualification image passed Bluetooth application
+updates through Nordic nRF Connect 4.24.3 and MeshCore Open 9.5.5, starting
+from the exact reported 1.17.1.7 application. The saved radio tuple and seven
+compared settings were preserved. The linked correction notes distinguish
+this qualification image from production assets and the earlier lab-only
+2.4.12 test. Production assets must pass the clean-tag build and package
+validation described below before upload.
 
 New recovery builds ignore the incoming bootloader's board, name, version,
 BLMF/BLM2 manifest, manifest CRC and layout declarations. They accept older
@@ -61,7 +73,9 @@ or Bluetooth DFU connection for that one-time bootstrap, then reinstall the
 application. If buttonless entry itself fails, use the board's supported
 hardware DFU entry. Verify the installed bootloader version after transfer;
 a successful copy alone does not prove activation. No automatic filesystem
-erase is added by the 2.4.12 correction.
+erase is added by the 2.4.11 correction. Because the original and corrected
+assets retain the same version, compare the installed manifest CRC against
+the corrected profile's inventory as well as checking the version.
 
 Confirm the physical board manually. Allow-all means the bridge can accept the
 wrong board again. Do not leave it installed for normal use. Back up settings
@@ -148,18 +162,33 @@ OTAFIX version; the `R_` prefix is a distribution/policy label, not a new ABI.
 Normal builds reject these tags unless an explicit test-version override is used.
 
 The dedicated **Recovery allow-all boards** workflow builds every board. A manual
-workflow run with a blank `release_tag` produces test artifacts only. To rebuild
-and repair an existing recovery prerelease using the current workflow, set
-`release_tag` to its exact `R_` tag. This preserves the published source tag,
-builds its exact source commit without test-version overrides, and uploads only
-changed or missing assets sequentially. The release remains a non-latest
-prerelease. A release event for a recovery tag
+workflow run with a blank `release_tag` produces test artifacts only. A
+same-source rebuild requires a tag containing the workflow's required
+validation and packaging tools. The original 2.4.11 source predates those
+tools, so this repair requires an explicit `source_tag` override.
+The corrected-source 2.4.11 repair keeps
+`R_0.11.0-OTAFIX2.4.11` as the publication destination and uses the clean
+source-only tag `R_v0.11.0-OTAFIX2.4.11` as the build source. The source-only
+tag does not create another release. Set `release_tag` to
+`R_0.11.0-OTAFIX2.4.11` and the optional `source_tag` to
+`R_v0.11.0-OTAFIX2.4.11`. Do not omit `source_tag` for this correction.
+The build source must derive the same packed version as the destination.
+Production builds use no test-version overrides. The inventory records
+`source_tag`, `source_commit`, `distribution_tag`, `distribution_tag_object`,
+and `distribution_tag_commit`, preserving the original distribution tag's
+identity separately from the corrected source. Each board inventory entry
+also records the verified `bootloader_manifest_crc32`, so the installed
+manifest can distinguish corrected binaries from the original same-version
+images. Changed or missing assets
+are uploaded sequentially using the
+existing 110 filenames. The release remains a non-latest prerelease.
+A release event for a recovery tag
 uploads only recovery packages, these instructions, and checksums; it marks the
 release as a prerelease and does not make it latest. The normal release workflow
 skips recovery tags. The repaired 2.4.10 archive is an in-place asset update,
 not a separate recovery release.
 
-The standalone 2.4.11 recovery release and planned 2.4.12 recovery release
+The standalone 2.4.11 recovery release and its in-place correction
 include all 35 releasable board profiles.
 Six included ports remain pending hardware qualification: `gat562_mesh_watch13`,
 `lilygo_t_impulse_plus`, `lilygo_techo_card`, `meshtiny`, `muzi_base`,

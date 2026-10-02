@@ -42,7 +42,7 @@ def inspect_profile(artifacts, board, tag, packed):
         expected_name = expected_name.replace("_DFU", "_AUTO_DFU")
     if (start, size, name, extension[4]) != (0xF4000, 0xA000, expected_name, packed):
         raise ValueError(f"{board}: bootloader identity/version/layout mismatch")
-    verify_manifest(str(hex_path))
+    manifest_crc = verify_manifest(str(hex_path))
     raw = bytes(image.tobinarray(start=start, size=size))
     if f"R_0x{packed:08X}\0".encode() not in raw:
         raise ValueError(f"{board}: missing recovery firmware marker")
@@ -82,6 +82,7 @@ def inspect_profile(artifacts, board, tag, packed):
     if struct.unpack_from("<II", blocks[0x10001000], 0x14) != (start, 0xFE000):
         raise ValueError(f"{board}: UF2 UICR layout mismatch")
     return files, {"board": board, "device_name": name,
+                   "bootloader_manifest_crc32": f"0x{manifest_crc:08X}",
                    "bootloader_sha256": hashlib.sha256(raw).hexdigest(),
                    "files": {path.name: sha256(path) for path in files}}
 
