@@ -300,3 +300,29 @@ bootloader and the fixed `v1.17.1.8-ble-dfu-test` application. Final CLI
 verification confirmed those versions, the saved radio tuple
 `869.6179809,62.5,8,5`, and all seven unchanged settings digests. USB data
 was re-enabled. No erase firmware was used.
+
+## Published production Bluetooth bootloader test: PASS
+
+An additional [RAK4631 hardware test](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/blob/feature/ota-delta-apply/docs/hardware-qualification-2.4.11-ble-bootloader.md)
+on 2 October 2026 used an attached LG Android 5.1.1 phone and nRF Connect
+4.24.3 to install the actual published recovery `board` ZIP over Bluetooth.
+The phone recorded successful validation and Activate and Reset. Read-only
+UF2 information and a subsequent phone firmware-revision read confirmed
+`R_0x02040BFF`. The input ZIP SHA-256 was
+`3ec67bba63dff7ed44dc1680d0f65b0b371ffd9505f5ed6540ec7de8e4999771`.
+
+With host USB configuration blocked before restart and USB power retained,
+recovery advertised as `4631_DFU` at the address ending A7. The previous
+application connection used A6, so a cached nRF Connect reconnect to that
+address produced GATT 133 after successful activation. A fresh scan and
+connection to A7 worked. The same phone then successfully installed the
+531,708-byte MeshCore application over Bluetooth. CLI checks confirmed both
+versions, all seven unchanged settings digests, and the saved radio tuple.
+No erase firmware was used.
+
+This additional test uses the production file; the earlier qualification
+image tests above retain their original artifact identities. It qualifies
+the tested RAK4631 profile and phone, not every board, a physical charge-only
+cable, or battery-only operation. The hardware report records the USB fixture
+limits, a detected and restored hub authorization, and final restoration of
+the node to normal 2.4.10. Release assets and tags were unchanged by this test.
