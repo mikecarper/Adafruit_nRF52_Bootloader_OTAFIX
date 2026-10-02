@@ -28,6 +28,16 @@
 #include <stdbool.h>
 #include "ota_layout.h"
 #include "ota_hybrid_handoff.h"
+#if defined(MOTA_SD_CARD)
+// Internal/retained-RAM apply must never acquire the optional SD peripheral.
+void otah_sd_auth_read(void *dst, uint32_t len) { (void)dst; (void)len; abort(); }
+void otah_sd_auth_consume(void) { abort(); }
+bool ota_sd_init(void) { abort(); }
+void ota_sd_deinit(void) { abort(); }
+bool ota_sd_read_bytes(uint32_t sector, uint32_t offset, void *dst, uint32_t len) {
+    (void)sector; (void)offset; (void)dst; (void)len; abort();
+}
+#endif
 
 // ----- simulated flash + a pre-apply SNAPSHOT used to model the LTO stale read -----
 #if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)

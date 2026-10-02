@@ -17,6 +17,13 @@
   #include "ota_sd_auth.h"
 #endif
 
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) && (!defined(MOTA_SD_DUAL_STORE) || defined(TEST_DUAL_INTERNAL))
+  #define TEST_INTERNAL_PATH 1
+#endif
+#if defined(MOTA_SD_BOOTLOADER_UPDATE) && !defined(TEST_INTERNAL_PATH)
+  #define TEST_SD_PATH 1
+#endif
+
 #define FLASH_LEN        0x00100000u
 #define QSPI_LEN         (2u * 1024u * 1024u)
 #define SD_FIRST_SECTOR  128u
@@ -81,6 +88,17 @@
                               MOTA_BL_STORAGE_BOOT_UPDATE)
 #endif
 
+#if defined(MOTA_SD_DUAL_STORE)
+  #if defined(TEST_INTERNAL_PATH)
+    #undef TEST_SOURCE
+    #undef TEST_PRESERVE_END
+    #undef TEST_RAW_START
+    #define TEST_SOURCE GPREGRET2_OTA_STAGE_EXPANDED
+    #define TEST_PRESERVE_END MOTA_NRF52_INTERNAL_BL_SLOT_START
+    #define TEST_RAW_START MOTA_NRF52_INTERNAL_BL_SLOT_START
+  #endif
+#endif
+
 static const char TEST_DEVICE_NAME_FIELD[BOOTLOADER_UPDATE_DEVICE_NAME_SIZE] =
   TEST_DEVICE_NAME;
 
@@ -132,7 +150,7 @@ void otah_write_words(uint32_t address, const uint32_t *src, uint32_t words) {
     }
   }
 #if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_BOOTLOADER_UPDATE) || defined(MOTA_QSPI_BOOTLOADER_UPDATE)
-#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+#if defined(TEST_INTERNAL_PATH)
   // The approval-clear rewrite of the first slot page still begins with mOTA.
   // The first compacted raw page does not; from there writes are sequential.
   if (address == TEST_RAW_START && memcmp(src, "mOTA", 4u) != 0) {
@@ -340,9 +358,15 @@ static uint8_t *make_boot_image(uint32_t board_id, uint16_t abi, uint8_t storage
   ram_caps->abi         = MOTA_RAM_INFO_ABI;
   ram_caps->handoff_len = MOTA_HYBRID_HANDOFF_LEN;
   ram_caps->arena_size  = MOTA_HYBRID_ARENA_SIZE;
-#if defined(MOTA_RAK_AUTO_STORE)
+#if defined(MOTA_RAK_AUTO_STORE) || defined(MOTA_SD_DUAL_STORE)
   static const uint8_t optional_store[16] = {
-    'M','O','T','A','S','T','O','R',1,0,16,0,0x14,0,0,0
+    'M','O','T','A','S','T','O','R',1,0,16,0,
+#if defined(MOTA_SD_DUAL_STORE)
+    MOTA_BL_STORAGE_STAGE_CEILING,
+#else
+    0x14,
+#endif
+    0,0,0
   };
   memcpy(image + RAM_CAPS_OFFSET + sizeof(*ram_caps), optional_store, sizeof(optional_store));
 #endif
@@ -520,7 +544,7 @@ static void reset_device(void) {
 #endif
 }
 
-#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+#if defined(TEST_SD_PATH)
 static void authorize_sd(const uint8_t *mota, uint32_t total,
                          uint8_t purpose, uint8_t format_ver) {
   const uint32_t sectors = (total + MOTA_SD_SECTOR_SIZE - 1u) /
@@ -541,13 +565,13 @@ static void authorize_sd(const uint8_t *mota, uint32_t total,
 #endif
 
 static void stage(const uint8_t *mota, uint32_t total) {
-#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+#if defined(TEST_INTERNAL_PATH)
   if (total > MOTA_NRF52_INTERNAL_BL_SLOT_END - MOTA_NRF52_INTERNAL_BL_SLOT_START) {
     fprintf(stderr, "test container too large\n");
     exit(2);
   }
   memcpy(FLASH + MOTA_NRF52_INTERNAL_BL_SLOT_START, mota, total);
-#elif defined(MOTA_SD_BOOTLOADER_UPDATE)
+#elif defined(TEST_SD_PATH)
   const uint32_t sectors = (total + MOTA_SD_SECTOR_SIZE - 1u) / MOTA_SD_SECTOR_SIZE;
   if (SD_FIRST_SECTOR + sectors > SD_CARD_SECTORS) {
     fprintf(stderr, "test container too large\n");
@@ -567,7 +591,7 @@ static void stage(const uint8_t *mota, uint32_t total) {
 #endif
 }
 
-#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+#if defined(TEST_SD_PATH)
 static uint8_t *load_exact_mota(const char *path, uint32_t *total_out) {
   FILE *file = fopen(path, "rb");
   if (!file) {
@@ -642,9 +666,9 @@ int main(void) {
   int  ok       = applied && g_gpregret == 0 && g_gpregret2 == GPREGRET2_BL_MBR_HANDOFF &&
            g_mbr_calls == 1 && g_mbr_source == TEST_RAW_START &&
            g_mbr_words == MOTA_NRF52_BL_SIZE / 4u &&
-#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+#if defined(TEST_INTERNAL_PATH)
            g_qspi_init_calls == 0 && g_qspi_deinit_calls == 0 && g_qspi_writes == 0 &&
-#elif defined(MOTA_SD_BOOTLOADER_UPDATE)
+#elif defined(TEST_SD_PATH)
            g_qspi_init_calls == 1 && g_qspi_deinit_calls == 1 && g_qspi_writes == 0 &&
            memcmp(QSPI + SD_FIRST_SECTOR * MOTA_SD_SECTOR_SIZE + 201u, APRV, sizeof(APRV)) == 0 &&
            memcmp(&SD_AUTH, &(mota_sd_auth_t){0}, sizeof(SD_AUTH)) == 0 &&
@@ -657,11 +681,11 @@ int main(void) {
   report("valid v3 package produces raw source and reaches MBR with C8", ok, &failures);
 
   int calls_before = g_mbr_calls;
-#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+#if defined(TEST_SD_PATH)
   int sd_inits_before = g_qspi_init_calls;
 #endif
   applied = ota_delta_check_and_apply();
-#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+#if defined(TEST_SD_PATH)
   report("normal boot leaves approved SD file inert until explicitly re-armed",
          !applied && g_gpregret2 == GPREGRET2_BL_MBR_HANDOFF && g_mbr_calls == calls_before &&
            g_qspi_init_calls == sd_inits_before &&
@@ -673,7 +697,7 @@ int main(void) {
          &failures);
 #endif
 
-#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+#if defined(TEST_SD_PATH)
   const char *exact_path = getenv("MOTA_EXACT_PACKAGE");
   if (exact_path && exact_path[0] != 0) {
     uint32_t exact_total;
@@ -730,9 +754,9 @@ int main(void) {
 
   reset_device();
   stage(mota, total);
-#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+#if defined(TEST_INTERNAL_PATH)
   g_gpregret2 = GPREGRET2_OTA_STAGE_QSPI;
-#elif defined(MOTA_SD_BOOTLOADER_UPDATE)
+#elif defined(TEST_SD_PATH)
   g_gpregret2 = GPREGRET2_OTA_STAGE_QSPI;
 #else
   g_gpregret2 = GPREGRET2_OTA_STAGE_EXPANDED;
@@ -743,7 +767,7 @@ int main(void) {
 
 #if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_SD_BOOTLOADER_UPDATE) || defined(MOTA_QSPI_BOOTLOADER_UPDATE)
   reset_device();
-#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+#if defined(TEST_INTERNAL_PATH)
   report("manual UF2 fixed scratch guard rejects an app extending past E0000",
          ota_delta_live_app_fits_below(MOTA_NRF52_INTERNAL_BL_SLOT_START) &&
            !ota_delta_live_app_fits_below(MOTA_NRF52_BL_SCRATCH_START),
@@ -775,7 +799,7 @@ int main(void) {
 
   reset_device();
   stage(mota, total);
-#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+#if defined(TEST_SD_PATH)
   uint8_t *swap_image = make_boot_image(board_base, 3, required_caps);
   swap_image[0x2000u] ^= 1u;
   fix_image_crc(swap_image);
@@ -989,7 +1013,7 @@ int main(void) {
   free(bad);
   free(bad_image);
 
-#if defined(MOTA_RAK_AUTO_STORE)
+#if defined(MOTA_RAK_AUTO_STORE) || defined(MOTA_SD_DUAL_STORE)
   bad_image = make_boot_image(board_base, 3, required_caps);
   memset(bad_image + RAM_CAPS_OFFSET + sizeof(mota_ram_info_t), 0, 16);
   fix_image_crc(bad_image);
@@ -1236,12 +1260,12 @@ int main(void) {
   reset_device();
   stage(mota, total);
   g_gpregret  = GPREGRET_OTA_APPLY;
-#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+#if defined(TEST_INTERNAL_PATH)
   g_gpregret2 = GPREGRET2_OTA_STAGE_EXPANDED;
 #else
   g_gpregret2 = TEST_SOURCE;
 #endif
-#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+#if defined(TEST_SD_PATH)
   authorize_sd(mota, total, MOTA_SD_AUTH_PURPOSE_APP, 2u);
 #endif
   applied     = ota_delta_check_and_apply();
@@ -1250,7 +1274,7 @@ int main(void) {
            && app_unchanged()
          , &failures);
 
-#if defined(MOTA_SD_BOOTLOADER_UPDATE) || defined(TEST_GENERIC_QSPI)
+#if defined(TEST_SD_PATH) || defined(TEST_GENERIC_QSPI)
   uint32_t beyond_scratch_len = MOTA_NRF52_BL_SCRATCH_START - MOTA_NRF52_APP_BASE +
                                 MOTA_NRF52_FLASH_PAGE;
   uint8_t *beyond_scratch = malloc(beyond_scratch_len);
@@ -1259,7 +1283,7 @@ int main(void) {
                   "APP_TEST", &total);
   reset_device();
   stage(bad, total);
-#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+#if defined(TEST_SD_PATH)
   authorize_sd(bad, total, MOTA_SD_AUTH_PURPOSE_APP, 2u);
 #endif
   g_gpregret  = GPREGRET_OTA_APPLY;

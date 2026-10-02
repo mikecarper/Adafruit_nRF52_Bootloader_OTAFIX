@@ -56,7 +56,12 @@ def main() -> int:
         adaptive = (cmake_value(cmake, "MOTA_RAK_AUTO_STORE") == "ON" and
                     cmake_value(cmake, "MOTA_QSPI_FLASH") == "ON" and
                     cmake_value(cmake, "MOTA_SD_CARD") != "ON")
-        if internal and (not is_nrf52840 or (external and not adaptive)):
+        tower_dual = (board_dir.name == "heltec_mesh_tower_v2_sdcard" and
+                      cmake_value(cmake, "MOTA_SD_DUAL_STORE") == "ON" and
+                      cmake_value(cmake, "MOTA_SD_CARD") == "ON" and
+                      cmake_value(cmake, "MOTA_SD_BOOTLOADER_UPDATE") == "ON" and
+                      cmake_value(cmake, "MOTA_QSPI_FLASH") != "ON")
+        if internal and (not is_nrf52840 or (external and not adaptive and not tower_dual)):
             raise ValueError(f"{board_dir.name}: unsafe internal bootloader-update geometry")
         if is_nrf52840 and not external and not internal:
             raise ValueError(f"{board_dir.name}: internal-only nRF52840 target is not enabled")
@@ -83,6 +88,7 @@ def main() -> int:
         if target in targets:
             previous, previous_hw = targets[target]
             aliases = {frozenset(("wiscore_rak3401", "wiscore_rak3401_auto")),
+                       frozenset(("heltec_mesh_tower_v2", "heltec_mesh_tower_v2_sdcard")),
                        frozenset(("wiscore_rak4631_board", "wiscore_rak4631_auto"))}
             if hw_id != previous_hw or frozenset((board_dir.name, previous)) not in aliases:
                 raise ValueError(f"target collision: {board_dir.name} and {previous} both use {target:08X}")

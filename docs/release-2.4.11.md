@@ -2,6 +2,31 @@
 
 Full normal bootloader release. Packed version: `0x02040BFF`.
 
+## MeshTower SD/internal refresh
+
+`heltec_mesh_tower_v2_sdcard` is now the combined MeshTower V2 bootloader:
+SD remains the default, with optional internal-flash staging when SD is off.
+USB drive flashing, serial DFU and Nordic Legacy BLE DFU remain available.
+Use matching combined/SD MeshCore firmware; `set sdcard off` or
+`set sdcard on`, followed by a reboot, selects its update storage.
+SD supports full and delta application updates. Internal mode supports
+application deltas that fit its flash workspace, plus signed bootloader
+updates; it does not make full application updates fit in internal flash.
+
+**The SD-card path does not need any recovery image.** Devices already using
+the authenticated SD bootloader-update path install the normal combined
+SD-profile `.mota` directly. Do not install an `R_` bridge first or afterward.
+Older bootloaders lacking that protocol can install the normal image locally.
+The separate internal-only Tower profile remains available for existing
+deployments; changing its storage profile requires a one-time local normal
+bootloader installation, not a cross-profile LoRa update.
+
+The refreshed Tower files are built from source tag `0.11.0-OTAFIX2.4.11`.
+The original release tag and download names are unchanged. Unaffected board
+firmware is unchanged; the mOTA and recovery archives retain their inventories
+with the affected Tower entries refreshed. Recovery files remain optional
+repair tools, not a required step for normal SD updates.
+
 ## Downloads
 
 - `OTAFIX-2.4.11-bootloader-mota.zip`: 24 signed, exact-profile bootloader

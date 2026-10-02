@@ -5,7 +5,7 @@
     {"id": "gat562", "label": "MTools Tec GAT562", "meshcoreHardware": ["GAT562_30S_Mesh_Kit", "GAT562_Mesh_EVB_Pro", "GAT562_Mesh_Tracker_Pro"]},
     {"id": "heltec_mesh_pocket", "label": "Heltec MeshPocket", "meshcoreHardware": ["Mesh_pocket"]},
     {"id": "heltec_mesh_tower_v2", "label": "Heltec MeshTower V2 - internal storage", "meshcoreHardware": ["Heltec_tower_v2"]},
-    {"id": "heltec_mesh_tower_v2_sdcard", "label": "Heltec MeshTower V2 - microSD", "meshcoreHardware": ["Heltec_tower_v2_sdcard"]},
+    {"id": "heltec_mesh_tower_v2_sdcard", "label": "Heltec MeshTower V2 - microSD + internal (SD primary)", "meshcoreHardware": ["Heltec_tower_v2_sdcard"]},
     {"id": "heltec_t096", "label": "Heltec T096", "meshcoreHardware": ["Heltec_t096"]},
     {"id": "heltec_t1", "label": "Heltec T1", "meshcoreHardware": ["Heltec_t1"]},
     {"id": "heltec_t114", "label": "Heltec T114", "meshcoreHardware": ["Heltec_t114", "Heltec_t114_without_display"]},

@@ -376,6 +376,8 @@ static void reset_device(const uint8_t *base, uint32_t base_len) {
   g_gpregret              = GPREGRET_OTA_APPLY;
 #if defined(MOTA_QSPI_FLASH)
   g_gpregret2             = GPREGRET2_OTA_STAGE_QSPI;
+#elif defined(MOTA_SD_DUAL_STORE)
+  g_gpregret2             = GPREGRET2_OTA_STAGE_SD;
 #else
   g_gpregret2             = 0;
 #endif
