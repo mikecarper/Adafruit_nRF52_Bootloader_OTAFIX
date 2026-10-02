@@ -5,6 +5,13 @@ These are temporary **recovery bridges**, not normal bootloader upgrades.
 over Legacy serial/BLE DFU and bootloader-family UF2. It is available for every
 board profile; each profile still supports only its normal transports.
 
+The planned [2.4.12 recovery correction](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/blob/feature/ota-delta-apply/docs/release-2.4.12-recovery.md) adds a narrow
+Bluetooth handoff fault fallback for older MeshCore applications. Its release
+tag will be `R_0.11.0-OTAFIX2.4.12`; publication awaits the remaining physical
+test. The normal latest release remains 2.4.10.
+It includes the local recovery packages without an Open kit or signed
+bootloader mOTA bundle. Existing mOTA features remain enabled.
+
 New recovery builds ignore the incoming bootloader's board, name, version,
 BLMF/BLM2 manifest, manifest CRC and layout declarations. They accept older
 manifest-free binaries and shorter word-aligned bootloader images, including
@@ -44,6 +51,18 @@ Do not drag the merged `.hex` onto the drive or use an application erase package
 as a bootloader replacement. The bridge does not repair a bootloader that cannot
 start DFU, and hardware access may still be needed if USB recovery fails.
 
+On RAK internal-update profiles, a valid application without a usable
+hash-bound `EndF` record leaves the bootloader UF2 updater unable to prove
+that fixed `0xE0000` staging flash is safe to erase. It refuses before staging;
+this safety guard remains intact. Ordinary non-LoRa builds can also omit
+this metadata even when their Bluetooth handoff is corrected. Use the
+matching combined SoftDevice/bootloader DFU ZIP through a working serial/CDC
+or Bluetooth DFU connection for that one-time bootstrap, then reinstall the
+application. If buttonless entry itself fails, use the board's supported
+hardware DFU entry. Verify the installed bootloader version after transfer;
+a successful copy alone does not prove activation. No automatic filesystem
+erase is added by the 2.4.12 correction.
+
 Confirm the physical board manually. Allow-all means the bridge can accept the
 wrong board again. Do not leave it installed for normal use. Back up settings
 where possible and plan for application/settings loss during recovery.
@@ -60,8 +79,8 @@ The two adaptive recovery images in the repaired 2.4.10 archive also accept
 signed bootloader `.mota` packages over LoRa. Their packages must target the
 exact historical `*_AUTO_DFU` identity and retain the internal bootloader
 staging and optional application-storage capabilities. The recovery packages
-in this archive update only a device already running the matching recovery
-bridge. They do not migrate to the normal `*_DFU` identity; complete that
+in that repaired 2.4.10 archive update only a device already running the
+matching recovery bridge. They do not migrate to the normal `*_DFU` identity; complete that
 one-time transition with the local updater above.
 
 For the in-place 2.4.10 repair, the two adaptive images were rebuilt from the
@@ -140,7 +159,8 @@ release as a prerelease and does not make it latest. The normal release workflow
 skips recovery tags. The repaired 2.4.10 archive is an in-place asset update,
 not a separate recovery release.
 
-The standalone 2.4.11 recovery release includes all 35 releasable board profiles.
+The standalone 2.4.11 recovery release and planned 2.4.12 recovery release
+include all 35 releasable board profiles.
 Six included ports remain pending hardware qualification: `gat562_mesh_watch13`,
 `lilygo_t_impulse_plus`, `lilygo_techo_card`, `meshtiny`, `muzi_base`,
 and `nano_g2_ultra`. They are identified in the archive inventory

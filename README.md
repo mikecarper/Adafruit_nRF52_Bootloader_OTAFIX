@@ -26,6 +26,14 @@ before using it: first install the bridge matching the **installed bootloader**,
 then the normal bootloader matching the **physical board**. Recovery packages are
 separately labelled and must not be left installed for normal operation.
 
+The planned [2.4.12 recovery-only correction](docs/release-2.4.12-recovery.md) handles
+the legacy MeshCore Bluetooth DFU stack fault through a narrow reset fallback.
+It will be a non-latest prerelease after physical qualification; the normal
+latest release remains 2.4.10.
+Its notes include the completed Nordic DFU qualification, the one-time DFU ZIP
+bootstrap for older applications without `EndF`, and the remaining hardware
+test limits. The release adds no automatic erase or Open kit.
+
 ## Development build qualification
 
 Development pushes on `feature/ota-delta-apply`, as well as `master`, pull
