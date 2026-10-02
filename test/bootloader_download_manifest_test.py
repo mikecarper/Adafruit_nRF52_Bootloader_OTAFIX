@@ -29,10 +29,11 @@ class DownloadManifestTests(unittest.TestCase):
 
     def test_all_normal_profiles_and_exact_storage(self):
         manifest = build_manifest(self.release, self.mapping)
-        self.assertEqual(24, len(manifest["profiles"]))
+        self.assertEqual(23, len(manifest["profiles"]))
         profiles = {p["id"]: p for p in manifest["profiles"]}
+        self.assertNotIn("heltec_mesh_tower_v2", profiles)
         for board, storage in (("heltec_t096", "internal"), ("heltec_t114", "internal"),
-                ("heltec_mesh_tower_v2", "internal"), ("heltec_mesh_tower_v2_sdcard", "sd"),
+                ("heltec_mesh_tower_v2_sdcard", "sd"),
                 ("wiscore_rak3401_auto", "adaptive"), ("wiscore_rak4631_auto", "adaptive")):
             self.assertEqual(storage, profiles[board]["storage"])
             self.assertEqual({"uf2", "zip", "hex"}, set(profiles[board]["files"]))
@@ -53,9 +54,11 @@ class DownloadManifestTests(unittest.TestCase):
             self.assertEqual("xiao_nrf52840_ble", aliases[h])
         for h in ("WioTrackerL1-1W", "WioTrackerL1Eink"):
             self.assertEqual("wio_tracker_l1", aliases[h])
+        self.assertEqual("heltec_mesh_tower_v2_sdcard", aliases["Heltec_tower_v2_sdcard"])
         gaps = {h: p for p in manifest["unavailableProfiles"] for h in p["meshcoreHardware"]}
-        self.assertEqual(14, len(gaps))
-        for h in ("wio_wm1110", "GAT562_Mesh_Watch13", "ThinkNode_M8", "LilyGo_T-Echo_Card"):
+        self.assertEqual(15, len(gaps))
+        for h in ("wio_wm1110", "GAT562_Mesh_Watch13", "ThinkNode_M8", "LilyGo_T-Echo_Card",
+                  "Heltec_tower_v2"):
             self.assertNotIn(h, aliases)
             self.assertTrue(gaps[h]["reason"])
             self.assertNotIn("files", gaps[h])
