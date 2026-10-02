@@ -1,5 +1,13 @@
 # Adafruit nRF52 Bootloader with Enhanced OTA DFU
 
+## OTAFIX 2.4.11
+
+The [full 2.4.11 release](docs/release-2.4.11.md) carries the corrected legacy
+MeshCore Bluetooth handoff recovery into the normal bootloaders. It retains
+24 normal profiles with signed bootloader LoRa self-update and provides a
+separate 29-profile recovery archive. RAK models each have one compatible
+normal `*_auto` image. No Open kit or automatic settings erase is bundled.
+
 ## Update capabilities by board
 
 Firmware pickers can use the release's [exact-board JSON download manifest](docs/bootloader-download-manifest.md)
@@ -32,7 +40,8 @@ It repairs the existing non-latest recovery prerelease. The original
 distribution tag `R_0.11.0-OTAFIX2.4.11` stays unchanged; corrected binaries
 use the clean source-only tag
 `R_v0.11.0-OTAFIX2.4.11`. The 110 existing asset names remain unchanged.
-This correction creates no 2.4.12 release; the normal latest release remains 2.4.10.
+The recovery correction creates no 2.4.12 release. The full normal 2.4.11
+release is published separately with its own production tag and packages.
 Its notes record successful corrected 2.4.11 qualification with Nordic nRF
 Connect and MeshCore Open, including unchanged settings. Clean production
 builds and artifact validation are required by the release workflow. The notes
