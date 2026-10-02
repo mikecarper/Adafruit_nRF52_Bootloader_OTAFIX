@@ -17,14 +17,15 @@ updates; it does not make full application updates fit in internal flash.
 the authenticated SD bootloader-update path install the normal combined
 SD-profile `.mota` directly. Do not install an `R_` bridge first or afterward.
 Older bootloaders lacking that protocol can install the normal image locally.
-The separate internal-only Tower profile remains available for existing
-deployments; changing its storage profile requires a one-time local normal
-bootloader installation, not a cross-profile LoRa update.
+The separate internal-only Tower downloads have been removed from this release,
+including both bundles. Existing internal-only deployments require a one-time
+local normal bootloader installation, not a cross-profile LoRa update. The
+included updater refuses that cross-profile selection rather than guessing.
 
 The refreshed Tower files are built from source tag `0.11.0-OTAFIX2.4.11`.
-The original release tag and download names are unchanged. Unaffected board
-firmware is unchanged; the mOTA and recovery archives retain their inventories
-with the affected Tower entries refreshed. Recovery files remain optional
+The original release tag and remaining download names are unchanged. Remaining
+board firmware is unchanged; the mOTA and recovery archives omit the retired
+internal-only Tower and retain the combined Tower. Recovery files remain optional
 repair tools, not a required step for normal SD updates.
 
 The refreshed normal Tower image reports manifest CRC `AAC09D85`; version
@@ -38,12 +39,12 @@ claim a new physical test of the production files. See the
 
 ## Downloads
 
-- `OTAFIX-2.4.11-bootloader-mota.zip`: 24 signed, exact-profile bootloader
+- `OTAFIX-2.4.11-bootloader-mota.zip`: 23 signed, exact-profile bootloader
   packages, the official public key, inventory and checksums.
 - `OTAFIX-2.4.11-R_recovery.zip`: separately labelled temporary recovery
-  bridges for the 29 qualified historical/current profiles.
+  bridges for 28 qualified historical/current profiles.
 - Individual bootloader UF2, combined SoftDevice/bootloader DFU ZIP and SWD
-  HEX files for the 24 normal profiles, plus `bootloader-manifest.json` for
+  HEX files for the 23 normal profiles, plus `bootloader-manifest.json` for
   exact-board firmware pickers.
 - RAK3401 and RAK4631 each have one normal image, named `*_auto`, retaining
   the standard `3401_DFU` / `4631_DFU` identity. Existing standard `board`
@@ -104,7 +105,8 @@ start DFU. Do not interpret a completed file copy as proof of activation.
 
 ## Verification
 
-All 33 production build/validation jobs passed, including Make and CMake for
+Before withdrawal of the separate internal-only Tower download, all 33
+production build/validation jobs passed, including Make and CMake for
 all 29 production profiles, T096/ST7735S and T114/ST7789 feature variants,
 host and sanitizer tests, signed package verification, and the separate
 recovery archive audit. Downloaded HEX/ZIP/UF2 sets, all 24 signatures,

@@ -435,12 +435,18 @@ def select_package(manifest: dict[str, Any], identity: NodeIdentity) -> dict[str
         item for item in manifest.get("packages", [])
         if str(item.get("target_id", "")).upper() == f"0X{identity.target_id}"
     ]
-    if len(matches) == 2 and identity.name == "TOWER_V2_OTA":
-        board = (
-            "heltec_mesh_tower_v2_sdcard"
-            if identity.caps == 0x09 else "heltec_mesh_tower_v2"
-        )
+    if identity.name == "TOWER_V2_OTA":
+        board = {0x09: "heltec_mesh_tower_v2_sdcard",
+                 0x0A: "heltec_mesh_tower_v2"}.get(identity.caps)
+        if board is None:
+            raise UpdateError("unsupported MeshTower bootloader storage profile")
         matches = [item for item in matches if item.get("board") == board]
+        if not matches:
+            raise UpdateError(
+                "release has no matching MeshTower storage profile; "
+                "use a one-time local normal bootloader installation via "
+                "USB/BLE DFU or SWD, not a cross-profile LoRa update"
+            )
     if len(matches) == 1:
         return matches[0]
     if not matches:

@@ -102,7 +102,7 @@ jobs:
     - name: Select normal release profile
       id: release-profile
       run: |
-        python3 -c 'import sys; sys.path.insert(0, "tools"); from build_bootloader_mota_release import QUALIFIED_BOARDS, PENDING_BOARDS; print("publish=" + str(sys.argv[1] in QUALIFIED_BOARDS).lower()); print("publish_recovery=" + str(sys.argv[1] not in PENDING_BOARDS).lower())' "${{ matrix.board }}" >> "$GITHUB_OUTPUT"
+        python3 -c 'import sys; sys.path.insert(0, "tools"); from build_bootloader_mota_release import QUALIFIED_BOARDS, PENDING_BOARDS, RETIRED_NORMAL_PROFILES; print("publish=" + str(sys.argv[1] in QUALIFIED_BOARDS).lower()); print("publish_recovery=" + str(sys.argv[1] not in PENDING_BOARDS | RETIRED_NORMAL_PROFILES).lower())' "${{ matrix.board }}" >> "$GITHUB_OUTPUT"
 
     - uses: actions/upload-artifact@v7
       if: ${{ env.OTAFIX_RELEASE_BUILD != 'true' || steps.release-profile.outputs.publish == 'true' }}

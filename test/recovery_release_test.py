@@ -106,6 +106,16 @@ class RecoveryReleaseTest(unittest.TestCase):
             self.assertEqual(manifest["board_count"], 1)
             self.assertFalse(any("pending_test_board" in name for name in archive.namelist()))
 
+    def test_retired_tower_excluded_from_normal_release_recovery(self):
+        retired = self.root / "src/boards/heltec_mesh_tower_v2"
+        retired.mkdir()
+        (retired / "board.cmake").write_text("set(DEVICE_NAME TOWER_V2_OTA)\n")
+        bundle = release.build(self.input, self.root / "out", TAG)
+        with zipfile.ZipFile(bundle) as archive:
+            manifest = json.loads(archive.read("manifest.json"))
+            self.assertEqual(manifest["board_count"], 1)
+            self.assertFalse(any("heltec_mesh_tower_v2" in name for name in archive.namelist()))
+
     def test_mistagged_binary_rejected(self):
         with self.assertRaisesRegex(ValueError, "version/layout"):
             release.inspect_profile(self.input, "gat562", TAG, VERSION-1)

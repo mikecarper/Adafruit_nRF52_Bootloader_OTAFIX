@@ -20,7 +20,8 @@ SD update contract with `0x0B`.
 | Tower internal-only (`0x0A`) | One-time local USB/BLE DFU or SWD migration; install matching combined/SD MeshCore firmware |
 | Combined SD/internal | Signed newer combined successor using the selected store |
 
-The internal-only target remains buildable for existing deployments. Exact
+The internal-only target remains buildable for historical deployments, but is
+no longer published in the normal release or its recovery bundle. Exact
 storage-profile checks intentionally reject cross-profile bootloader OTA, even
 though the board name and target ID match. Combined successors must retain
 both their SD profile and validated optional internal capability.

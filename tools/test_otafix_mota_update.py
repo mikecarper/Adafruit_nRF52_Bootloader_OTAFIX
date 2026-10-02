@@ -82,6 +82,27 @@ class SeederAttachmentTests(unittest.TestCase):
                 )
 
 
+class TowerPackageSelectionTests(unittest.TestCase):
+    def test_storage_match_is_required_even_with_only_one_tower_package(self) -> None:
+        sd = {"target_id": "0x1150F50E", "board": "heltec_mesh_tower_v2_sdcard"}
+        internal = {"target_id": "0x1150F50E", "board": "heltec_mesh_tower_v2"}
+        for packages in ([sd], [internal], [sd, internal]):
+            for caps, expected in ((9, sd), (10, internal)):
+                identity = updater.NodeIdentity("239A0071", "1150F50E", "TOWER_V2_OTA", "00000000", 3, caps)
+                with self.subTest(packages=packages, caps=caps), mock.patch.object(updater, "choose") as choose:
+                    if expected in packages:
+                        self.assertEqual(updater.select_package({"packages": packages}, identity), expected)
+                    else:
+                        with self.assertRaisesRegex(updater.UpdateError, "local normal bootloader"):
+                            updater.select_package({"packages": packages}, identity)
+                    choose.assert_not_called()
+
+    def test_unknown_tower_storage_does_not_guess(self) -> None:
+        identity = updater.NodeIdentity("239A0071", "1150F50E", "TOWER_V2_OTA", "00000000", 3, 0x0B)
+        with self.assertRaisesRegex(updater.UpdateError, "unsupported MeshTower"):
+            updater.select_package({"packages": [{"target_id": "0x1150F50E", "board": "heltec_mesh_tower_v2_sdcard"}]}, identity)
+
+
 class CompanionTerminalTests(unittest.TestCase):
     def test_reset_sequence_is_state_independent(self) -> None:
         self.assertEqual(

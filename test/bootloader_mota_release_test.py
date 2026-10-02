@@ -63,10 +63,18 @@ def define_hex(text: str, key: str) -> int:
 class QualifiedReleaseInventoryTest(unittest.TestCase):
     def test_inventory_covers_every_release_board(self) -> None:
         boards = {path.name for path in (ROOT / "src" / "boards").iterdir() if path.is_dir()}
-        self.assertEqual(set(release.QUALIFIED_BOARDS), boards - release.LEGACY_RAK_PROFILES - release.PENDING_BOARDS)
-        self.assertEqual(len(release.QUALIFIED_BOARDS), len(boards) - 5 - len(release.PENDING_BOARDS))
+        self.assertEqual(set(release.QUALIFIED_BOARDS), boards - release.LEGACY_RAK_PROFILES - release.RETIRED_NORMAL_PROFILES - release.PENDING_BOARDS)
+        self.assertEqual(len(release.QUALIFIED_BOARDS), len(boards) - 6 - len(release.PENDING_BOARDS))
         self.assertEqual({name for name in release.QUALIFIED_BOARDS if name.startswith("wiscore_rak")},
                          {"wiscore_rak3401_auto", "wiscore_rak4631_auto"})
+
+    def test_only_combined_tower_is_published_but_both_compile(self) -> None:
+        self.assertNotIn("heltec_mesh_tower_v2", release.QUALIFIED_BOARDS)
+        self.assertIn("heltec_mesh_tower_v2_sdcard", release.QUALIFIED_BOARDS)
+        self.assertIn("heltec_mesh_tower_v2", release.ci_boards(production=True))
+        mapping = json.loads((ROOT / "docs/bootloader_profiles.json").read_text())
+        self.assertEqual({item["id"] for item in mapping["profiles"]}, set(release.QUALIFIED_BOARDS))
+        self.assertIn("heltec_mesh_tower_v2", {item["id"] for item in mapping["unavailableProfiles"]})
 
     def test_normal_release_uploads_use_the_canonical_inventory(self) -> None:
         workflow = (ROOT / ".github/workflows/githubci.yml").read_text(encoding="ascii")

@@ -22,6 +22,10 @@ LEGACY_RAK_PROFILES = frozenset((
     "wiscore_rak4631_w25q16",
 ))
 
+# Keep historical source targets buildable, but do not publish a second Tower
+# image now that the SD-primary profile supports both storage backends.
+RETIRED_NORMAL_PROFILES = frozenset(("heltec_mesh_tower_v2",))
+
 
 def pending_boards(root: Path = Path(__file__).resolve().parents[1] / "src" / "boards") -> frozenset[str]:
     """Build source-verified ports in CI without publishing untested board images."""
@@ -59,7 +63,7 @@ def release_boards(root: Path = Path(__file__).resolve().parents[1] / "src" / "b
             raise ValueError(f"{directory.name}: missing exact bootloader mOTA profile")
         if any(f"-DMOTA_{backend}_BOOTLOADER_UPDATE=1" not in make for backend in backends):
             raise ValueError(f"{directory.name}: Make/CMake bootloader mOTA disagreement")
-        if (directory.name not in LEGACY_RAK_PROFILES and
+        if (directory.name not in LEGACY_RAK_PROFILES | RETIRED_NORMAL_PROFILES and
                 "set(OTAFIX_BOARD_QUALIFICATION_PENDING ON)" not in cmake):
             boards.append(directory.name)
     if not boards:
@@ -281,9 +285,9 @@ Trust the key once on the device console:
 ota key add {public_text.upper()}
 
 Then follow the explicit bootloader installation workflow. Always select the
-exact board and storage profile. In particular, heltec_mesh_tower_v2 and
-heltec_mesh_tower_v2_sdcard are not interchangeable even though they share a
-wire target ID.
+exact board and storage profile. The historical internal-only MeshTower
+profile is no longer included. Its shared wire target ID does not make the
+combined SD-primary package a compatible cross-profile LoRa update.
 
 The default combined MeshTower profile is heltec_mesh_tower_v2_sdcard. It
 preserves the existing SD identity and 0x09 update contract, adding internal

@@ -4,7 +4,6 @@
   "profiles": [
     {"id": "gat562", "label": "MTools Tec GAT562", "meshcoreHardware": ["GAT562_30S_Mesh_Kit", "GAT562_Mesh_EVB_Pro", "GAT562_Mesh_Tracker_Pro"]},
     {"id": "heltec_mesh_pocket", "label": "Heltec MeshPocket", "meshcoreHardware": ["Mesh_pocket"]},
-    {"id": "heltec_mesh_tower_v2", "label": "Heltec MeshTower V2 - internal storage", "meshcoreHardware": ["Heltec_tower_v2"]},
     {"id": "heltec_mesh_tower_v2_sdcard", "label": "Heltec MeshTower V2 - microSD + internal (SD primary)", "meshcoreHardware": ["Heltec_tower_v2_sdcard"]},
     {"id": "heltec_t096", "label": "Heltec T096", "meshcoreHardware": ["Heltec_t096"]},
     {"id": "heltec_t1", "label": "Heltec T1", "meshcoreHardware": ["Heltec_t1"]},
@@ -28,6 +27,7 @@
     {"id": "xiao_nrf52840_ble_sense", "label": "Seeed XIAO nRF52840 BLE Sense", "meshcoreHardware": ["Xiao_nrf52_Sense"]}
   ],
   "unavailableProfiles": [
+    {"id": "heltec_mesh_tower_v2", "label": "Heltec MeshTower V2 - historical internal-only profile", "meshcoreHardware": ["Heltec_tower_v2"], "reason": "Retired from normal releases in favor of the combined SD/internal profile. Existing internal-only bootloaders require a one-time local installation of the normal combined image via USB/BLE DFU or SWD; do not use a cross-profile LoRa update."},
     {"id": "gat562_mesh_watch13", "label": "GAT562 Mesh Watch13", "meshcoreHardware": ["GAT562_Mesh_Watch13"], "reason": "The watch routes a GAT562 bootloader LED output to its vibration motor and has onboard flash. It needs a watch-specific profile."},
     {"id": "heltec_mesh_solar", "label": "Heltec Mesh Solar", "meshcoreHardware": ["Heltec_mesh_solar"], "reason": "Mesh Solar has different LED and peripheral pins from the supported Heltec boards. It needs its own profile."},
     {"id": "lilygo_t_impulse_plus", "label": "LilyGo T-Impulse Plus", "meshcoreHardware": ["LilyGo_T_Impulse_Plus"], "reason": "T-Impulse Plus has different flash data pins and LED wiring from T-Echo Lite. It needs its own profile."},
