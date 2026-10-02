@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 import struct
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -173,6 +174,103 @@ class RecoveryReleaseTest(unittest.TestCase):
         (self.input / "old-build.zip").write_bytes(b"old")
         with self.assertRaisesRegex(ValueError, "stale"):
             release.build(self.input, self.root / "out", TAG)
+
+    def repaired_source_files(self):
+        originals = {path.name: path.read_bytes() for path in self.input.iterdir()}
+        for path in list(self.input.iterdir()):
+            path.rename(path.with_name(path.name.replace("_bootloader-" + TAG, "_bootloader-v" + TAG)))
+        return originals
+
+    def repair_provenance(self):
+        return {"source_tag": "R_v" + TAG, "source_commit": "1" * 40,
+                "distribution_tag": "R_" + TAG, "distribution_tag_object": "2" * 40,
+                "distribution_tag_commit": "3" * 40}
+
+    def test_source_only_repair_preserves_asset_names_and_bytes_and_records_provenance_without_mota(self):
+        originals = self.repaired_source_files()
+        with mock.patch.object(release, "validate_provenance", return_value=self.repair_provenance()) as check:
+            bundle = release.build(self.input, self.root / "out", TAG,
+                                   source_tag="R_v" + TAG, release_tag="R_" + TAG)
+        check.assert_called_once_with(self.root, "R_v" + TAG, "R_" + TAG)
+        self.assertEqual({path.name: path.read_bytes() for path in self.input.iterdir()}, originals)
+        with zipfile.ZipFile(bundle) as archive:
+            manifest = json.loads(archive.read("manifest.json"))
+            for field, expected in self.repair_provenance().items():
+                self.assertEqual(manifest[field], expected)
+            self.assertNotIn("recovery_mota", manifest)
+            self.assertEqual(set(manifest["boards"][0]["files"]), set(originals))
+            for name, data in originals.items():
+                self.assertEqual(archive.read("boards/gat562/" + name), data)
+                self.assertEqual(manifest["boards"][0]["files"][name], hashlib.sha256(data).hexdigest())
+
+    def test_alias_collision_is_rejected_without_changing_either_file(self):
+        originals = self.repaired_source_files()
+        paths = sorted(self.input.iterdir())
+        collision = paths[0].with_name(paths[0].name.replace("_bootloader-v" + TAG, "_bootloader-" + TAG))
+        collision.write_bytes(b"original distribution asset")
+        before = {path.name: path.read_bytes() for path in self.input.iterdir()}
+        with self.assertRaisesRegex(ValueError, "overwrite"):
+            release.alias_plan(paths, "v" + TAG, TAG)
+        self.assertEqual({path.name: path.read_bytes() for path in self.input.iterdir()}, before)
+        self.assertIn(collision.name, originals)
+
+    def test_bad_source_provenance_is_rejected_before_aliases_or_output(self):
+        self.repaired_source_files()
+        before = {path.name: path.read_bytes() for path in self.input.iterdir()}
+        with mock.patch.object(release, "validate_provenance", side_effect=ValueError("different packed versions")):
+            with self.assertRaisesRegex(ValueError, "different packed"):
+                release.build(self.input, self.root / "out", TAG,
+                              source_tag="R_v" + TAG, release_tag="R_" + TAG)
+        self.assertEqual({path.name: path.read_bytes() for path in self.input.iterdir()}, before)
+        self.assertFalse((self.root / "out").exists())
+
+    def test_bad_source_artifact_is_rejected_before_any_alias(self):
+        self.repaired_source_files()
+        source_uf2 = next(self.input.glob("*.uf2"))
+        blob = bytearray(source_uf2.read_bytes())
+        blob[32 + 128] ^= 1
+        source_uf2.write_bytes(blob)
+        before = {path.name: path.read_bytes() for path in self.input.iterdir()}
+        with mock.patch.object(release, "validate_provenance", return_value=self.repair_provenance()):
+            with self.assertRaisesRegex(ValueError, "UF2 differs"):
+                release.build(self.input, self.root / "out", TAG,
+                              source_tag="R_v" + TAG, release_tag="R_" + TAG)
+        self.assertEqual({path.name: path.read_bytes() for path in self.input.iterdir()}, before)
+
+    def test_distribution_filename_version_must_match_release_tag(self):
+        with self.assertRaisesRegex(ValueError, "external recovery filename version"):
+            release.build(self.input, self.root / "out", TAG,
+                          source_tag="R_v" + TAG, release_tag="R_v" + TAG)
+
+    def test_real_clean_source_tag_repair_builds_without_moving_distribution_tag(self):
+        originals = self.repaired_source_files()
+        def git(*args):
+            return subprocess.check_output(["git", "-C", str(self.root), *args],
+                                           text=True, stderr=subprocess.PIPE).strip()
+        git("init", "-q")
+        git("config", "user.email", "test@example.invalid")
+        git("config", "user.name", "Recovery packaging test")
+        (self.root / ".gitignore").write_text("/input/\n/out/\n", encoding="ascii")
+        git("add", ".")
+        git("commit", "-qm", "Original distribution source")
+        original_commit = git("rev-parse", "HEAD")
+        git("tag", "-am", "Original distribution", "R_" + TAG)
+        original_object = git("rev-parse", "refs/tags/R_" + TAG)
+        (self.root / "correction.txt").write_text("Fixed source\n", encoding="ascii")
+        git("add", "correction.txt")
+        git("commit", "-qm", "Corrected source")
+        source_commit = git("rev-parse", "HEAD")
+        git("tag", "-am", "Source-only correction", "R_v" + TAG)
+        bundle = release.build(self.input, self.root / "out", TAG,
+                               source_tag="R_v" + TAG, release_tag="R_" + TAG)
+        with zipfile.ZipFile(bundle) as archive:
+            manifest = json.loads(archive.read("manifest.json"))
+            self.assertEqual(manifest["source_commit"], source_commit)
+            self.assertEqual(manifest["distribution_tag_commit"], original_commit)
+            self.assertEqual(manifest["distribution_tag_object"], original_object)
+        self.assertEqual(git("rev-parse", "refs/tags/R_" + TAG), original_object)
+        self.assertEqual(git("status", "--porcelain"), "")
+        self.assertEqual({path.name: path.read_bytes() for path in self.input.iterdir()}, originals)
 
 
 if __name__ == "__main__":

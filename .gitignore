@@ -60,6 +60,8 @@ _build/
 cmake-build-*/
 bin/
 _bin/
+/_recovery-release/
+/_recovery-bundle/
 *.emSession
 *.jlink
 .idea/

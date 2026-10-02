@@ -39,9 +39,10 @@ class RecoveryPublisherTest(unittest.TestCase):
             self.assets.append({"name": path.name,
                 "digest": "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()})
 
-    def publish(self, assets, failure=None):
+    def publish(self, assets, failure=None, source_tag=None):
         with mock.patch.dict(os.environ, {
-            "RECOVERY_RELEASE_TAG": "R_0.11.0-OTAFIX2.4.11", "GH_REPO": "owner/repo"}), \
+            "RECOVERY_RELEASE_TAG": "R_0.11.0-OTAFIX2.4.11", "GH_REPO": "owner/repo",
+            "RECOVERY_SOURCE_TAG": source_tag or "R_0.11.0-OTAFIX2.4.11"}), \
              mock.patch("subprocess.check_output", return_value=json.dumps({"assets": assets})), \
              mock.patch("subprocess.run", side_effect=failure) as run, \
              mock.patch("time.sleep") as sleep, mock.patch("sys.stdout", io.StringIO()):
@@ -81,6 +82,21 @@ class RecoveryPublisherTest(unittest.TestCase):
         with self.assertRaises(subprocess.CalledProcessError):
             self.publish([], failure=fail_upload)
         self.assertEqual(len(calls), 2)
+
+    def test_source_only_repair_preserves_external_names_and_distribution_release(self):
+        self.assets[0]["digest"] = "sha256:old-recovery-image"
+        calls, pauses = self.publish(self.assets, source_tag="R_v0.11.0-OTAFIX2.4.11")
+        self.assertEqual(calls[0].args[0], ["gh", "release", "edit",
+            "R_0.11.0-OTAFIX2.4.11", "--prerelease", "--latest=false"])
+        self.assertEqual(calls[1].args[0], ["gh", "release", "upload",
+            "R_0.11.0-OTAFIX2.4.11", "--clobber", str(self.files[0])])
+        self.assertEqual(pauses, [mock.call(1)])
+
+    def test_source_only_repair_cannot_add_or_drop_existing_asset_names(self):
+        self.assets[0]["name"] = "R_source_only_filename.zip"
+        with self.assertRaisesRegex(RuntimeError, "preserve every existing asset name"):
+            self.publish(self.assets, source_tag="R_v0.11.0-OTAFIX2.4.11")
+        self.last_run.assert_not_called()
 
 
 if __name__ == "__main__":

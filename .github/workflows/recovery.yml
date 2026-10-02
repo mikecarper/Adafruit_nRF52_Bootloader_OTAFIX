@@ -8,6 +8,11 @@ on:
         type: string
         required: false
         default: ''
+      source_tag:
+        description: Exact R_ source tag with the same packed version (defaults to release_tag)
+        type: string
+        required: false
+        default: ''
   release:
     types: [created]
 
@@ -15,8 +20,9 @@ permissions:
   contents: read
 
 env:
-  RECOVERY_PRODUCTION: ${{ github.event_name == 'release' || inputs.release_tag != '' }}
+  RECOVERY_PRODUCTION: ${{ github.event_name == 'release' || inputs.release_tag != '' || inputs.source_tag != '' }}
   RECOVERY_RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+  RECOVERY_SOURCE_TAG: ${{ inputs.source_tag || inputs.release_tag || github.ref_name }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ inputs.release_tag || github.ref_name }}
@@ -30,21 +36,24 @@ jobs:
       boards: ${{ steps.boards.outputs.boards }}
       source_commit: ${{ steps.boards.outputs.source_commit }}
     steps:
+      - name: Require a distribution release for a source tag override
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.source_tag != '' && inputs.release_tag == '' }}
+        run: |
+          echo 'source_tag requires release_tag for a recovery repair' >&2
+          exit 1
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.release_tag || github.ref }}
+          ref: ${{ inputs.source_tag || inputs.release_tag || github.ref }}
           fetch-depth: 0
           submodules: true
-      - name: Require an existing exact recovery release tag
+      - name: Require clean exact recovery source and existing distribution tags
         if: ${{ env.RECOVERY_PRODUCTION == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          [[ "$RECOVERY_RELEASE_TAG" == R_* ]]
-          git rev-parse --verify "refs/tags/$RECOVERY_RELEASE_TAG"
-          test "$(git describe --dirty --always --tags)" = "$RECOVERY_RELEASE_TAG"
-          python3 tools/derive_otafix_version.py "$RECOVERY_RELEASE_TAG" --hex --recovery-allow-all-boards
+          python3 tools/recovery_release_provenance.py \
+            --source-tag "$RECOVERY_SOURCE_TAG" --release-tag "$RECOVERY_RELEASE_TAG"
           gh release view "$RECOVERY_RELEASE_TAG" --json tagName
       - id: boards
         working-directory: src/boards
@@ -72,6 +81,7 @@ jobs:
           test/dfu_image_policy_test
           test/dfu_image_policy_recovery_test
           python3 test/version_derivation_test.py
+          python3 test/recovery_release_provenance_test.py
           python3 test/build_all_test.py
           python3 test/dfu_hardfault_test.py
 
@@ -118,6 +128,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.source_commit }}
+          fetch-depth: 0
       - uses: actions/download-artifact@v8
         with:
           pattern: R_*
@@ -128,7 +139,9 @@ jobs:
           pip3 install intelhex
           python3 tools/build_recovery_release.py \
             --artifacts-dir _recovery-release --output-dir _recovery-bundle \
-            --tag "${RECOVERY_RELEASE_TAG#R_}" --include-pending
+            --tag "${RECOVERY_RELEASE_TAG#R_}" \
+            --source-tag "$RECOVERY_SOURCE_TAG" --release-tag "$RECOVERY_RELEASE_TAG" \
+            --include-pending
       - name: Include recovery instructions and checksums
         run: |
           cp docs/recovery-allow-all.md _recovery-release/RECOVERY-README.md
@@ -158,10 +171,15 @@ jobs:
               if not matches:
                   raise RuntimeError(f"Missing recovery upload files: {pattern}")
               files.extend(matches)
-          subprocess.run(["gh", "release", "edit", tag, "--prerelease", "--latest=false"], check=True)
           release = json.loads(subprocess.check_output(
               ["gh", "api", f"repos/{repo}/releases/tags/{tag}"], text=True))
           existing = {asset["name"]: asset["digest"] for asset in release["assets"]}
+          names = {path.name for path in files}
+          if len(names) != len(files):
+              raise RuntimeError("Duplicate recovery upload asset names")
+          if os.environ.get("RECOVERY_SOURCE_TAG", tag) != tag and names != set(existing):
+              raise RuntimeError("Source-only recovery repair must preserve every existing asset name")
+          subprocess.run(["gh", "release", "edit", tag, "--prerelease", "--latest=false"], check=True)
           for path in files:
               digest = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
               if existing.get(path.name) == digest:

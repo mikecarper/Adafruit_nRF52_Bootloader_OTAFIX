@@ -14,6 +14,7 @@ from intelhex import IntelHex
 
 from build_bootloader_mota_release import add_to_zip, parse_package, pending_boards, sha256, version_from_tag
 from patch_bootloader_manifest import find_manifest, verify_manifest
+from recovery_release_provenance import validate as validate_provenance
 
 ROOT = Path(__file__).resolve().parents[1]
 RAK_RECOVERY_BOARDS = ("wiscore_rak3401_auto", "wiscore_rak4631_auto")
@@ -85,16 +86,39 @@ def inspect_profile(artifacts, board, tag, packed):
                    "files": {path.name: sha256(path) for path in files}}
 
 
+def alias_plan(paths, source_tag, distribution_tag):
+    """Plan external filename aliases; never rewrite verified payload bytes."""
+    aliases = {}
+    for path in paths:
+        marker = "_bootloader-" + source_tag
+        if path.name.count(marker) != 1:
+            raise ValueError("unexpected recovery source artifact filename")
+        target = path.with_name(path.name.replace(marker, "_bootloader-" + distribution_tag, 1))
+        if target != path and target.exists():
+            raise ValueError("recovery filename alias would overwrite an existing artifact")
+        if target in aliases.values():
+            raise ValueError("duplicate recovery filename alias")
+        aliases[path] = target
+    return aliases
+
+
 def build(artifacts, output, tag, recovery_mota_dir=None, source_tag=None,
-          motatool=None, public_key=None, include_pending=False):
+          motatool=None, public_key=None, include_pending=False, release_tag=None):
     label, _, packed = version_from_tag(tag)
+    provenance = {}
+    artifact_tag = tag
+    if release_tag is not None:
+        if release_tag != "R_" + tag:
+            raise ValueError("distribution tag must match the external recovery filename version")
+        provenance = validate_provenance(ROOT, source_tag, release_tag)
+        artifact_tag = source_tag.removeprefix("R_")
     pending = pending_boards(ROOT / "src/boards")
     boards = sorted(path.name for path in (ROOT / "src/boards").iterdir()
                     if path.is_dir() and path.name not in RELEASE_BLOCKED_BOARDS
                     and (include_pending or path.name not in pending))
     inventory, entries = [], []
     for board in boards:
-        files, item = inspect_profile(artifacts, board, tag, packed)
+        files, item = inspect_profile(artifacts, board, artifact_tag, packed)
         inventory.append(item)
         entries.extend((path, f"boards/{board}/{path.name}") for path in files)
     board_paths = {path for path, _ in entries}
@@ -131,13 +155,23 @@ def build(artifacts, output, tag, recovery_mota_dir=None, source_tag=None,
     actual = {path for path in artifacts.iterdir() if path.is_file()}
     if actual != board_paths:
         raise ValueError("unexpected or stale artifacts in recovery input directory")
+    aliases = alias_plan(board_paths, artifact_tag, tag)
     output.mkdir(parents=True, exist_ok=True)
     if any(output.iterdir()):
         raise ValueError("recovery output directory must be empty")
+    for path, target in aliases.items():
+        if path != target:
+            path.rename(target)
+    for item in inventory:
+        item["files"] = {aliases[artifacts / name].name: digest
+                         for name, digest in item["files"].items()}
+    entries = [(aliases[path], name.rsplit("/", 1)[0] + "/" + aliases[path].name)
+               if path in aliases else (path, name) for path, name in entries]
     manifest = output / "manifest.json"
     manifest_data = {"tag": tag, "recovery_only": True,
         "packed_bootloader_version": f"0x{packed:08X}", "board_count": len(boards),
         "boards": inventory}
+    manifest_data.update(provenance)
     if include_pending:
         manifest_data["qualification_pending_boards"] = sorted(set(boards) & set(pending))
     excluded = {board: reason for board, reason in RELEASE_BLOCKED_BOARDS.items()
@@ -169,10 +203,11 @@ if __name__ == "__main__":
     parser.add_argument("--tag", required=True)
     parser.add_argument("--recovery-mota-dir", type=Path)
     parser.add_argument("--source-tag")
+    parser.add_argument("--release-tag", help="existing distribution tag; preserve filenames and record source provenance")
     parser.add_argument("--motatool", type=Path)
     parser.add_argument("--public-key", type=Path)
     parser.add_argument("--include-pending", action="store_true",
                         help="include unqualified source ports and identify them in the inventory")
     args = parser.parse_args()
     build(args.artifacts_dir, args.output_dir, args.tag, args.recovery_mota_dir,
-          args.source_tag, args.motatool, args.public_key, args.include_pending)
+          args.source_tag, args.motatool, args.public_key, args.include_pending, args.release_tag)
