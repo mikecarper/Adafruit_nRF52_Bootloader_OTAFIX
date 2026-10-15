@@ -25,7 +25,7 @@ import sys
 
 args = sys.argv[1:]
 if "-dumpfullversion" in args or "-dumpversion" in args:
-    print("14.2.1")
+    print(os.environ.get("OTAFIX_FAKE_GCC_VERSION", "15.3.1"))
     raise SystemExit(0)
 
 def option_value(option):
@@ -364,7 +364,8 @@ class BuildProfileTest(unittest.TestCase):
 
     def test_ci_pins_gcc_14_2_and_builds_the_tightest_profiles(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
-        self.assertEqual(2, workflow.count("release: '14.2.Rel1'"))
+        self.assertEqual(1, workflow.count("release: '14.2.Rel1'"))
+        self.assertIn("matrix.board == 'wiscore_rak4631_auto' && '15.3.Rel1' || '14.2.Rel1'", workflow)
         self.assertIn('_build/signed-dualbank-$board', workflow)
         self.assertIn('cmake-build-signed-dualbank-$board', workflow)
 

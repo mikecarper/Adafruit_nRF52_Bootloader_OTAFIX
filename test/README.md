@@ -354,7 +354,12 @@ the documented `0x02040A05` restored recovery information qualification lineage 
 reuse of failed candidate ID `0x02040401` as an active override. It also pins
 bounded `TEST_<packed-version>` on-device qualification text while requiring
 full Git/test provenance in filenames (recovery retains its `R_` label), and
-both CI toolchain installs to Arm GNU Toolchain 14.2.Rel1, requires Make and
+ordinary CI toolchain installs to Arm GNU Toolchain 14.2.Rel1, selecting
+15.3.Rel1 only for the combined `wiscore_rak4631_auto` normal/recovery matrix.
+`compiler_policy_test.py` checks that exact-board minimum and the matching
+compile/LTO flags with CMake policy scripts and a harmless Make compiler stub.
+The Docker installer tests also cover the explicit, SHA256-pinned
+`ARM_GNU_RELEASE=15.3.rel1` option. The build-profile regression requires Make and
 CMake to build the signed-plus-dual-bank `heltec_t096` and `heltec_t114`
 profiles, keeps
 `-Oz`, and rejects the unsafe `-fmerge-all-constants` and optional

@@ -8,6 +8,8 @@ endif ()
 
 # include board specific
 include(${CMAKE_CURRENT_LIST_DIR}/src/boards/${BOARD}/board.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/mota_storage_policy.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/mota_compiler_policy.cmake)
 
 # toolchain set up
 if (MCU_VARIANT STREQUAL "nrf5340_application")
@@ -66,7 +68,8 @@ endif ()
 math(EXPR MOTA_RAM_ARENA_SIZE_BYTES "${MOTA_RAM_ARENA_SIZE}")
 if (MOTA_RAM_ARENA_SIZE_BYTES GREATER 0 AND
     (NOT (MOTA_INTERNAL_BOOTLOADER_UPDATE OR MOTA_RAK_AUTO_STORE) OR
-     (MOTA_QSPI_FLASH AND NOT MOTA_RAK_AUTO_STORE) OR (MOTA_SD_CARD AND NOT MOTA_SD_DUAL_STORE) OR
+     (MOTA_QSPI_FLASH AND NOT MOTA_RAK_AUTO_STORE) OR
+     (MOTA_SD_CARD AND NOT (MOTA_SD_DUAL_STORE OR MOTA_RAK_SD_STORE)) OR
      NOT MCU_VARIANT STREQUAL "nrf52840"))
   message(FATAL_ERROR
     "The mOTA SRAM arena requires an internal or RAK adaptive nRF52840 target")
@@ -88,11 +91,7 @@ endif ()
 
 project(Adafruit_nRF52_Bootloader C ASM)
 
-if(NOT CMAKE_C_COMPILER_ID STREQUAL "GNU" OR
-   CMAKE_C_COMPILER_VERSION VERSION_LESS "14.2")
-  message(FATAL_ERROR
-    "Arm GNU Toolchain 14.2.Rel1 or newer is required; found ${CMAKE_C_COMPILER_ID} ${CMAKE_C_COMPILER_VERSION}")
-endif()
+mota_require_arm_gcc("${CMAKE_C_COMPILER_ID}" "${CMAKE_C_COMPILER_VERSION}")
 
 set(CMAKE_EXECUTABLE_SUFFIX .elf)
 set(STARTUP_SOURCE ${NRFX_DIR}/mdk/gcc_startup_${MCU_VARIANT}.S)
@@ -181,6 +180,13 @@ if (MOTA_RAK_AUTO_STORE)
   endif ()
   target_compile_definitions(bootloader PUBLIC MOTA_RAK_AUTO_STORE=1)
 endif ()
+if (MOTA_RAK_SD_STORE)
+  target_compile_definitions(bootloader PUBLIC MOTA_RAK_SD_STORE=1)
+  # Lossless code-size choice for the fixed-envelope three-backend profile;
+  # retain every USB/BLE recovery and update-validation path.
+  target_compile_options(bootloader PRIVATE -fno-caller-saves)
+  target_link_options(bootloader PRIVATE -fno-caller-saves)
+endif ()
 
 if (MOTA_QSPI_BOOTLOADER_UPDATE)
   if (NOT MOTA_QSPI_FLASH)
@@ -200,7 +206,8 @@ if (MOTA_SD_BOOTLOADER_UPDATE)
 endif ()
 
 if (MOTA_INTERNAL_BOOTLOADER_UPDATE)
-  if ((MOTA_QSPI_FLASH AND NOT MOTA_RAK_AUTO_STORE) OR (MOTA_SD_CARD AND NOT MOTA_SD_DUAL_STORE))
+  if ((MOTA_QSPI_FLASH AND NOT MOTA_RAK_AUTO_STORE) OR
+      (MOTA_SD_CARD AND NOT (MOTA_SD_DUAL_STORE OR MOTA_RAK_SD_STORE)))
     message(FATAL_ERROR "MOTA_INTERNAL_BOOTLOADER_UPDATE requires internal or RAK adaptive OTA storage")
   endif ()
   if (NOT MCU_VARIANT STREQUAL "nrf52840")
@@ -318,6 +325,13 @@ target_compile_options(bootloader PUBLIC
   # Suppress warning caused by SDK
   -Wno-unused-parameter -Wno-expansion-to-defined -Wno-array-bounds
   )
+
+# Keep the board-specific pass choices after the common optimization options,
+# including at LTO link time. The reviewed storage guard binds this to RAK4631.
+if (MOTA_RAK_SD_SIZE_OPTIONS)
+  target_compile_options(bootloader PRIVATE ${MOTA_RAK_SD_SIZE_OPTIONS})
+  target_link_options(bootloader PRIVATE ${MOTA_RAK_SD_SIZE_OPTIONS})
+endif ()
 
 target_compile_definitions(bootloader PUBLIC
   DETOOLS_CONFIG_IN_PLACE_RESUME=0
@@ -556,7 +570,12 @@ cmake_print_variables(GIT_VERSION MK_BOOTLOADER_VERSION)
 set(FIRMWARE_VERSION "${GIT_VERSION}")
 set(FIRMWARE_VERSION_BASE "${GIT_VERSION_BASE}")
 # Match Make: long dirty/test descriptions stay in artifact filenames, not
-# in the fixed flash envelope. Production text still comes from the exact tag.
+# in the fixed flash envelope. Only combined RAK production text uses the
+# complete packed major/minor/patch/channel, rather than an arbitrarily long tag.
+if (MOTA_RAK_SD_STORE AND BOARD STREQUAL "wiscore_rak4631_auto")
+  set(FIRMWARE_VERSION "BL_${MOTA_BOOTLOADER_VERSION}")
+  set(FIRMWARE_VERSION_BASE "${FIRMWARE_VERSION}")
+endif ()
 if(DEFINED MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE)
   set(FIRMWARE_VERSION "TEST_${MOTA_BOOTLOADER_VERSION}")
   set(FIRMWARE_VERSION_BASE "${FIRMWARE_VERSION}")

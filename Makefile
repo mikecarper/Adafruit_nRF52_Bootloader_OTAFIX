@@ -50,6 +50,35 @@ endif
 # Board specific
 -include src/boards/$(BOARD)/board.mk
 
+# Match the early CMake exception: SD+NOR+internal is not a generic flag mix.
+# Presence, including =0, matters because the C guards use defined(...).
+mota_feature_flag = $(filter -D$(1) -D$(1)=%,$(CFLAGS))
+ifneq ($(call mota_feature_flag,MOTA_RAK_SD_STORE),)
+  ifneq ($(BOARD),wiscore_rak4631_auto)
+    $(error RAK SD storage requires the exact combined RAK4631 adaptive profile)
+  endif
+  ifneq ($(MCU_SUB_VARIANT),nrf52840)
+    $(error RAK SD storage requires the nRF52840 RAK4631 profile)
+  endif
+  $(foreach feature,MOTA_RAK_AUTO_STORE MOTA_QSPI_FLASH MOTA_SD_CARD MOTA_INTERNAL_BOOTLOADER_UPDATE,$(if $(call mota_feature_flag,$(feature)),,$(error RAK SD storage requires $(feature))))
+  ifneq ($(call mota_feature_flag,MOTA_SD_BOOTLOADER_UPDATE)$(call mota_feature_flag,MOTA_QSPI_BOOTLOADER_UPDATE),)
+    $(error Combined RAK SD application storage keeps bootloader self-update internal-only)
+  endif
+  ifneq ($(call mota_feature_flag,MOTA_SD_DUAL_STORE),)
+    $(error RAK SD storage must not enable the MeshTower dual-store profile)
+  endif
+  ifeq ($(filter 65536 0x10000 0X10000,$(MOTA_RAM_ARENA_SIZE)),)
+    $(error RAK SD storage requires the retained 65536-byte mOTA RAM arena)
+  endif
+endif
+ifneq ($(call mota_feature_flag,MOTA_SD_CARD),)
+  ifneq ($(call mota_feature_flag,MOTA_QSPI_FLASH),)
+    ifeq ($(call mota_feature_flag,MOTA_RAK_SD_STORE),)
+      $(error Combined SD/QSPI storage is qualified only for the RAK4631 adaptive profile)
+    endif
+  endif
+endif
+
 # Internal-update profiles (including adaptive RAK and combined Tower) reserve
 # the fixed 64 KiB arena; external-only profiles retain historical full RAM.
 ifneq ($(findstring -DMOTA_INTERNAL_BOOTLOADER_UPDATE=1,$(CFLAGS)),)
@@ -124,6 +153,12 @@ GIT_VERSION_BASE := $(shell echo "$(GIT_VERSION)" | sed -E 's/-[0-9]+-g[0-9a-f]+
 FIRMWARE_VERSION = $(GIT_VERSION)
 FIRMWARE_VERSION_BASE = $(GIT_VERSION_BASE)
 BLE_FIRMWARE_VERSION = $(FIRMWARE_VERSION) $(SD_NAME) $(SD_VERSION)
+ifneq ($(call mota_feature_flag,MOTA_RAK_SD_STORE),)
+  # Full packed major/minor/patch/channel, not a shortened Git tag. TEST_ and
+  # recovery R_ below deliberately take precedence; filenames keep GIT_VERSION.
+  FIRMWARE_VERSION = BL_$(MOTA_BOOTLOADER_VERSION)
+  FIRMWARE_VERSION_BASE = $(FIRMWARE_VERSION)
+endif
 ifneq ($(MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE),)
   FIRMWARE_VERSION = TEST_$(MOTA_BOOTLOADER_VERSION)
   FIRMWARE_VERSION_BASE = $(FIRMWARE_VERSION)
@@ -159,9 +194,13 @@ SIZE    = $(CROSS_COMPILE)size
 GDB     = $(CROSS_COMPILE)gdb
 
 ARM_GCC_VERSION := $(shell $(CC) -dumpfullversion -dumpversion 2>$(NULL_DEVICE))
-ARM_GCC_SUPPORTED := $(shell $(PYTHON) -c "import sys; p=tuple(map(int, sys.argv[1].split('.')[:2])); print(int(p >= (14, 2)))" "$(ARM_GCC_VERSION)" 2>$(NULL_DEVICE))
+ARM_GCC_MINIMUM := 14.2
+ifneq ($(call mota_feature_flag,MOTA_RAK_SD_STORE),)
+  ARM_GCC_MINIMUM := 15.3
+endif
+ARM_GCC_SUPPORTED := $(shell $(PYTHON) -c "import sys; p=tuple(map(int, sys.argv[1].split('.')[:2])); m=tuple(map(int, sys.argv[2].split('.'))); print(int(p >= m))" "$(ARM_GCC_VERSION)" "$(ARM_GCC_MINIMUM)" 2>$(NULL_DEVICE))
 ifneq ($(ARM_GCC_SUPPORTED),1)
-  $(error Arm GNU Toolchain 14.2.Rel1 or newer is required; found '$(ARM_GCC_VERSION)')
+  $(error Arm GNU Toolchain $(ARM_GCC_MINIMUM).Rel1 or newer is required for $(BOARD); found '$(ARM_GCC_VERSION)'. Select arm-none-eabi-gcc on PATH or build Docker with --build-arg ARM_GNU_RELEASE=$(ARM_GCC_MINIMUM).rel1)
 endif
 
 # Object directories are created by multiple independent pattern rules. Plain
@@ -570,6 +609,15 @@ CFLAGS += -DDFU_APP_DATA_RESERVED=$(DFU_APP_DATA_RESERVED)
 #------------------------------------------------------------------------------
 # Linker Flags
 #------------------------------------------------------------------------------
+
+# Exact all-in-one RAK4631 pass choices must also reach the LTO link via CFLAGS.
+# Keep other boards, and their existing GCC 14.2 qualification, unchanged.
+ifneq ($(call mota_feature_flag,MOTA_RAK_SD_STORE),)
+CFLAGS += -fno-schedule-insns -fno-schedule-insns2 -fno-code-hoisting \
+  -fno-tree-ter -fno-tree-dominator-opts -fno-tree-tail-merge \
+  -fno-optimize-sibling-calls -fno-if-conversion -mbranch-cost=3 \
+  -fno-tree-loop-im -fno-early-inlining
+endif
 
 LDFLAGS += \
 	-Wl,--sort-section=alignment \

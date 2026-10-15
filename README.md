@@ -619,7 +619,7 @@ update; neither a name nor a shared USB VID/PID alone identifies an exact board.
 
 ## Building from source (Docker)
 
-The Docker environment uses Arm GNU Toolchain **14.2.Rel1**, with pinned
+The Docker environment defaults to Arm GNU Toolchain **14.2.Rel1**, with pinned
 archive checksums for Linux x86_64 and AArch64. It includes both Make and
 CMake, Node.js for CF2 inspection, and the Python DFU/signing dependencies.
 The firmware sources and initialized submodules come from your mounted
@@ -628,6 +628,28 @@ checkout, not from a separately downloaded source tree.
 The Debian 13 base supplies a modern native sanitizer runtime for host tests.
 The ARM firmware compiler is still the separately downloaded, checksum-pinned
 14.2.Rel1 toolchain.
+
+The combined `wiscore_rak4631_auto` profile requires **15.3.Rel1 or newer**
+for both normal and recovery builds; other boards retain the 14.2 minimum.
+Select the checksum-pinned newer Docker toolchain explicitly:
+
+```sh
+docker build --build-arg ARM_GNU_RELEASE=15.3.rel1 -t otafix-rak-sd .
+```
+
+Use that image for this RAK profile or an all-board build. The default 14.2
+image rejects an all-board run before clearing outputs if the combined RAK
+profile is selected; intentionally omitting it requires
+`--exclude-board wiscore_rak4631_auto` in `tools/build_all.py`.
+
+To keep that combined RAK inside the fixed bootloader space, its production
+UF2 information and BLE firmware text use `BL_0xXXXXXXXX`: the complete packed
+OTAFIX major, minor, patch and release channel (for example,
+`BL_0x02040BFF` means 2.4.11 stable; `BL_0x02040B01` means 2.4.11 preview1).
+The authenticated manifest keeps the same packed version, and artifact
+filenames retain the full Git tag/provenance. Qualification builds still show
+the larger `TEST_` label, recovery builds keep `R_`, and other boards' labels
+are unchanged.
 
 ```sh
 git submodule update --init --recursive

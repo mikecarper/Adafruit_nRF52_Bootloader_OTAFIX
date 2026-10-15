@@ -46,6 +46,17 @@ class DownloadManifestTests(unittest.TestCase):
         manifest = build_manifest(self.release, self.mapping)
         self.assertNotIn("update-R_", manifest["profiles"][0]["files"]["uf2"]["name"])
 
+    def test_legacy_rak_release_identity_does_not_claim_supplemental_sd(self):
+        # Current source flags must not retroactively grant an old release SD
+        # support. Neither filenames nor the preserved adaptive identity prove
+        # the exact device image contains a valid MOTASDRA capability marker.
+        manifest = build_manifest(self.release, self.mapping)
+        rak = next(p for p in manifest["profiles"] if p["id"] == "wiscore_rak4631_auto")
+        self.assertEqual("adaptive", rak["storage"])
+        self.assertEqual("4631_DFU", rak["deviceName"])
+        self.assertNotIn("RAK15002", rak["label"])
+        self.assertNotIn("sd", rak["label"].lower())
+
     def test_carrier_aliases_and_real_port_gaps(self):
         manifest = build_manifest(self.release, self.mapping)
         aliases = {h: p["id"] for p in manifest["profiles"] for h in p["meshcoreHardware"]}

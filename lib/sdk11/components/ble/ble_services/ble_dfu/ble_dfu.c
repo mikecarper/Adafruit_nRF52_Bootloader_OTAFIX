@@ -42,6 +42,57 @@ enum
 static bool     m_is_dfu_service_initialized = false;                           /**< Variable to check if the DFU service was initialized by the application.*/
 static uint8_t  m_notif_buffer[MAX_NOTIF_BUFFER_LEN];                           /**< Buffer used for sending notifications to peer. */
 
+// Preserve the three existing attributes and their call order, sharing only
+// construction of their identical zeroed metadata. Do not clone this helper
+// for each constant UUID under LTO: the fixed bootloader envelope needs one
+// constructor, not three inlined copies.
+__attribute__((noinline, noclone))
+static uint32_t dfu_characteristic_add(ble_dfu_t * const p_dfu, uint16_t uuid,
+                                      const uint16_t *revision)
+{
+    ble_gatts_char_md_t char_md;
+    ble_gatts_attr_t    attr_char_value;
+    ble_uuid_t          char_uuid;
+    ble_gatts_attr_md_t attr_md;
+    const bool is_revision = uuid == BLE_DFU_REV_CHAR_UUID;
+    const bool is_packet = uuid == BLE_DFU_PKT_CHAR_UUID;
+    ble_gatts_char_handles_t *handles = is_revision ? &p_dfu->dfu_rev_handles :
+        is_packet ? &p_dfu->dfu_pkt_handles : &p_dfu->dfu_ctrl_pt_handles;
+
+    memset(&char_md, 0, sizeof(char_md));
+    char_md.char_props = (ble_gatt_char_props_t) {
+        .read = is_revision,
+        .write = !is_revision,
+        .write_wo_resp = is_packet,
+        .notify = !is_revision && !is_packet
+    };
+    // Keep all optional descriptors, including p_cccd_md, NULL as before.
+    char_uuid.type = p_dfu->uuid_type;
+    char_uuid.uuid = uuid;
+
+    memset(&attr_md, 0, sizeof(attr_md));
+    if (is_revision) {
+        BLE_GAP_CONN_SEC_MODE_SET_OPEN(&attr_md.read_perm);
+        BLE_GAP_CONN_SEC_MODE_SET_NO_ACCESS(&attr_md.write_perm);
+    } else {
+        BLE_GAP_CONN_SEC_MODE_SET_NO_ACCESS(&attr_md.read_perm);
+        BLE_GAP_CONN_SEC_MODE_SET_OPEN(&attr_md.write_perm);
+    }
+    attr_md.vloc = BLE_GATTS_VLOC_STACK;
+    attr_md.wr_auth = !is_revision && !is_packet;
+    attr_md.vlen = 1;
+
+    memset(&attr_char_value, 0, sizeof(attr_char_value));
+    attr_char_value.p_uuid = &char_uuid;
+    attr_char_value.p_attr_md = &attr_md;
+    attr_char_value.init_len = is_revision ? sizeof(uint16_t) : 0;
+    attr_char_value.max_len = is_revision ? sizeof(uint16_t) :
+        is_packet ? MAX_DFU_PKT_LEN : BLE_GATT_ATT_MTU_DEFAULT;
+    attr_char_value.p_value = is_revision ? (uint8_t *)revision : NULL;
+    return sd_ble_gatts_characteristic_add(p_dfu->service_handle, &char_md,
+                                            &attr_char_value, handles);
+}
+
 /**@brief       Function for adding DFU Packet characteristic to the BLE Stack.
  *
  * @param[in]   p_dfu DFU Service structure.
@@ -50,47 +101,7 @@ static uint8_t  m_notif_buffer[MAX_NOTIF_BUFFER_LEN];                           
  */
 static uint32_t dfu_pkt_char_add(ble_dfu_t * const p_dfu)
 {
-    ble_gatts_char_md_t char_md;
-    ble_gatts_attr_t    attr_char_value;
-    ble_uuid_t          char_uuid;
-    ble_gatts_attr_md_t attr_md;
-
-    memset(&char_md, 0, sizeof(char_md));
-
-    char_md.char_props.write         = 1; // For those improved apps that can take advantage of ACK
-    char_md.char_props.write_wo_resp = 1; // Nordic IOS DFU app REQUIRES Write Without Response */
-    char_md.p_char_user_desc         = NULL;
-    char_md.p_char_pf                = NULL;
-    char_md.p_user_desc_md           = NULL;
-    char_md.p_cccd_md                = NULL;
-    char_md.p_sccd_md                = NULL;
-
-    char_uuid.type = p_dfu->uuid_type;
-    char_uuid.uuid = BLE_DFU_PKT_CHAR_UUID;
-
-    memset(&attr_md, 0, sizeof(attr_md));
-
-    BLE_GAP_CONN_SEC_MODE_SET_NO_ACCESS(&attr_md.read_perm);
-    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&attr_md.write_perm);
-
-    attr_md.vloc    = BLE_GATTS_VLOC_STACK;
-    attr_md.rd_auth = 0;
-    attr_md.wr_auth = 0;
-    attr_md.vlen    = 1;
-
-    memset(&attr_char_value, 0, sizeof(attr_char_value));
-
-    attr_char_value.p_uuid    = &char_uuid;
-    attr_char_value.p_attr_md = &attr_md;
-    attr_char_value.init_len  = 0;
-    attr_char_value.init_offs = 0;
-    attr_char_value.max_len   = MAX_DFU_PKT_LEN;
-    attr_char_value.p_value   = NULL;
-
-    return sd_ble_gatts_characteristic_add(p_dfu->service_handle,
-                                           &char_md,
-                                           &attr_char_value,
-                                           &p_dfu->dfu_pkt_handles);
+    return dfu_characteristic_add(p_dfu, BLE_DFU_PKT_CHAR_UUID, NULL);
 }
 
 
@@ -102,46 +113,7 @@ static uint32_t dfu_pkt_char_add(ble_dfu_t * const p_dfu)
  */
 static uint32_t dfu_rev_char_add(ble_dfu_t * const p_dfu, ble_dfu_init_t const * const p_dfu_init)
 {
-    ble_gatts_char_md_t char_md;
-    ble_gatts_attr_t    attr_char_value;
-    ble_uuid_t          char_uuid;
-    ble_gatts_attr_md_t attr_md;
-
-    memset(&char_md, 0, sizeof(char_md));
-
-    char_md.char_props.read          = 1;
-    char_md.p_char_user_desc         = NULL;
-    char_md.p_char_pf                = NULL;
-    char_md.p_user_desc_md           = NULL;
-    char_md.p_cccd_md                = NULL;
-    char_md.p_sccd_md                = NULL;
-
-    char_uuid.type = p_dfu->uuid_type;
-    char_uuid.uuid = BLE_DFU_REV_CHAR_UUID;
-
-    memset(&attr_md, 0, sizeof(attr_md));
-
-    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&attr_md.read_perm);
-    BLE_GAP_CONN_SEC_MODE_SET_NO_ACCESS(&attr_md.write_perm);
-
-    attr_md.vloc    = BLE_GATTS_VLOC_STACK;
-    attr_md.rd_auth = 0;
-    attr_md.wr_auth = 0;
-    attr_md.vlen    = 1;
-
-    memset(&attr_char_value, 0, sizeof(attr_char_value));
-
-    attr_char_value.p_uuid    = &char_uuid;
-    attr_char_value.p_attr_md = &attr_md;
-    attr_char_value.init_len  = sizeof(uint16_t);
-    attr_char_value.init_offs = 0;
-    attr_char_value.max_len   = sizeof(uint16_t);
-    attr_char_value.p_value   = (uint8_t *)&p_dfu_init->revision;
-
-    return sd_ble_gatts_characteristic_add(p_dfu->service_handle,
-                                           &char_md,
-                                           &attr_char_value,
-                                           &p_dfu->dfu_rev_handles);
+    return dfu_characteristic_add(p_dfu, BLE_DFU_REV_CHAR_UUID, &p_dfu_init->revision);
 }
 
 
@@ -153,47 +125,7 @@ static uint32_t dfu_rev_char_add(ble_dfu_t * const p_dfu, ble_dfu_init_t const *
  */
 static uint32_t dfu_ctrl_pt_add(ble_dfu_t * const p_dfu)
 {
-    ble_gatts_char_md_t char_md;
-    ble_gatts_attr_t    attr_char_value;
-    ble_uuid_t          char_uuid;
-    ble_gatts_attr_md_t attr_md;
-
-    memset(&char_md, 0, sizeof(char_md));
-
-    char_md.char_props.write  = 1;
-    char_md.char_props.notify = 1;
-    char_md.p_char_user_desc  = NULL;
-    char_md.p_char_pf         = NULL;
-    char_md.p_user_desc_md    = NULL;
-    char_md.p_cccd_md         = NULL;
-    char_md.p_sccd_md         = NULL;
-
-    char_uuid.type = p_dfu->uuid_type;
-    char_uuid.uuid = BLE_DFU_CTRL_PT_UUID;
-
-    memset(&attr_md, 0, sizeof(attr_md));
-
-    BLE_GAP_CONN_SEC_MODE_SET_NO_ACCESS(&attr_md.read_perm);
-    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&attr_md.write_perm);
-
-    attr_md.vloc    = BLE_GATTS_VLOC_STACK;
-    attr_md.rd_auth = 0;
-    attr_md.wr_auth = 1;
-    attr_md.vlen    = 1;
-
-    memset(&attr_char_value, 0, sizeof(attr_char_value));
-
-    attr_char_value.p_uuid    = &char_uuid;
-    attr_char_value.p_attr_md = &attr_md;
-    attr_char_value.init_len  = 0;
-    attr_char_value.init_offs = 0;
-    attr_char_value.max_len   = BLE_GATT_ATT_MTU_DEFAULT;
-    attr_char_value.p_value   = NULL;
-
-    return sd_ble_gatts_characteristic_add(p_dfu->service_handle,
-                                           &char_md,
-                                           &attr_char_value,
-                                           &p_dfu->dfu_ctrl_pt_handles);
+    return dfu_characteristic_add(p_dfu, BLE_DFU_CTRL_PT_UUID, NULL);
 }
 
 
@@ -255,6 +187,18 @@ static bool is_cccd_configured(ble_dfu_t * p_dfu)
  *
  * @return    NRF_SUCCESS on successful processing of control point write. Otherwise an error code.
  */
+// The wire's first six opcodes and the public event enum are consecutive.
+// Refuse to silently change dispatch if either declaration changes later.
+_Static_assert(BLE_DFU_START == OP_CODE_START_DFU - 1 &&
+               BLE_DFU_RECEIVE_INIT_DATA == OP_CODE_RECEIVE_INIT - 1 &&
+               BLE_DFU_RECEIVE_APP_DATA == OP_CODE_RECEIVE_FW - 1 &&
+               BLE_DFU_VALIDATE == OP_CODE_VALIDATE - 1 &&
+               BLE_DFU_ACTIVATE_N_RESET == OP_CODE_ACTIVATE_N_RESET - 1 &&
+               BLE_DFU_SYS_RESET == OP_CODE_SYS_RESET - 1,
+               "DFU control opcode/event mapping changed");
+_Static_assert(PKT_START_DFU_PARAM_LEN == PKT_INIT_DFU_PARAM_LEN,
+               "DFU start/init parameter bounds differ");
+
 static uint32_t on_ctrl_pt_write(ble_dfu_t * p_dfu, ble_gatts_evt_write_t * p_ble_write_evt)
 {
     ble_gatts_rw_authorize_reply_params_t auth_reply;
@@ -288,100 +232,32 @@ static uint32_t on_ctrl_pt_write(ble_dfu_t * p_dfu, ble_gatts_evt_write_t * p_bl
 
     ble_dfu_evt_t ble_dfu_evt;
 
-    switch (p_ble_write_evt->data[0])
-    {
-        case OP_CODE_START_DFU:
-            ble_dfu_evt.ble_dfu_evt_type = BLE_DFU_START;
-
-            if (p_ble_write_evt->len < PKT_START_DFU_PARAM_LEN)
-            {
-                return ble_dfu_response_send(p_dfu,
-                                             (ble_dfu_procedure_t) p_ble_write_evt->data[0],
+    const uint8_t opcode = p_ble_write_evt->data[0];
+    if (opcode >= OP_CODE_START_DFU && opcode <= OP_CODE_SYS_RESET) {
+        ble_dfu_evt.ble_dfu_evt_type = (ble_dfu_evt_type_t)(opcode - 1u);
+        if (opcode <= OP_CODE_RECEIVE_INIT) {
+            if (p_ble_write_evt->len < PKT_START_DFU_PARAM_LEN) {
+                return ble_dfu_response_send(p_dfu, (ble_dfu_procedure_t)opcode,
                                              BLE_DFU_RESP_VAL_OPER_FAILED);
             }
-
-            ble_dfu_evt.evt.ble_dfu_pkt_write.len    = 1;
-            ble_dfu_evt.evt.ble_dfu_pkt_write.p_data = &(p_ble_write_evt->data[1]);
-
-            p_dfu->evt_handler(p_dfu, &ble_dfu_evt);
-            break;
-
-        case OP_CODE_RECEIVE_INIT:
-            ble_dfu_evt.ble_dfu_evt_type = BLE_DFU_RECEIVE_INIT_DATA;
-
-            if (p_ble_write_evt->len < PKT_INIT_DFU_PARAM_LEN)
-            {
-                return ble_dfu_response_send(p_dfu,
-                                             (ble_dfu_procedure_t) p_ble_write_evt->data[0],
-                                             BLE_DFU_RESP_VAL_OPER_FAILED);
-            }
-
-            ble_dfu_evt.evt.ble_dfu_pkt_write.len    = 1;
-            ble_dfu_evt.evt.ble_dfu_pkt_write.p_data = &(p_ble_write_evt->data[1]);
-
-            p_dfu->evt_handler(p_dfu, &ble_dfu_evt);
-            break;
-
-        case OP_CODE_RECEIVE_FW:
-            ble_dfu_evt.ble_dfu_evt_type = BLE_DFU_RECEIVE_APP_DATA;
-
-            p_dfu->evt_handler(p_dfu, &ble_dfu_evt);
-            break;
-
-        case OP_CODE_VALIDATE:
-            ble_dfu_evt.ble_dfu_evt_type = BLE_DFU_VALIDATE;
-
-            p_dfu->evt_handler(p_dfu, &ble_dfu_evt);
-            break;
-
-        case OP_CODE_ACTIVATE_N_RESET:
-            ble_dfu_evt.ble_dfu_evt_type = BLE_DFU_ACTIVATE_N_RESET;
-
-            p_dfu->evt_handler(p_dfu, &ble_dfu_evt);
-            break;
-
-        case OP_CODE_SYS_RESET:
-            ble_dfu_evt.ble_dfu_evt_type = BLE_DFU_SYS_RESET;
-
-            p_dfu->evt_handler(p_dfu, &ble_dfu_evt);
-            break;
-
-        case OP_CODE_PKT_RCPT_NOTIF_REQ:
-            if (p_ble_write_evt->len < PKT_RCPT_NOTIF_REQ_LEN)
-            {
-                return (ble_dfu_response_send(p_dfu,
-                                              BLE_DFU_PKT_RCPT_REQ_PROCEDURE,
-                                              BLE_DFU_RESP_VAL_NOT_SUPPORTED));
-            }
-
-            ble_dfu_evt.evt.pkt_rcpt_notif_req.num_of_pkts =
-                uint16_decode(&(p_ble_write_evt->data[1]));
-
-            if (ble_dfu_evt.evt.pkt_rcpt_notif_req.num_of_pkts == 0)
-            {
-                ble_dfu_evt.ble_dfu_evt_type = BLE_DFU_PKT_RCPT_NOTIF_DISABLED;
-            }
-            else
-            {
-                ble_dfu_evt.ble_dfu_evt_type = BLE_DFU_PKT_RCPT_NOTIF_ENABLED;
-            }
-
-            p_dfu->evt_handler(p_dfu, &ble_dfu_evt);
-
-            break;
-
-        case OP_CODE_IMAGE_SIZE_REQ:
-            ble_dfu_evt.ble_dfu_evt_type = BLE_DFU_BYTES_RECEIVED_SEND;
-
-            p_dfu->evt_handler(p_dfu, &ble_dfu_evt);
-            break;
-
-        default:
-            // Unsupported op code.
-            return ble_dfu_response_send(p_dfu,
-                                         (ble_dfu_procedure_t) p_ble_write_evt->data[0],
+            ble_dfu_evt.evt.ble_dfu_pkt_write.len = 1;
+            ble_dfu_evt.evt.ble_dfu_pkt_write.p_data = &p_ble_write_evt->data[1];
+        }
+    } else if (opcode == OP_CODE_PKT_RCPT_NOTIF_REQ) {
+        if (p_ble_write_evt->len < PKT_RCPT_NOTIF_REQ_LEN) {
+            return ble_dfu_response_send(p_dfu, BLE_DFU_PKT_RCPT_REQ_PROCEDURE,
                                          BLE_DFU_RESP_VAL_NOT_SUPPORTED);
+        }
+        ble_dfu_evt.evt.pkt_rcpt_notif_req.num_of_pkts = uint16_decode(&p_ble_write_evt->data[1]);
+        ble_dfu_evt.ble_dfu_evt_type = ble_dfu_evt.evt.pkt_rcpt_notif_req.num_of_pkts == 0
+            ? BLE_DFU_PKT_RCPT_NOTIF_DISABLED : BLE_DFU_PKT_RCPT_NOTIF_ENABLED;
+    } else if (opcode == OP_CODE_IMAGE_SIZE_REQ) {
+        ble_dfu_evt.ble_dfu_evt_type = BLE_DFU_BYTES_RECEIVED_SEND;
+    } else {
+        return ble_dfu_response_send(p_dfu, (ble_dfu_procedure_t)opcode,
+                                     BLE_DFU_RESP_VAL_NOT_SUPPORTED);
     }
+    p_dfu->evt_handler(p_dfu, &ble_dfu_evt);
     return NRF_SUCCESS;
 }
 
@@ -544,7 +420,12 @@ void ble_dfu_on_ble_evt(ble_dfu_t * p_dfu, ble_evt_t * p_ble_evt)
 }
 
 
-uint32_t ble_dfu_bytes_rcvd_report(ble_dfu_t * p_dfu, uint32_t num_of_firmware_bytes_rcvd)
+// The three public notifications differ only in their fixed wire length and
+// two response bytes. Keep state checks and each resource retry identical,
+// rebuilding both the packet and the SoftDevice's in/out length every time.
+__attribute__((noinline, noclone))
+static uint32_t dfu_notification_send(ble_dfu_t * p_dfu, uint16_t length,
+                                       uint16_t response, uint32_t count)
 {
     if (p_dfu == NULL)
     {
@@ -560,18 +441,15 @@ uint32_t ble_dfu_bytes_rcvd_report(ble_dfu_t * p_dfu, uint32_t num_of_firmware_b
 	do {
 
         ble_gatts_hvx_params_t hvx_params;
-        uint16_t               index = 0;
+        uint16_t               index = length;
 
-        // Encode the Op Code.
-        m_notif_buffer[index++] = OP_CODE_RESPONSE;
-
-        // Encode the Reqest Op Code.
-        m_notif_buffer[index++] = OP_CODE_IMAGE_SIZE_REQ;
-
-        // Encode the Response Value.
-        m_notif_buffer[index++] = (uint8_t)BLE_DFU_RESP_VAL_SUCCESS;
-
-        index += uint32_encode(num_of_firmware_bytes_rcvd, &m_notif_buffer[index]);
+        m_notif_buffer[0] = length == 5u ? OP_CODE_PKT_RCPT_NOTIF : OP_CODE_RESPONSE;
+        m_notif_buffer[1] = (uint8_t)response;
+        m_notif_buffer[2] = (uint8_t)(response >> 8);
+        if (length != 3u) {
+            // Receipt: opcode + u32. Size report: response header + u32.
+            uint32_encode(count, &m_notif_buffer[length - sizeof(uint32_t)]);
+        }
 
         memset(&hvx_params, 0, sizeof(hvx_params));
 
@@ -588,40 +466,17 @@ uint32_t ble_dfu_bytes_rcvd_report(ble_dfu_t * p_dfu, uint32_t num_of_firmware_b
 }
 
 
+uint32_t ble_dfu_bytes_rcvd_report(ble_dfu_t * p_dfu, uint32_t num_of_firmware_bytes_rcvd)
+{
+    return dfu_notification_send(p_dfu, 7u,
+        OP_CODE_IMAGE_SIZE_REQ | ((uint16_t)BLE_DFU_RESP_VAL_SUCCESS << 8),
+        num_of_firmware_bytes_rcvd);
+}
+
+
 uint32_t ble_dfu_pkts_rcpt_notify(ble_dfu_t * p_dfu, uint32_t num_of_firmware_bytes_rcvd)
 {
-    if (p_dfu == NULL)
-    {
-        return NRF_ERROR_NULL;
-    }
-
-    if ((p_dfu->conn_handle == BLE_CONN_HANDLE_INVALID) || !m_is_dfu_service_initialized)
-    {
-        return NRF_ERROR_INVALID_STATE;
-    }
-
-    uint32_t err_code;
-	do {
-
-        ble_gatts_hvx_params_t hvx_params;
-        uint16_t               index = 0;
-
-        m_notif_buffer[index++] = OP_CODE_PKT_RCPT_NOTIF;
-
-        index += uint32_encode(num_of_firmware_bytes_rcvd, &m_notif_buffer[index]);
-
-        memset(&hvx_params, 0, sizeof(hvx_params));
-
-        hvx_params.handle = p_dfu->dfu_ctrl_pt_handles.value_handle;
-        hvx_params.type   = BLE_GATT_HVX_NOTIFICATION;
-        hvx_params.offset = 0;
-        hvx_params.p_len  = &index;
-        hvx_params.p_data = m_notif_buffer;
-
-        err_code = sd_ble_gatts_hvx(p_dfu->conn_handle, &hvx_params);
-    } while (err_code == NRF_ERROR_RESOURCES);
-
-    return err_code;
+    return dfu_notification_send(p_dfu, 5u, 0u, num_of_firmware_bytes_rcvd);
 }
 
 
@@ -629,40 +484,6 @@ uint32_t ble_dfu_response_send(ble_dfu_t         * p_dfu,
                                ble_dfu_procedure_t dfu_proc,
                                ble_dfu_resp_val_t  resp_val)
 {
-    if (p_dfu == NULL)
-    {
-        return NRF_ERROR_NULL;
-    }
-
-    if ((p_dfu->conn_handle == BLE_CONN_HANDLE_INVALID) || !m_is_dfu_service_initialized)
-    {
-        return NRF_ERROR_INVALID_STATE;
-    }
-
-    uint32_t err_code;
-	do {
-
-        ble_gatts_hvx_params_t hvx_params;
-        uint16_t               index = 0;
-
-        m_notif_buffer[index++] = OP_CODE_RESPONSE;
-
-        // Encode the Request Op code
-        m_notif_buffer[index++] = (uint8_t)dfu_proc;
-
-        // Encode the Response Value.
-        m_notif_buffer[index++] = (uint8_t)resp_val;
-
-        memset(&hvx_params, 0, sizeof(hvx_params));
-
-        hvx_params.handle = p_dfu->dfu_ctrl_pt_handles.value_handle;
-        hvx_params.type   = BLE_GATT_HVX_NOTIFICATION;
-        hvx_params.offset = 0;
-        hvx_params.p_len  = &index;
-        hvx_params.p_data = m_notif_buffer;
-
-        err_code = sd_ble_gatts_hvx(p_dfu->conn_handle, &hvx_params);
-    } while (err_code == NRF_ERROR_RESOURCES);
-
-    return err_code;
+    return dfu_notification_send(p_dfu, 3u,
+        (uint16_t)(uint8_t)dfu_proc | ((uint16_t)(uint8_t)resp_val << 8), 0u);
 }

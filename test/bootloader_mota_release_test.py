@@ -144,6 +144,49 @@ class QualifiedReleaseInventoryTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "inconsistent combined"):
                 release.release_boards(root)
 
+    def test_combined_rak_sd_inventory_requires_exact_board_flags_and_arena(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            board = root / "wiscore_rak4631_auto"
+            board.mkdir()
+            original = ROOT / "src/boards/wiscore_rak4631_auto"
+            cmake = (original / "board.cmake").read_text()
+            make = (original / "board.mk").read_text()
+            def write(cmake_text=cmake, make_text=make):
+                (board / "board.cmake").write_text(cmake_text)
+                (board / "board.mk").write_text(make_text)
+            write()
+            self.assertEqual((board.name,), release.release_boards(root))
+            for flag in ("RAK_SD_STORE", "RAK_AUTO_STORE", "QSPI_FLASH", "SD_CARD",
+                         "INTERNAL_BOOTLOADER_UPDATE"):
+                with self.subTest(flag=flag, build="CMake"):
+                    write(cmake.replace(f"set(MOTA_{flag} ON)", ""))
+                    with self.assertRaises(ValueError):
+                        release.release_boards(root)
+                with self.subTest(flag=flag, build="Make"):
+                    write(make_text=make.replace(f"-DMOTA_{flag}=1", ""))
+                    with self.assertRaises(ValueError):
+                        release.release_boards(root)
+            for changed in (cmake.replace("MOTA_RAM_ARENA_SIZE 65536", "MOTA_RAM_ARENA_SIZE 0"),
+                            cmake + "\nset(MOTA_SD_DUAL_STORE ON)\n",
+                            cmake + "\nset(MOTA_SD_BOOTLOADER_UPDATE ON)\n",
+                            cmake + "\nset(MOTA_QSPI_BOOTLOADER_UPDATE ON)\n",
+                            cmake.replace("nrf52840", "nrf52833")):
+                write(changed)
+                with self.assertRaises(ValueError):
+                    release.release_boards(root)
+            for changed in (make.replace("MOTA_RAM_ARENA_SIZE ?= 65536", "MOTA_RAM_ARENA_SIZE ?= 0"),
+                            make + "\nCFLAGS += -DMOTA_SD_DUAL_STORE=1\n",
+                            make + "\nCFLAGS += -DMOTA_SD_BOOTLOADER_UPDATE=1\n",
+                            make + "\nCFLAGS += -DMOTA_QSPI_BOOTLOADER_UPDATE=1\n"):
+                write(make_text=changed)
+                with self.assertRaises(ValueError):
+                    release.release_boards(root)
+            write()
+            board = board.rename(root / "wiscore_rak3401_auto")
+            with self.assertRaisesRegex(ValueError, "inconsistent combined RAK"):
+                release.release_boards(root)
+
     def test_gat562_exact_internal_profile_is_qualified(self) -> None:
         self.assertIn("gat562", release.QUALIFIED_BOARDS)
 

@@ -5,6 +5,9 @@
 
 #if defined(MOTA_QSPI_FLASH) && !defined(OTA_DELTA_HOST_TEST)
 
+#if defined(MOTA_RAK_SD_STORE)
+  #include "ota_rak_spi_nor.h"
+#else
   #include <string.h>
   #include "boards.h"
   #include "hal/nrf_qspi.h"
@@ -479,4 +482,5 @@ bool ota_qspi_write(uint32_t offset, const void *src, uint32_t len) {
          memcmp(verify, expected, window.length) == 0;
 }
 
-#endif
+#endif // !MOTA_RAK_SD_STORE
+#endif // MOTA_QSPI_FLASH && !OTA_DELTA_HOST_TEST

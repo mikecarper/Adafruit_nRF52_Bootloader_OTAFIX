@@ -24,6 +24,34 @@ SPEC.loader.exec_module(BUILD_ALL)
 
 
 class BuildAllTest(unittest.TestCase):
+    def test_toolchain_preflight_uses_the_selected_board_set(self) -> None:
+        for version, boards, accepted in (
+            ("14.2.1", ["heltec_t096", "wiscore_rak3401_auto"], True),
+            ("14.2.1", ["wiscore_rak4631_auto"], False),
+            ("15.2.1", ["wiscore_rak4631_auto"], False),
+            ("15.3.1", ["wiscore_rak4631_auto"], True),
+        ):
+            result = subprocess.CompletedProcess([], 0, stdout=version)
+            with self.subTest(version=version, boards=boards), \
+                 mock.patch.object(BUILD_ALL.shutil, "which", side_effect=lambda name: name), \
+                 mock.patch.object(BUILD_ALL.subprocess, "run", return_value=result):
+                if accepted:
+                    self.assertEqual(version, BUILD_ALL.require_toolchain(boards)[1])
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "ARM_GNU_RELEASE=15.3.rel1"):
+                        BUILD_ALL.require_toolchain(boards)
+
+    def test_bad_compiler_is_rejected_before_any_output_cleanup_or_board_job(self) -> None:
+        with mock.patch.object(sys, "argv", ["build_all.py"]), \
+             mock.patch.object(BUILD_ALL, "require_toolchain", side_effect=RuntimeError("compiler too old")) as check, \
+             mock.patch.object(BUILD_ALL.shutil, "rmtree") as remove, \
+             mock.patch.object(BUILD_ALL, "build_board") as build, \
+             mock.patch.object(sys, "stderr", io.StringIO()):
+            self.assertEqual(2, BUILD_ALL.main())
+        self.assertIn("wiscore_rak4631_auto", check.call_args.args[0])
+        remove.assert_not_called()
+        build.assert_not_called()
+
     def test_exclusions_are_explicit_and_require_known_boards(self) -> None:
         with mock.patch.object(sys, "argv", ["build_all.py", "--exclude-board", "thinknode_m8"]):
             args = BUILD_ALL.parse_args()

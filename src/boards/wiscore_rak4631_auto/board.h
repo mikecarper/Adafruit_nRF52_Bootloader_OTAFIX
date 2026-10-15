@@ -15,6 +15,19 @@
 #define MOTA_QSPI_IO3_PIN 0xFFu
 #define MOTA_QSPI_SCK_FREQ NRF_QSPI_FREQ_32MDIV4
 
+// RAK15002 IO-slot microSD uses the same physical bus as slot-C NOR, but
+// never at the same time. The authenticated handoff selects its backend;
+// boot does not probe or initialize an SD card for an internal/NOR update.
+// Firmware Arduino pins map identically to physical P0.00..P1.15 here.
+// The module uses connector pin 5 (unswitched 3V3), not the GPS sensor rail.
+#define MOTA_RAK_SD_STORE 1
+#define MOTA_SD_CARD      1
+#define MOTA_SD_SPIM      NRF_SPIM2
+#define MOTA_SD_CS_PIN    _PINNUM(0, 26)
+#define MOTA_SD_MOSI_PIN  _PINNUM(0, 30)
+#define MOTA_SD_SCK_PIN   _PINNUM(0, 3)
+#define MOTA_SD_MISO_PIN  _PINNUM(0, 29)
+
 #undef BLEDIS_MODEL
 #define BLEDIS_MODEL "RAK4631"
 #undef BLEDIS_MANUFACTURER

@@ -37,6 +37,35 @@ def board_header(path: Path, visited: frozenset[Path] = frozenset()) -> str:
     )
 
 
+def reviewed_rak_sd_profile(board: str, cmake: str, make: str) -> bool:
+    """Permit only the exact additive RAK4631 SD/internal/NOR combination."""
+    # Comments are not build settings; a stale commented flag must not grant
+    # the geometry exception. Existing unrelated profile rules stay unchanged.
+    cmake = "\n".join(line for line in cmake.splitlines()
+                      if not line.lstrip().startswith("#"))
+    make = "\n".join(line.split("#", 1)[0] for line in make.splitlines())
+    if (cmake_value(cmake, "MOTA_RAK_SD_STORE") != "ON" and
+            "-DMOTA_RAK_SD_STORE" not in make):
+        return False
+    required = ("RAK_SD_STORE", "RAK_AUTO_STORE", "QSPI_FLASH", "SD_CARD",
+                "INTERNAL_BOOTLOADER_UPDATE")
+    if (board != "wiscore_rak4631_auto" or
+            cmake_value(cmake, "MCU_VARIANT") != "nrf52840" or
+            any(cmake_value(cmake, "MOTA_" + feature) != "ON" or
+                f"-DMOTA_{feature}=1" not in make for feature in required) or
+            cmake_value(cmake, "MOTA_SD_DUAL_STORE") == "ON" or
+            "-DMOTA_SD_DUAL_STORE" in make or
+            cmake_value(cmake, "MOTA_SD_BOOTLOADER_UPDATE") == "ON" or
+            "-DMOTA_SD_BOOTLOADER_UPDATE" in make or
+            cmake_value(cmake, "MOTA_QSPI_BOOTLOADER_UPDATE") == "ON" or
+            "-DMOTA_QSPI_BOOTLOADER_UPDATE" in make or
+            cmake_value(cmake, "MOTA_RAM_ARENA_SIZE") not in ("65536", "0x10000", "0X10000") or
+            not re.search(r"^MOTA_RAM_ARENA_SIZE\s*\??=\s*(?:65536|0[xX]10000)\s*$",
+                          make, re.MULTILINE)):
+        raise ValueError(f"{board}: unsafe combined RAK SD bootloader-update profile")
+    return True
+
+
 def main() -> int:
     targets: dict[int, tuple[str, bytes]] = {}
     enabled = 0
@@ -53,6 +82,7 @@ def main() -> int:
         external = cmake_value(cmake, "MOTA_QSPI_FLASH") == "ON" or cmake_value(cmake, "MOTA_SD_CARD") == "ON"
         internal = cmake_value(cmake, "MOTA_INTERNAL_BOOTLOADER_UPDATE") == "ON"
 
+        rak_sd = reviewed_rak_sd_profile(board_dir.name, cmake, make)
         adaptive = (cmake_value(cmake, "MOTA_RAK_AUTO_STORE") == "ON" and
                     cmake_value(cmake, "MOTA_QSPI_FLASH") == "ON" and
                     cmake_value(cmake, "MOTA_SD_CARD") != "ON")
@@ -61,7 +91,7 @@ def main() -> int:
                       cmake_value(cmake, "MOTA_SD_CARD") == "ON" and
                       cmake_value(cmake, "MOTA_SD_BOOTLOADER_UPDATE") == "ON" and
                       cmake_value(cmake, "MOTA_QSPI_FLASH") != "ON")
-        if internal and (not is_nrf52840 or (external and not adaptive and not tower_dual)):
+        if internal and (not is_nrf52840 or (external and not adaptive and not tower_dual and not rak_sd)):
             raise ValueError(f"{board_dir.name}: unsafe internal bootloader-update geometry")
         if is_nrf52840 and not external and not internal:
             raise ValueError(f"{board_dir.name}: internal-only nRF52840 target is not enabled")

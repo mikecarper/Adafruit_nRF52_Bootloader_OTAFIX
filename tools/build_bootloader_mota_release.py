@@ -40,14 +40,36 @@ def release_boards(root: Path = Path(__file__).resolve().parents[1] / "src" / "b
     for directory in sorted(path for path in root.iterdir() if path.is_dir()):
         cmake = (directory / "board.cmake").read_text(encoding="ascii")
         make = (directory / "board.mk").read_text(encoding="ascii")
+        # The reviewed RAK4631 exception keeps the historical adaptive identity
+        # and adds SD only through its supplemental runtime capability marker.
+        # Source inventory admission is not proof that an older release image
+        # implements SD: consumers must still validate MOTASDRA on the device.
+        rak_sd = "set(MOTA_RAK_SD_STORE ON)" in cmake
+        if rak_sd:
+            required = ("RAK_SD_STORE", "RAK_AUTO_STORE", "QSPI_FLASH", "SD_CARD",
+                        "INTERNAL_BOOTLOADER_UPDATE")
+            if (directory.name != "wiscore_rak4631_auto" or
+                    any(f"set(MOTA_{name} ON)" not in cmake or
+                        f"-DMOTA_{name}=1" not in make for name in required) or
+                    "set(MOTA_SD_DUAL_STORE ON)" in cmake or
+                    "-DMOTA_SD_DUAL_STORE" in make or
+                    "set(MOTA_SD_BOOTLOADER_UPDATE ON)" in cmake or
+                    "-DMOTA_SD_BOOTLOADER_UPDATE" in make or
+                    "set(MOTA_QSPI_BOOTLOADER_UPDATE ON)" in cmake or
+                    "-DMOTA_QSPI_BOOTLOADER_UPDATE" in make or
+                    not re.search(r"set\(MOTA_RAM_ARENA_SIZE\s+(?:65536|0[xX]10000)(?:\s|\))", cmake) or
+                    not re.search(r"^MOTA_RAM_ARENA_SIZE\s*\??=\s*(?:65536|0[xX]10000)\s*$", make, re.MULTILINE)):
+                raise ValueError(f"{directory.name}: inconsistent combined RAK SD profile")
+        elif "-DMOTA_RAK_SD_STORE" in make:
+            raise ValueError(f"{directory.name}: inconsistent combined RAK SD profile")
         # Adaptive RAK application storage coexists with internal-only
         # bootloader staging. Both build systems must select that exact path.
         if "set(MOTA_RAK_AUTO_STORE ON)" in cmake:
             if ("-DMOTA_RAK_AUTO_STORE=1" not in make or
                     "set(MOTA_QSPI_FLASH ON)" not in cmake or
                     "set(MOTA_INTERNAL_BOOTLOADER_UPDATE ON)" not in cmake or
-                    any(f"set(MOTA_{name}_BOOTLOADER_UPDATE ON)" in cmake
-                        for name in ("QSPI", "SD"))):
+                    "set(MOTA_QSPI_BOOTLOADER_UPDATE ON)" in cmake or
+                    "set(MOTA_SD_BOOTLOADER_UPDATE ON)" in cmake):
                 raise ValueError(f"{directory.name}: inconsistent adaptive bootloader profile")
         backends = [name for name in ("INTERNAL", "QSPI", "SD")
                     if f"set(MOTA_{name}_BOOTLOADER_UPDATE ON)" in cmake]
@@ -59,7 +81,8 @@ def release_boards(root: Path = Path(__file__).resolve().parents[1] / "src" / "b
                            "-DMOTA_SD_CARD=1" not in make or
                            "-DMOTA_SD_DUAL_STORE=1" not in make):
             raise ValueError(f"{directory.name}: inconsistent combined Tower profile")
-        if (not tower_dual and len(backends) != 1) or "set(MCU_VARIANT nrf52840)" not in cmake:
+        if (rak_sd and backends != ["INTERNAL"]) or (
+                not (tower_dual or rak_sd) and len(backends) != 1) or "set(MCU_VARIANT nrf52840)" not in cmake:
             raise ValueError(f"{directory.name}: missing exact bootloader mOTA profile")
         if any(f"-DMOTA_{backend}_BOOTLOADER_UPDATE=1" not in make for backend in backends):
             raise ValueError(f"{directory.name}: Make/CMake bootloader mOTA disagreement")

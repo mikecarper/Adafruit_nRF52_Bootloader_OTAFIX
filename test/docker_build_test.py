@@ -20,6 +20,10 @@ HASHES = {
     "amd64": "62a63b981fe391a9cbad7ef51b17e49aeaa3e7b0d029b36ca1e9c3b2a9b78823",
     "arm64": "87330bab085dd8749d4ed0ad633674b9dc48b237b61069e3b481abd364d0a684",
 }
+HASHES_15_3 = {
+    "amd64": "563bebb2b97d53382b956d6ee1fe61e2cae26699901417234a37df505ef9b5fa",
+    "arm64": "06979e0c8171de58e5dc2a2b2019330a290f30930f27728af98a83e1a7369b3a",
+}
 
 # All commands that could download or mutate the host are replaced. The
 # actual Docker RUN body still controls architecture selection and ordering.
@@ -42,12 +46,13 @@ rm() { printf 'remove:%s\n' "$*"; }
 
 
 class DockerBuildTest(unittest.TestCase):
-    def run_installer(self, arch, *, bad_hash=False, download_failure=False):
+    def run_installer(self, arch, *, bad_hash=False, download_failure=False, release="14.2.rel1"):
         shell = shutil.which("sh")
         if shell is None:
             self.skipTest("POSIX shell is required for the Docker RUN test")
-        env = dict(os.environ, OTAFIX_TEST_ARCH=arch,
-                   OTAFIX_TEST_HASH=HASHES.get(arch, "unsupported"),
+        hashes = HASHES_15_3 if release == "15.3.rel1" else HASHES
+        env = dict(os.environ, OTAFIX_TEST_ARCH=arch, ARM_GNU_RELEASE=release,
+                   OTAFIX_TEST_HASH=hashes.get(arch, "unsupported"),
                    OTAFIX_TEST_HASH_FAIL=str(int(bad_hash)),
                    OTAFIX_TEST_CURL_FAIL=str(int(download_failure)))
         return subprocess.run([shell, "-c", HARMLESS_TOOLS + INSTALL],
@@ -70,6 +75,24 @@ class DockerBuildTest(unittest.TestCase):
         self.assertIn("verify:", result.stdout)
         self.assertNotIn("mkdir:", result.stdout)
         self.assertNotIn("extract:", result.stdout)
+
+    def test_explicit_rak_toolchain_uses_official_hashed_gitlab_packages(self):
+        for arch, host in (("amd64", "x86_64"), ("arm64", "aarch64")):
+            result = self.run_installer(arch, release="15.3.rel1")
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertIn("gitlab.arm.com/api/v4/projects/tooling%2Fgnu-toolchains-for-arm", result.stdout)
+            self.assertIn("15.3.rel1-" + host + "-arm-none-eabi.tar.xz", result.stdout)
+            self.assertIn("verify:" + HASHES_15_3[arch], result.stdout)
+            self.assertLess(result.stdout.index("verify:"), result.stdout.index("extract:"))
+        rejected = self.run_installer("amd64", release="15.3.rel1", bad_hash=True)
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertNotIn("extract:", rejected.stdout)
+
+    def test_unqualified_toolchain_selection_fails_before_download(self):
+        result = self.run_installer("amd64", release="latest")
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("ARM_GNU_RELEASE must be", result.stderr)
+        self.assertNotIn("download:", result.stdout)
 
     def test_failed_download_never_verifies_or_extracts(self):
         result = self.run_installer("arm64", download_failure=True)

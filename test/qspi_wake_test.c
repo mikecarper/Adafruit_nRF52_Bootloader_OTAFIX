@@ -224,17 +224,33 @@ static void test_rak_adaptive_profiles(void) {
     assert(strstr(cmake, "set(MOTA_INTERNAL_BOOTLOADER_UPDATE ON)") != NULL);
     assert(strstr(make, "-DMOTA_INTERNAL_BOOTLOADER_UPDATE=1") != NULL);
     assert(strstr(cmake, "set(MOTA_QSPI_BOOTLOADER_UPDATE ON)") == NULL);
-    assert(strstr(cmake, "set(MOTA_SD_BOOTLOADER_UPDATE ON)") == NULL);
     assert(strstr(make, "-DMOTA_QSPI_BOOTLOADER_UPDATE=1") == NULL);
+    assert(strstr(cmake, "set(MOTA_SD_BOOTLOADER_UPDATE ON)") == NULL);
     assert(strstr(make, "-DMOTA_SD_BOOTLOADER_UPDATE=1") == NULL);
     assert(strlen(names[i]) < 16u);
     assert(strstr(make, names[i]) != NULL);
     assert(strstr(cmake, names[i]) != NULL);
     if (i == 0) {
       assert(strstr(board, "MOTA_RAK_AUTO_RAK4631 1") != NULL);
+      assert(strstr(cmake, "set(MOTA_RAK_SD_STORE ON)") != NULL);
+      assert(strstr(cmake, "set(MOTA_SD_CARD ON)") != NULL);
+      assert(strstr(make, "-DMOTA_RAK_SD_STORE=1") != NULL);
+      assert(strstr(make, "-DMOTA_SD_CARD=1") != NULL);
+      assert(strstr(board, "MOTA_RAK_SD_STORE 1") != NULL);
+      assert(strstr(board, "MOTA_SD_SPIM      NRF_SPIM2") != NULL);
+      assert(strstr(board, "MOTA_SD_CS_PIN    _PINNUM(0, 26)") != NULL);
+      assert(strstr(board, "MOTA_SD_MOSI_PIN  _PINNUM(0, 30)") != NULL);
+      assert(strstr(board, "MOTA_SD_SCK_PIN   _PINNUM(0, 3)") != NULL);
+      assert(strstr(board, "MOTA_SD_MISO_PIN  _PINNUM(0, 29)") != NULL);
+      assert(strstr(board, "MOTA_SD_POWER_PIN") == NULL);
     } else {
       assert(strstr(board, "MOTA_RAK_AUTO_RAK3401 1") != NULL);
       assert(strstr(board, "MOTA_QSPI_AUX_CSN_PIN _PINNUM(0, 26)") != NULL);
+      assert(strstr(cmake, "set(MOTA_SD_BOOTLOADER_UPDATE ON)") == NULL);
+      assert(strstr(make, "-DMOTA_SD_BOOTLOADER_UPDATE=1") == NULL);
+      assert(strstr(board, "MOTA_RAK_SD_STORE") == NULL);
+      assert(strstr(cmake, "set(MOTA_RAK_SD_STORE ON)") == NULL);
+      assert(strstr(make, "-DMOTA_RAK_SD_STORE=1") == NULL);
     }
     free(board); free(make); free(cmake);
   }

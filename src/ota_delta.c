@@ -5,6 +5,14 @@
 #include "ota_layout.h"
 #include "ota_bl_info.h"
 #include "ota_ram_info.h"
+#if defined(MOTA_RAK_SD_STORE)
+  #if !defined(OTA_DELTA_HOST_TEST)
+    // The exact RAK4631 pin/profile identity is provided by board.h, not
+    // by the portable host-test command line. Load it before policy guards.
+    #include "boards.h"
+  #endif
+  #include "ota_rak_sd_info.h"
+#endif
 #if defined(MOTA_SD_CARD)
   #include "ota_sd_auth.h"
   #include "ota_sd_spi.h"
@@ -51,7 +59,11 @@
   #define MOTA_BOOTLOADER_UPDATE_ENABLED 1
 #endif
 
-#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+#if defined(MOTA_RAK_SD_STORE)
+  // Preserve the released RAK internal boot-update lineage. SD is additive
+  // through MOTASDRA, not a mutation of MOTABLDR/MOTASTOR.
+  #define MOTA_BOOT_UPDATE_STORAGE_FLAGS (MOTA_BL_STORAGE_STAGE_CEILING | MOTA_BL_STORAGE_BOOT_UPDATE)
+#elif defined(MOTA_SD_BOOTLOADER_UPDATE)
   #define MOTA_BOOT_UPDATE_STORAGE_FLAGS MOTA_SD_STORAGE_FLAGS
 #elif defined(MOTA_QSPI_BOOTLOADER_UPDATE)
   #define MOTA_BOOT_UPDATE_STORAGE_FLAGS MOTA_QSPI_STORAGE_FLAGS
@@ -71,7 +83,7 @@ __attribute__((used, aligned(4))) const mota_bl_info_t g_mota_bl_info = {
   {MOTA_BL_MAGIC0, MOTA_BL_MAGIC1, MOTA_BL_MAGIC2, MOTA_BL_MAGIC3, MOTA_BL_MAGIC4, MOTA_BL_MAGIC5, MOTA_BL_MAGIC6,
    MOTA_BL_MAGIC7},
   MOTA_BL_APPLY_ABI,
-#if defined(MOTA_SD_CARD)
+#if defined(MOTA_SD_CARD) && !defined(MOTA_RAK_SD_STORE)
   (uint16_t)((1u << 0) | (1u << 2)), // SD: full images and in-place deltas
   {MOTA_SD_STORAGE_FLAGS, 0, 0, 0},  // retained-auth SD source
 #elif defined(MOTA_QSPI_FLASH) && (!defined(MOTA_RAK_AUTO_STORE) || !defined(MOTA_INTERNAL_BOOTLOADER_UPDATE))
@@ -88,7 +100,7 @@ __attribute__((used, aligned(4))) const mota_bl_info_t g_mota_bl_info = {
 
 #if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
   #if (!defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) && !defined(MOTA_RAK_AUTO_STORE)) || \
-      (defined(MOTA_SD_CARD) && !defined(MOTA_SD_DUAL_STORE)) || \
+      (defined(MOTA_SD_CARD) && !defined(MOTA_SD_DUAL_STORE) && !defined(MOTA_RAK_SD_STORE)) || \
       (defined(MOTA_QSPI_FLASH) && !defined(MOTA_RAK_AUTO_STORE))
     #error "The retained mOTA RAM arena requires an internal or RAK adaptive nRF52840 profile"
   #endif
@@ -117,6 +129,17 @@ __attribute__((used, aligned(4))) const mota_ram_capabilities_t g_mota_ram_capab
     .reserved = {0, 0, 0},
   },
 #endif
+};
+#endif
+
+#if defined(MOTA_RAK_SD_STORE)
+__attribute__((used, aligned(4))) const mota_rak_sd_info_t g_mota_rak_sd_info = {
+  .magic = {'M', 'O', 'T', 'A', 'S', 'D', 'R', 'A'},
+  .abi = MOTA_RAK_SD_INFO_ABI,
+  .auth_len = MOTA_SD_AUTH_LEN,
+  .storage_flags = MOTA_RAK_SD_STORAGE_FLAGS,
+  .stage_marker = GPREGRET2_OTA_STAGE_SD,
+  .reserved = {0, 0},
 };
 #endif
 
@@ -313,7 +336,7 @@ static void otah_settings_commit(uint16_t bank0, uint16_t crc, uint32_t size) {
 
 #if (defined(MOTA_SD_BOOTLOADER_UPDATE) && defined(MOTA_QSPI_BOOTLOADER_UPDATE)) || \
   (defined(MOTA_SD_BOOTLOADER_UPDATE) && defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) && \
-   !defined(MOTA_SD_DUAL_STORE)) || \
+   !defined(MOTA_SD_DUAL_STORE) && !defined(MOTA_RAK_SD_STORE)) || \
   (defined(MOTA_QSPI_BOOTLOADER_UPDATE) && defined(MOTA_INTERNAL_BOOTLOADER_UPDATE))
   #error "Select exactly one bootloader-update staging backend"
 #endif
@@ -348,7 +371,8 @@ static void otah_settings_commit(uint16_t bank0, uint16_t crc, uint32_t size) {
     #error "MOTA_QSPI_BOOTLOADER_UPDATE requires MOTA_QSPI_FLASH"
   #endif
 #elif defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
-  #if (defined(MOTA_QSPI_FLASH) && !defined(MOTA_RAK_AUTO_STORE)) || defined(MOTA_SD_CARD)
+  #if (defined(MOTA_QSPI_FLASH) && !defined(MOTA_RAK_AUTO_STORE)) || \
+      (defined(MOTA_SD_CARD) && !defined(MOTA_RAK_SD_STORE))
     #error "MOTA_INTERNAL_BOOTLOADER_UPDATE requires internal or RAK adaptive OTA storage"
   #endif
 #else
@@ -461,17 +485,25 @@ static int hybrid_staged_read(uint32_t address, void *dst, uint32_t len) {
 static mota_sd_auth_t g_sd_auth;
 #define g_sd_first_sector g_sd_auth.first_sector
 #define g_sd_total_size g_sd_auth.container_total
-static int g_sd_auth_loaded;
-#if defined(MOTA_SD_DUAL_STORE)
-static int g_sd_source;
+static bool g_sd_auth_loaded;
+#if defined(MOTA_SD_DUAL_STORE) || defined(MOTA_RAK_SD_STORE)
+static bool g_sd_source;
 #else
   #define g_sd_source 1
+#endif
+#if defined(MOTA_RAK_SD_STORE)
+// Authentication must precede even pin ownership. Invalid SD handoffs never
+// initialize or deinitialize the shared slot-C/SD chip-select pin.
+static bool g_sd_active;
 #endif
 
 // Copy the retained authorization into bootloader-owned RAM and consume it
 // before the first access to removable media.  Thus every trigger is one-shot,
 // including invalid records and SD failures.  A reset/power cut cannot retry.
-__attribute__((noinline, noclone)) static int sd_auth_take(uint8_t purpose, uint8_t format_ver) {
+#if !defined(MOTA_RAK_SD_STORE)
+__attribute__((noinline, noclone))
+#endif
+static int sd_auth_take(uint8_t purpose, uint8_t format_ver) {
 #ifdef OTA_DELTA_HOST_TEST
   otah_sd_auth_read(&g_sd_auth, sizeof(g_sd_auth));
   otah_sd_auth_consume();
@@ -486,7 +518,20 @@ __attribute__((noinline, noclone)) static int sd_auth_take(uint8_t purpose, uint
 #endif
 #if defined(MOTA_QSPI_FLASH)
 static uint32_t g_qspi_total_size;
-static int      g_qspi_source;
+static bool     g_qspi_source;
+#endif
+
+#if defined(MOTA_SD_CARD) || defined(MOTA_QSPI_FLASH)
+static bool external_staged_source(void) {
+#if defined(MOTA_SD_CARD)
+  if (g_sd_source) return 1;
+#endif
+#if defined(MOTA_QSPI_FLASH)
+  return g_qspi_source;
+#else
+  return 0;
+#endif
+}
 #endif
 
 // Only the explicitly selected source is read. An SD failure must never fall
@@ -599,7 +644,7 @@ static int flash_page_erase_verified(uint32_t page) {
 // ---- coherent single-page write-back cache (in-place reads back shifted data it just wrote) -------
 static uint8_t  g_cache[PAGE] __attribute__((aligned(4)));
 static uint32_t g_cache_page; // page-aligned addr; 0 == INVALID (no app page is at 0)
-static int      g_cache_dirty;
+static bool     g_cache_dirty;
 
 static int cache_flush(void) {
   if (!g_cache_page) {
@@ -923,7 +968,13 @@ static int parse_mota_at(uint32_t addr, uint32_t limit, struct mota_min *o) {
 static uint32_t scan_mota(struct mota_min *o, uint32_t stage_ceiling) {
 #if defined(MOTA_SD_CARD)
   if (g_sd_source) {
-    if (!g_sd_auth_loaded || !ota_sd_init()) {
+    if (!g_sd_auth_loaded) {
+      return 0;
+    }
+#if defined(MOTA_RAK_SD_STORE)
+    g_sd_active = 1;
+#endif
+    if (!ota_sd_init()) {
       return 0;
     }
     // parse_mota_at enforces the minimum size before any media read.
@@ -931,7 +982,7 @@ static uint32_t scan_mota(struct mota_min *o, uint32_t stage_ceiling) {
     return parse_mota_at(0, g_sd_total_size, o) && o->total == g_sd_total_size;
   }
 #endif
-#if !defined(MOTA_SD_CARD) || defined(MOTA_SD_DUAL_STORE)
+#if !defined(MOTA_SD_CARD) || defined(MOTA_SD_DUAL_STORE) || defined(MOTA_RAK_SD_STORE)
   #if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
   if (g_hybrid.container_total != 0u) {
     const uint32_t virtual_limit = g_hybrid.flash_start + g_hybrid.container_total;
@@ -1170,7 +1221,7 @@ static const uint8_t BOOT_UPDATE_HW_ID[32] = "XIAO_BL_28860045";
 #else
   #define BOOT_UPDATE_RAW_MAX_START MOTA_NRF52_BL_SCRATCH_START
 #endif
-#if defined(MOTA_SD_DUAL_STORE)
+#if defined(MOTA_SD_DUAL_STORE) || (defined(MOTA_RAK_SD_STORE) && defined(MOTA_SD_BOOTLOADER_UPDATE))
   #define BOOT_UPDATE_RAW_START \
     (g_sd_source ? MOTA_NRF52_BL_SCRATCH_START : MOTA_NRF52_INTERNAL_BL_SLOT_START)
 #else
@@ -1324,6 +1375,10 @@ static int boot_image_caps_valid(const uint8_t *image) {
   // exact storage profile; a second valid marker cannot hide behind a
   // different boot-update backend.
   uint32_t matches = 0;
+#if defined(MOTA_RAK_SD_STORE)
+  uint32_t sd_matches = 0;
+  _Static_assert(MOTA_RAK_SD_STORAGE_FLAGS == MOTA_BL_STORAGE_SD, "Exact SD marker flag coverage");
+#endif
 #if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
   uint32_t ram_matches = 0;
   _Static_assert(sizeof(mota_ram_info_t) == sizeof(mota_bl_info_t), "Shared marker scan bounds");
@@ -1331,9 +1386,36 @@ static int boot_image_caps_valid(const uint8_t *image) {
   for (uint32_t off = 0; off + sizeof(mota_bl_info_t) <= MOTA_NRF52_BL_SIZE; off += 4u) {
     // The internal staged payload begins 365 bytes into its container, so its
     // base is deliberately unaligned even though marker offsets within the
-    // raw image are 4-byte aligned. Read every field as bytes: even an enabled
-    // Cortex-M UNALIGN_TRP cannot fault this validation path.
+    // raw image are 4-byte aligned. Fields use byte-oriented decoding, but
+    // compiler-generated halfword loads rely on the reset-default Cortex-M
+    // unaligned-access setting; do not treat this as an UNALIGN_TRP-safe path.
     const uint8_t *candidate = image + off;
+#if defined(MOTA_RAK_SD_STORE)
+    // All privileged capability records share this prefix. Reject ordinary
+    // image words once in the combined profile's three-marker scan.
+    if (memcmp(candidate, g_mota_bl_info.magic, 4u) != 0) {
+      continue;
+    }
+#endif
+#if defined(MOTA_RAK_SD_STORE)
+    if (memcmp(candidate + 4u, g_mota_rak_sd_info.magic + 4u,
+               sizeof(g_mota_rak_sd_info.magic) - 4u) == 0) {
+      const uint16_t abi = rd_u16(candidate + offsetof(mota_rak_sd_info_t, abi));
+      const uint8_t flags = candidate[offsetof(mota_rak_sd_info_t, storage_flags)];
+      if (abi >= MOTA_RAK_SD_INFO_ABI && abi != UINT16_MAX &&
+          rd_u16(candidate + offsetof(mota_rak_sd_info_t, auth_len)) == MOTA_SD_AUTH_LEN &&
+          (flags & MOTA_BL_STORAGE_SD) != 0u &&
+          (flags & (uint8_t)~MOTA_RAK_SD_STORAGE_FLAGS) == 0u &&
+          (candidate[14] | candidate[15]) == 0u) {
+        // Magic, auth length, exact SD-only flags and both reserved bytes
+        // already match. These are the only remaining bytes in the record.
+        if (++sd_matches > 1u || abi != MOTA_RAK_SD_INFO_ABI ||
+            candidate[offsetof(mota_rak_sd_info_t, stage_marker)] != GPREGRET2_OTA_STAGE_SD) {
+          return 0;
+        }
+      }
+    }
+#endif
 #if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
     // Both markers are aligned and 16 bytes long. Check them in one scan,
     // preserving exact arena continuity and duplicate-marker rejection.
@@ -1349,7 +1431,12 @@ static int boot_image_caps_valid(const uint8_t *image) {
       }
     }
 #endif
+#if defined(MOTA_RAK_SD_STORE)
+    if (memcmp(candidate + 4u, g_mota_bl_info.magic + 4u,
+               sizeof(g_mota_bl_info.magic) - 4u) != 0) {
+#else
     if (memcmp(candidate, g_mota_bl_info.magic, sizeof(g_mota_bl_info.magic)) != 0) {
+#endif
       continue;
     }
     const uint16_t apply_abi  = rd_u16(candidate + offsetof(mota_bl_info_t, apply_abi));
@@ -1367,6 +1454,9 @@ static int boot_image_caps_valid(const uint8_t *image) {
   if (matches != 1u) {
     return 0;
   }
+#if defined(MOTA_RAK_SD_STORE)
+  if (sd_matches != 1u) return 0;
+#endif
 #if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
   return ram_matches == 1u;
 #else
@@ -1482,7 +1572,7 @@ static bool apply_bootloader_update(void) {
   gpregret_set(0); // consume first: every validation/copy failure is fail-closed
   gpregret2_set(GPREGRET2_BL_GATE);
 #if defined(MOTA_SD_BOOTLOADER_UPDATE)
-#if defined(MOTA_SD_DUAL_STORE)
+#if defined(MOTA_SD_DUAL_STORE) || defined(MOTA_RAK_SD_STORE)
   g_sd_source = source == GPREGRET2_OTA_STAGE_SD;
 #endif
   if (g_sd_source) {
@@ -1520,7 +1610,7 @@ static bool apply_bootloader_update(void) {
   // Internal compaction overwrites its source. Validate metadata before that
   // commit point as well as again from the final MBR source.
   if (
-#if defined(MOTA_SD_DUAL_STORE)
+#if defined(MOTA_SD_DUAL_STORE) || (defined(MOTA_RAK_SD_STORE) && defined(MOTA_SD_BOOTLOADER_UPDATE))
       !g_sd_source &&
 #endif
       !boot_image_metadata_valid_at(m.payload_addr, &m)) {
@@ -1554,6 +1644,9 @@ static bool apply_bootloader_update(void) {
 #if defined(MOTA_SD_BOOTLOADER_UPDATE)
   if (g_sd_source) {
     ota_sd_deinit();
+#if defined(MOTA_RAK_SD_STORE)
+    g_sd_active = 0;
+#endif
   }
 #elif defined(MOTA_QSPI_BOOTLOADER_UPDATE)
   ota_qspi_deinit();
@@ -1604,10 +1697,20 @@ static bool finish_apply(bool result) {
 #if defined(MOTA_SD_CARD)
   // A rejected handoff falls through to the application without a hardware
   // reset, so do not leave SPIM2 or the SD pins owned by the bootloader.
-  if (g_sd_source) {
+  if (
+#if defined(MOTA_RAK_SD_STORE)
+      g_sd_active
+#else
+      g_sd_source
+#endif
+      ) {
     ota_sd_deinit();
+#if defined(MOTA_RAK_SD_STORE)
+    g_sd_active = 0;
+#endif
   }
-#elif defined(MOTA_QSPI_FLASH)
+#endif
+#if defined(MOTA_QSPI_FLASH)
   if (g_qspi_source) {
     ota_qspi_deinit();
   }
@@ -1617,6 +1720,18 @@ static bool finish_apply(bool result) {
 
 bool ota_delta_check_and_apply(void) {
   inherited_watchdog_feed();
+#if defined(MOTA_RAK_SD_STORE)
+  // Real boots initialize .bss; also make a rejected/host-simulated invocation
+  // incapable of leaking its selected source into a later unrelated request.
+  g_sd_source = 0;
+  g_sd_active = 0;
+  g_sd_auth_loaded = 0;
+  g_qspi_source = 0;
+  g_qspi_total_size = 0;
+  g_hybrid.container_total = 0;
+  volatile uint8_t keep_sd = *(const volatile uint8_t *)&g_mota_rak_sd_info.magic[0];
+  if (keep_sd == 0) return finish_apply(false);
+#endif
   // Force a volatile read of the capability marker so -flto / --gc-sections cannot fold the reference away
   // and drop it - the running app scans the bootloader flash for it (ota_bl_info.h / OtaBlInfo.h).
   volatile uint8_t keep = *(const volatile uint8_t *)&g_mota_bl_info.magic[0];
@@ -1652,7 +1767,7 @@ bool ota_delta_check_and_apply(void) {
   // any staged source. Every malformed/interrupted request is one-shot.
   gpregret_set(0);
   gpregret2_set(0xB1);
-#if defined(MOTA_SD_DUAL_STORE)
+#if defined(MOTA_SD_DUAL_STORE) || defined(MOTA_RAK_SD_STORE)
   g_sd_source = stage_handoff == GPREGRET2_OTA_STAGE_SD;
 #endif
 #if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
@@ -1689,7 +1804,11 @@ bool ota_delta_check_and_apply(void) {
     stage_ceiling = APP_APPLY_END;
   }
 #endif
-#if defined(MOTA_SD_CARD)
+#if defined(MOTA_RAK_SD_STORE)
+  // Adding optional SD must not widen the deployed RAK internal staging
+  // boundary. NOR/SD have an external source; legacy internal remains D4000.
+  const uint32_t app_limit = external_staged_source() ? APP_APPLY_END : stage_ceiling;
+#elif defined(MOTA_SD_CARD)
   const uint32_t app_limit = APP_APPLY_END;
 #elif defined(MOTA_QSPI_FLASH)
   const uint32_t app_limit = g_qspi_source ? APP_APPLY_END : stage_ceiling;
@@ -1739,12 +1858,8 @@ bool ota_delta_check_and_apply(void) {
   }
 #endif
 
-#if defined(MOTA_SD_CARD)
-  if (g_sd_source && m.is_full) {
-    return finish_apply(apply_full_external(&m));
-  }
-#elif defined(MOTA_QSPI_FLASH)
-  if (g_qspi_source && m.is_full) {
+#if defined(MOTA_SD_CARD) || defined(MOTA_QSPI_FLASH)
+  if (external_staged_source() && m.is_full) {
     return finish_apply(apply_full_external(&m));
   }
 #endif
@@ -1766,11 +1881,9 @@ bool ota_delta_check_and_apply(void) {
     gpregret2_set(0xB5);
     goto reject;
   } // wrong base
-#if defined(MOTA_SD_CARD)
+#if defined(MOTA_SD_CARD) || defined(MOTA_QSPI_FLASH)
   const uint32_t workspace_span =
-    (g_sd_source ? app_limit : mota_addr) - APP_BASE;
-#elif defined(MOTA_QSPI_FLASH)
-  const uint32_t workspace_span = g_qspi_source ? app_limit - APP_BASE : mota_addr - APP_BASE;
+    (external_staged_source() ? app_limit : mota_addr) - APP_BASE;
 #elif defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
   const uint32_t workspace_span = (mota_addr < app_limit ? mota_addr : app_limit) - APP_BASE;
 #else
@@ -1797,10 +1910,8 @@ bool ota_delta_check_and_apply(void) {
   c.patch_len  = m.payload_size;
   c.patch_pos  = 0;
   c.ws_lo      = APP_BASE;
-#if defined(MOTA_SD_CARD)
+#if defined(MOTA_SD_CARD) || defined(MOTA_QSPI_FLASH)
   c.ws_hi = APP_BASE + workspace_span;
-#elif defined(MOTA_QSPI_FLASH)
-  c.ws_hi = g_qspi_source ? app_limit : mota_addr;
 #elif defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
   // Application deltas and bootloader packages share the ED000 staging
   // ceiling. For an ordinary delta, detools workspace stops at the actual

@@ -13,7 +13,7 @@
 #include "ota_hybrid_handoff.h"
 #include "ota_ram_info.h"
 #include "usb/uf2/bootloader_image.h"
-#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+#if defined(MOTA_SD_CARD)
   #include "ota_sd_auth.h"
 #endif
 
@@ -39,7 +39,16 @@
 #define TEST_SOFTDEVICE_FWID        0x00B6u
 #endif
 
-#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+#if defined(MOTA_RAK_SD_STORE)
+  #define TEST_BOARD_ID       0x239A0029u
+  #define TEST_OTHER_BOARD_ID 0x239A0071u
+  #define TEST_DEVICE_NAME    DEVICE_NAME
+  // Canonical RAK identity comes from the test build, not the Tower SD role.
+  #define TEST_STORAGE_FLAGS  (MOTA_BL_STORAGE_STAGE_CEILING | MOTA_BL_STORAGE_BOOT_UPDATE)
+  #define TEST_SOURCE       GPREGRET2_OTA_STAGE_EXPANDED
+  #define TEST_PRESERVE_END MOTA_NRF52_INTERNAL_BL_SLOT_START
+  #define TEST_RAW_START    MOTA_NRF52_INTERNAL_BL_SLOT_START
+#elif defined(MOTA_SD_BOOTLOADER_UPDATE)
   #define TEST_BOARD_ID       0x239A0071u
   #define TEST_OTHER_BOARD_ID 0x239A0029u
   #define TEST_DEVICE_NAME    "TOWER_V2_OTA"
@@ -115,7 +124,7 @@ static uint16_t g_bank0, g_bank0_crc;
 static uint32_t g_bank0_size;
 static bootloader_image_info_t g_installed_boot_info;
 static uint16_t g_runtime_fwid;
-#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+#if defined(MOTA_SD_CARD)
 static mota_sd_auth_t SD_AUTH;
 #endif
 #if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
@@ -259,7 +268,7 @@ bool ota_qspi_write(uint32_t offset, const void *src, uint32_t len) {
   return true;
 }
 
-#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+#if defined(MOTA_SD_CARD)
 void otah_sd_auth_read(void *dst, uint32_t len) {
   memcpy(dst, &SD_AUTH, len);
 }
@@ -369,6 +378,16 @@ static uint8_t *make_boot_image(uint32_t board_id, uint16_t abi, uint8_t storage
     0,0,0
   };
   memcpy(image + RAM_CAPS_OFFSET + sizeof(*ram_caps), optional_store, sizeof(optional_store));
+#endif
+#if defined(MOTA_RAK_SD_STORE) || defined(TEST_RAK_SD_SUCCESSOR)
+  // The successor advertises SD independently. Old adaptive loaders ignore
+  // this addition while still validating their exact legacy capability bytes.
+  static const uint8_t sd_store[16] = {
+    'M','O','T','A','S','D','R','A',1,0,72,0,
+    MOTA_BL_STORAGE_SD,
+    GPREGRET2_OTA_STAGE_SD,0,0
+  };
+  memcpy(image + RAM_CAPS_OFFSET + 32u, sd_store, sizeof(sd_store));
 #endif
 #endif
 
@@ -499,7 +518,7 @@ static void reset_device(void) {
   }
   memcpy(OLD_BL_SNAPSHOT, FLASH + MOTA_NRF52_BL_START, sizeof(OLD_BL_SNAPSHOT));
   memset(QSPI, 0xFF, sizeof(QSPI));
-#if defined(MOTA_SD_BOOTLOADER_UPDATE)
+#if defined(MOTA_SD_CARD)
   memset(&SD_AUTH, 0, sizeof(SD_AUTH));
 #endif
 #if defined(MOTA_RAM_ARENA_SIZE) && MOTA_RAM_ARENA_SIZE > 0
@@ -544,7 +563,7 @@ static void reset_device(void) {
 #endif
 }
 
-#if defined(TEST_SD_PATH)
+#if defined(TEST_SD_PATH) || (defined(MOTA_RAK_SD_STORE) && defined(TEST_RAK_SD_REJECT))
 static void authorize_sd(const uint8_t *mota, uint32_t total,
                          uint8_t purpose, uint8_t format_ver) {
   const uint32_t sectors = (total + MOTA_SD_SECTOR_SIZE - 1u) /
@@ -679,6 +698,37 @@ int main(void) {
            memcmp(FLASH + TEST_RAW_START, image, MOTA_NRF52_BL_SIZE) == 0 && app_unchanged() &&
            old_bootloader_unchanged();
   report("valid v3 package produces raw source and reaches MBR with C8", ok, &failures);
+
+#if defined(MOTA_RAK_SD_STORE) && defined(TEST_RAK_SD_REJECT)
+  int sd_boot_rejected = 1;
+  for (unsigned auth_kind = 0; auth_kind < 3u; auth_kind++) {
+    reset_device();
+    stage(mota, total);
+    // Internal signed package is valid, and both removable/NOR mock media
+    // also contain it. An SD-v3 handoff must not discover any of these.
+    memcpy(QSPI, mota, total);
+    memcpy(QSPI + SD_FIRST_SECTOR * MOTA_SD_SECTOR_SIZE, mota, total);
+    if (auth_kind != 0u) authorize_sd(mota, total, MOTA_SD_AUTH_PURPOSE_BOOTLOADER, 3u);
+    if (auth_kind == 2u) SD_AUTH.crc32 ^= 1u;
+    mota_sd_auth_t retained_before = SD_AUTH;
+    g_gpregret2 = GPREGRET2_OTA_STAGE_SD;
+    g_mbr_success = 1;
+    const bool refused = !ota_delta_check_and_apply();
+    sd_boot_rejected = sd_boot_rejected && refused &&
+      g_gpregret == 0 && g_gpregret2 == GPREGRET2_BL_CONTAINER &&
+      g_qspi_init_calls == 0 && g_qspi_deinit_calls == 0 && g_qspi_writes == 0 &&
+      g_mbr_calls == 0 && g_settings_writes == 0 &&
+      app_unchanged() && old_bootloader_unchanged() &&
+      memcmp(&SD_AUTH, &retained_before, sizeof(SD_AUTH)) == 0;
+  }
+  report("SD bootloader handoff is rejected without any SD/NOR probe",
+         sd_boot_rejected, &failures);
+  // Restore the successful post-MBR state used by the existing retry check.
+  reset_device();
+  stage(mota, total);
+  g_mbr_success = 1;
+  (void)ota_delta_check_and_apply();
+#endif
 
   int calls_before = g_mbr_calls;
 #if defined(TEST_SD_PATH)
@@ -1309,6 +1359,66 @@ int main(void) {
            g_settings_writes == 0 && app_unchanged(), &failures);
   free(bad);
   free(too_large);
+#endif
+
+#if defined(MOTA_RAK_SD_STORE)
+  static const char *sd_cap_cases[] = {
+    "successor cannot silently remove the RAK SD capability",
+    "RAK SD capability requires its nonzero ABI",
+    "RAK SD capability requires the exact auth record length",
+    "RAK SD capability cannot add an unsupported bootloader backend",
+    "RAK SD capability requires the explicit SD handoff marker",
+    "RAK SD capability reserved bytes must stay zero",
+    "duplicate valid RAK SD capability is ambiguous",
+  };
+  for (unsigned i = 0; i < sizeof(sd_cap_cases) / sizeof(sd_cap_cases[0]); i++) {
+    uint8_t *candidate = make_boot_image(board_base, 3, required_caps);
+    uint8_t *sd_caps = candidate + RAM_CAPS_OFFSET + 32u;
+    switch (i) {
+      case 0: memset(sd_caps, 0, 16u); break;
+      case 1: sd_caps[8] = 0u; break;
+      case 2: sd_caps[10]--; break;
+      case 3: sd_caps[12] = MOTA_BL_STORAGE_SD | MOTA_BL_STORAGE_BOOT_UPDATE; break;
+      case 4: sd_caps[13] = GPREGRET2_OTA_STAGE_QSPI; break;
+      case 5: sd_caps[14] = 1u; break;
+      default: memcpy(sd_caps + 16u, sd_caps, 16u); break;
+    }
+    fix_image_crc(candidate);
+    uint32_t candidate_total;
+    uint8_t *candidate_mota = make_mota(candidate, MOTA_NRF52_BL_SIZE, 3,
+      MFLAG_FULL | MFLAG_SIGNED | MFLAG_BOOTLOADER,
+      TEST_TARGET_ID, TEST_HW_ID, &candidate_total);
+    report(sd_cap_cases[i], rejected_with(candidate_mota, candidate_total,
+                                         GPREGRET2_BL_MANIFEST), &failures);
+    free(candidate_mota);
+    free(candidate);
+  }
+
+  // Hold the size-optimized capability parser to the exact complete 16-byte
+  // record contract: each byte is mandatory even with a valid image CRC.
+  for (unsigned byte = 0; byte < sizeof(mota_rak_sd_info_t); byte++) {
+    uint8_t *candidate = make_boot_image(board_base, 3, required_caps);
+    candidate[RAM_CAPS_OFFSET + 32u + byte] ^= 1u;
+    fix_image_crc(candidate);
+    report("every byte of the RAK SD capability is required",
+           !boot_image_caps_valid(candidate), &failures);
+    free(candidate);
+  }
+
+  uint8_t *same_usb_id = make_boot_image(board_base, 3, required_caps);
+  bootloader_update_manifest_t *same_id_manifest =
+    &((bootloader_update_envelope_t *)(void *)(same_usb_id + MANIFEST_OFFSET))->manifest;
+  memset(same_id_manifest->device_name, 0, sizeof(same_id_manifest->device_name));
+  memcpy(same_id_manifest->device_name, "3401_DFU", 8u);
+  fix_image_crc(same_usb_id);
+  uint32_t same_id_total;
+  uint8_t *same_id_mota = make_mota(same_usb_id, MOTA_NRF52_BL_SIZE, 3,
+    MFLAG_FULL | MFLAG_SIGNED | MFLAG_BOOTLOADER,
+    TEST_TARGET_ID, TEST_HW_ID, &same_id_total);
+  report("RAK3401 sharing USB board ID cannot replace a RAK4631 loader",
+         rejected_with(same_id_mota, same_id_total, GPREGRET2_BL_MANIFEST), &failures);
+  free(same_id_mota);
+  free(same_usb_id);
 #endif
 
   free(mota);

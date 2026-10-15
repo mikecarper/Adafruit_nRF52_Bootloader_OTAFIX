@@ -83,7 +83,7 @@ def parse_args():
     return args
 
 
-def require_toolchain():
+def require_toolchain(boards=()):
     compiler = shutil.which("arm-none-eabi-gcc")
     size_tool = shutil.which("arm-none-eabi-size")
     if compiler is None or size_tool is None:
@@ -97,9 +97,15 @@ def require_toolchain():
         text=True,
     )
     match = re.match(r"(\d+)\.(\d+)", result.stdout.strip())
-    if match is None or tuple(map(int, match.groups())) < (14, 2):
+    minimum = (15, 3) if "wiscore_rak4631_auto" in boards else (14, 2)
+    if match is None or tuple(map(int, match.groups())) < minimum:
+        release = ".".join(map(str, minimum))
+        selected = " for the combined wiscore_rak4631_auto profile" if minimum == (15, 3) else ""
         raise RuntimeError(
-            f"Arm GNU Toolchain 14.2.Rel1 or newer is required; found {result.stdout.strip()}"
+            f"Arm GNU Toolchain {release}.Rel1 or newer is required{selected}; "
+            f"found {result.stdout.strip()}. Select it on PATH; Docker: "
+            f"--build-arg ARM_GNU_RELEASE={release}.rel1. "
+            "Use --exclude-board wiscore_rak4631_auto only if intentionally omitting that profile."
         )
     return size_tool, result.stdout.strip()
 
@@ -183,8 +189,14 @@ def build_board(board, make_jobs, test_version, size_tool, build_root, recovery_
 
 def main():
     args = parse_args()
+    boards = sorted(entry.name for entry in (REPO_ROOT / "src" / "boards").iterdir()
+                    if entry.is_dir() and entry.name not in args.exclude_board)
+    if not boards:
+        print("error: no boards selected", file=sys.stderr)
+        return 2
     try:
-        size_tool, compiler_version = require_toolchain()
+        # Fail before clearing any build directory or launching board jobs.
+        size_tool, compiler_version = require_toolchain(boards)
     except (OSError, RuntimeError, subprocess.SubprocessError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
@@ -213,11 +225,6 @@ def main():
             return 2
         shutil.rmtree(build_root, ignore_errors=True)
 
-    boards = sorted(entry.name for entry in (REPO_ROOT / "src" / "boards").iterdir()
-                    if entry.is_dir() and entry.name not in args.exclude_board)
-    if not boards:
-        print("error: no boards selected", file=sys.stderr)
-        return 2
     worker_count = min(args.jobs, len(boards))
 
     print(f"Arm GNU Toolchain {compiler_version}; {worker_count} board workers")
