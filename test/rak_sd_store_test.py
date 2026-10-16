@@ -6,8 +6,10 @@ device. Existing Tower/RAK3401 tests remain independently runnable.
 """
 from pathlib import Path
 import os
+import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -24,6 +26,17 @@ BASE = ["-DOTA_DELTA_HOST_TEST", "-DDETOOLS_CONFIG_IN_PLACE_RESUME=0",
         "-DUSB_DESC_UF2_PID=0x0029", '-DDEVICE_NAME="4631_DFU"']
 SD = ["-DMOTA_RAK_SD_STORE=1", "-DMOTA_SD_CARD=1"]
 IDENTITY = ['-DTEST_HW_ID="NRF_BL_239A0029_4631_DFU"', "-DTEST_TARGET_ID=0x2D0DF000u"]
+
+
+def make_policy_environment():
+    # These policy-only child makes must use the flags generated for each
+    # case, not a recursive `make sanitize` command-line CFLAGS override.
+    # Keep the parent environment and all native fixture sanitizer flags intact.
+    env = os.environ.copy()
+    for variable in ("MAKEFLAGS", "MFLAGS", "MAKELEVEL", "MAKEOVERRIDES",
+                     "CFLAGS", "LDFLAGS", "RECOVERY_ALLOW_ALL_BOARDS"):
+        env.pop(variable, None)
+    return env
 
 
 class RakSdStoreTests(unittest.TestCase):
@@ -215,8 +228,39 @@ int main(void) { return 0; }
                     "\nMOTA_RAM_ARENA_SIZE := " + settings.get("MOTA_RAM_ARENA_SIZE", "") +
                     "\nCFLAGS := " + " ".join(features) + "\n" + make_guard + "\nguard:; @true\n")
                 checked = subprocess.run(["make", "-s", "-f", str(makefile), "guard"],
+                                         env=make_policy_environment(),
                                          capture_output=True, text=True, timeout=15)
                 self.assertEqual(expected, checked.returncode == 0, checked.stdout + checked.stderr)
+
+    def test_storage_policy_matrix_ignores_recursive_make_overrides(self):
+        if not shutil.which("cmake") or not shutil.which("make"):
+            self.skipTest("native cmake and make are required for policy-only checks")
+        recipe = " ".join(shlex.quote(value) for value in (
+            sys.executable, str(Path(__file__).resolve()),
+            "RakSdStoreTests.test_cmake_and_make_storage_policy_matrix"))
+        makefile = "policy-regression:\n\t" + recipe + "\n"
+        pollution = {"CFLAGS": "-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer",
+                     "LDFLAGS": "-fsanitize=address,undefined",
+                     "BOARD": "wiscore_rak3401_auto", "MOTA_RAM_ARENA_SIZE": "0"}
+        for environment_overrides in (False, True):
+            with self.subTest(environment_overrides=environment_overrides):
+                env = make_policy_environment()
+                env.update(pollution)
+                command = ["make", "--no-print-directory", "-f", "-"]
+                if environment_overrides:
+                    # -e and exported variables are inherited through
+                    # MAKEFLAGS; normal `:=` assignments cannot override them.
+                    command.append("--environment-overrides")
+                else:
+                    # Real command-line overrides are exported by Make through
+                    # MAKEFLAGS/MAKEOVERRIDES to its Python recipe and children.
+                    command.extend(f"{key}={value}" for key, value in pollution.items())
+                command.append("policy-regression")
+                checked = subprocess.run(command, input=makefile, env=env,
+                                         capture_output=True, text=True, timeout=60)
+                self.assertEqual(0, checked.returncode, checked.stdout + checked.stderr)
+                self.assertIn("Ran 1 test", checked.stderr)
+                self.assertNotIn("FAILED", checked.stderr)
 
 
 if __name__ == "__main__":
