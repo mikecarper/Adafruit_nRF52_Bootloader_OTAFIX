@@ -27,17 +27,65 @@
     {"id": "xiao_nrf52840_ble_sense", "label": "Seeed XIAO nRF52840 BLE Sense", "meshcoreHardware": ["Xiao_nrf52_Sense"]}
   ],
   "unavailableProfiles": [
-    {"id": "heltec_mesh_tower_v2", "label": "Heltec MeshTower V2 - historical internal-only profile", "meshcoreHardware": ["Heltec_tower_v2"], "reason": "Retired from normal releases in favor of the combined SD/internal profile. Existing internal-only bootloaders require a one-time local installation of the normal combined image via USB/BLE DFU or SWD; do not use a cross-profile LoRa update."},
-    {"id": "gat562_mesh_watch13", "label": "GAT562 Mesh Watch13", "meshcoreHardware": ["GAT562_Mesh_Watch13"], "reason": "The watch routes a GAT562 bootloader LED output to its vibration motor and has onboard flash. It needs a watch-specific profile."},
-    {"id": "heltec_mesh_solar", "label": "Heltec Mesh Solar", "meshcoreHardware": ["Heltec_mesh_solar"], "reason": "Mesh Solar has different LED and peripheral pins from the supported Heltec boards. It needs its own profile."},
-    {"id": "lilygo_t_impulse_plus", "label": "LilyGo T-Impulse Plus", "meshcoreHardware": ["LilyGo_T_Impulse_Plus"], "reason": "T-Impulse Plus has different flash data pins and LED wiring from T-Echo Lite. It needs its own profile."},
-    {"id": "lilygo_techo_card", "label": "LilyGo T-Echo Card", "meshcoreHardware": ["LilyGo_T-Echo_Card"], "reason": "T-Echo Card has its own NFC configuration, buttons and LED hardware. It needs a Card-specific profile."},
-    {"id": "meshtiny", "label": "Meshtiny", "meshcoreHardware": ["Meshtiny"], "reason": "Meshtiny has its own factory bootloader identity and controls. A dedicated Meshtiny profile has not been qualified."},
-    {"id": "meshtracker_x1", "label": "MeshTracker X1", "meshcoreHardware": ["MeshTracker_X1"], "reason": "MeshTracker X1 has different flash wiring, power control and button polarity from Wio Tracker L1. It needs its own profile."},
-    {"id": "muzi_base", "label": "Muzi Base", "meshcoreHardware": ["muzi_base_duo", "muzi_base_duo_superIO", "muzi_base_uno", "muzi_base_uno_superIO"], "reason": "These four variants share Muzi Base hardware, which needs its own bootloader identity, LED polarity and flash configuration."},
-    {"id": "nano_g2_ultra", "label": "Nano G2 Ultra", "meshcoreHardware": ["Nano_G2_Ultra"], "reason": "Nano G2 Ultra has its own flash and button wiring. It needs a dedicated profile."},
-    {"id": "thinknode_m4", "label": "ThinkNode M4", "meshcoreHardware": ["ThinkNode_M4"], "reason": "ThinkNode M4 has different LED, button and power-control pins from the supported ThinkNodes. It needs its own profile."},
-    {"id": "thinknode_m8", "label": "ThinkNode M8", "meshcoreHardware": ["ThinkNode_M8"], "reason": "A dedicated M8 bootloader is awaiting factory USB identification and hardware testing. No verified download is available."},
-    {"id": "wio_wm1110", "label": "Seeed Wio WM1110", "meshcoreHardware": ["wio_wm1110"], "reason": "This firmware targets the Wio WM1110 Dev Kit (SDK carrier), whose LEDs and controls differ from Wio Tracker 1110 and XIAO. Its bootloader identity and installation route still need qualification."}
+    {
+      "id": "heltec_mesh_tower_v2", "label": "Heltec MeshTower V2 - historical internal-only profile", "meshcoreHardware": ["Heltec_tower_v2"],
+      "reason": "Retired from normal releases in favor of the combined SD/internal profile. Existing internal-only bootloaders require a one-time local installation of the normal combined image via USB/BLE DFU or SWD; do not use a cross-profile LoRa update.",
+      "qualification": {"status": "retired", "sourceBoard": "heltec_mesh_tower_v2", "storage": "internal", "factoryIdentity": "verified", "hardwareQualified": false, "replacementProfile": "heltec_mesh_tower_v2_sdcard", "localMigrationOnly": true, "blockers": ["Installed internal-only identity requires local migration, not cross-profile LoRa self-update."], "evidence": ["https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.11"]}
+    },
+    {
+      "id": "gat562_mesh_watch13", "label": "GAT562 Mesh Watch13", "meshcoreHardware": ["GAT562_Mesh_Watch13"],
+      "reason": "A watch-specific QSPI source port avoids driving the vibration motor as an LED. It awaits physical power, DFU and update qualification; no verified download is available.",
+      "qualification": {"status": "source-pending", "sourceBoard": "gat562_mesh_watch13", "storage": "qspi", "factoryIdentity": "verified", "hardwareQualified": false, "blockers": ["Physical button, motor-off, flash and power-loss update qualification."], "evidence": ["https://github.com/gat-iot/GAT562-family/blob/main/GAT562%20Mesh%20Watch13%20V1.0%20SCH.pdf"]}
+    },
+    {
+      "id": "heltec_mesh_solar", "label": "Heltec Mesh Solar", "meshcoreHardware": ["Heltec_mesh_solar"],
+      "reason": "A guarded internal-staging Solar source port avoids conflicting LED/QSPI/rail definitions, preserves the real factory identity and services the author-confirmed watchdog. Carrier-revision power/reset and long DFU/update watchdog behavior still require hardware qualification. No verified download is available.",
+      "qualification": {"status": "source-pending", "sourceBoard": "heltec_mesh_solar", "storage": "internal", "factoryIdentity": "verified", "hardwareQualified": false, "blockers": ["Carrier revision, factory entry, power/reset and long DFU/apply watchdog waveform qualification.", "Matching internal-staging S140 6.1.1 exact-base delta and signed self-update failure/power-loss qualification.", "External staging remains unsupported: actual flash/rail routing conflicts with BSP BMS/indicator definitions."], "evidence": ["https://resource.heltec.cn/download/MeshSolar/Pin_map/MeshSolar_pinmap.jpg", "https://github.com/meshtastic/firmware/pull/9337", "https://github.com/HelTecAutomation/Heltec_nRF52/pull/8"]}
+    },
+    {
+      "id": "lilygo_t_impulse_plus", "label": "LilyGo T-Impulse Plus", "meshcoreHardware": ["LilyGo_T_Impulse_Plus"],
+      "reason": "A dedicated QSPI source port preserves T-Impulse Plus flash wiring, rail and controls. Physical flash, power, DFU and update qualification is still required; no verified download is available.",
+      "qualification": {"status": "source-pending", "sourceBoard": "lilygo_t_impulse_plus", "storage": "qspi", "factoryIdentity": "verified", "hardwareQualified": false, "blockers": ["Physical flash-rail, button, USB/BLE and power-loss update qualification."], "evidence": ["https://github.com/Xinyuan-LilyGO/T-Impulse-Plus"]}
+    },
+    {
+      "id": "lilygo_techo_card", "label": "LilyGo T-Echo Card", "meshcoreHardware": ["LilyGo_T-Echo_Card"],
+      "reason": "A Card-specific QSPI source port preserves its NFC configuration, flash rail and controls. Physical flash, USB/BLE and update qualification is still required; no verified download is available.",
+      "qualification": {"status": "source-pending", "sourceBoard": "lilygo_techo_card", "storage": "qspi", "factoryIdentity": "verified", "hardwareQualified": false, "blockers": ["Physical NFC, flash-rail, button, USB/BLE and power-loss update qualification."], "evidence": ["https://github.com/Xinyuan-LilyGO/T-Echo-Card"]}
+    },
+    {
+      "id": "meshtiny", "label": "Meshtiny", "meshcoreHardware": ["Meshtiny"],
+      "reason": "A dedicated Meshtiny QSPI source port preserves factory identity and real side/top controls. Physical flash, power, DFU and update qualification remains pending; no verified download is available.",
+      "qualification": {"status": "source-pending", "sourceBoard": "meshtiny", "storage": "qspi", "factoryIdentity": "verified", "hardwareQualified": false, "blockers": ["Physical side/top-button entry, flash and power-loss update qualification.", "Matching application must use external raw staging; application flash macros cannot be inferred from the bootloader."], "evidence": ["https://shop.mtoolstec.com/bootloader-update-on-meshtiny.html", "https://dl.mtoolstec.com/meshtiny/bootloader.uf2"]}
+    },
+    {
+      "id": "meshtracker_x1", "label": "MeshTracker X1", "meshcoreHardware": ["MeshTracker_X1"],
+      "reason": "A dedicated internal-staging S140-v7 qualification source port preserves factory USB identity and the active-high button without driving unverified flash or peripheral rails. Cold USB/reset/power behavior and matching internal-staging application updates still need hardware testing. No verified download is available.",
+      "qualification": {"status": "source-pending", "sourceBoard": "meshtracker_x1", "storage": "internal", "factoryIdentity": "verified", "hardwareQualified": false, "blockers": ["Cold USB, button-plus-USB, BLE, timeout and power-controller behavior during lengthy updates.", "Matching internal-staging S140 7.3.0 application, exact-base delta and signed exact-profile self-update qualification.", "External full-image staging remains unsupported until flash-rail/reset behavior is corroborated."], "evidence": ["https://wiki.seeedstudio.com/sensecap_meshtracker_x1_meshcore/", "https://files.seeedstudio.com/wiki/SenseCAP/Meshcore/MeshTrackerX1/Bootloader.zip", "https://github.com/meshcore-dev/MeshCore/pull/3112", "https://github.com/meshcore-dev/MeshCore/pull/3139"]}
+    },
+    {
+      "id": "muzi_base", "label": "Muzi Base", "meshcoreHardware": ["muzi_base_duo", "muzi_base_duo_superIO", "muzi_base_uno", "muzi_base_uno_superIO"],
+      "reason": "A Muzi Base QSPI source port covers the four carrier variants with the real factory identity, LED polarity and flash pins. Physical DFU, flash and update qualification remains pending; no verified download is available.",
+      "qualification": {"status": "source-pending", "sourceBoard": "muzi_base", "storage": "qspi", "factoryIdentity": "verified", "hardwareQualified": false, "blockers": ["Physical carrier-variant, flash, USB/BLE and power-loss update qualification."], "evidence": ["https://github.com/muzi-works/Adafruit_nRF52_Bootloader/tree/master/src/boards/muzi_base"]}
+    },
+    {
+      "id": "nano_g2_ultra", "label": "Nano G2 Ultra", "meshcoreHardware": ["Nano_G2_Ultra"],
+      "reason": "A dedicated Nano G2 Ultra QSPI source port preserves designer-confirmed flash/buttons and factory USB identity. Physical single-button DFU, flash and update qualification is pending; no verified download is available.",
+      "qualification": {"status": "source-pending", "sourceBoard": "nano_g2_ultra", "storage": "qspi", "factoryIdentity": "verified", "hardwareQualified": false, "blockers": ["Physical single-button USB/BLE entry, flash and power-loss update qualification."], "evidence": ["https://wiki.bqvoy.com/meshtastic/nano_g2_ultra/nanog2ultra_19_jun_2023.pdf", "https://wiki.bqvoy.com/meshtastic/nano_g2_ultra/nano_g2_nrf52840_bootloader-0.6.4_s140_6.1.1.hex.zip"]}
+    },
+    {
+      "id": "thinknode_m4", "label": "ThinkNode M4", "meshcoreHardware": ["ThinkNode_M4"],
+      "reason": "M4 has a bespoke PCB and manufacturer-specified 2 MB external flash, but verified flash routing, factory bootloader identity and safe power/reset behavior are missing. An M3 profile or guessed internal-only definition is unsafe.",
+      "qualification": {"status": "source-blocked", "sourceBoard": null, "storage": "unknown", "factoryIdentity": "unverified", "hardwareQualified": false, "blockers": ["Factory USB descriptor, INFO_UF2 board identity and bootloader installation route.", "Actual 2 MB external-flash pin routing.", "Safe power/reset/rail behavior."], "evidence": ["https://github.com/meshcore-dev/MeshCore/pull/3463", "https://github.com/meshtastic/firmware/pull/8754", "https://static-cdn.elecrow.com/wiki/ThinkNode-M4_Power_Bank_LoRa_Device_with_Meshtastic_Function_Powered_By_nRF52840.html"]}
+    },
+    {
+      "id": "thinknode_m8", "label": "ThinkNode M8", "meshcoreHardware": ["ThinkNode_M8"],
+      "reason": "A V0.3 QSPI compile-only source port exists, but its factory USB identity and disputed power pin are unresolved. Its zero USB identity is an invalid compiler fixture, not a flashable image. No verified download is available.",
+      "qualification": {"status": "source-pending", "sourceBoard": "thinknode_m8", "storage": "qspi", "factoryIdentity": "unverified", "hardwareQualified": false, "blockers": ["Factory USB descriptor and INFO_UF2 board identity; replace invalid zero identity before any hardware use.", "Resolve P0.13 power-enable versus I2C rail and production hardware revision.", "Physical power/entry, flash and interrupted update qualification."], "evidence": ["https://github.com/meshcore-dev/MeshCore/pull/3180", "https://github.com/meshtastic/firmware/pull/11226"]}
+    },
+    {
+      "id": "wio_wm1110", "label": "Seeed Wio WM1110", "meshcoreHardware": ["wio_wm1110"],
+      "reason": "This target is the Wio WM1110 Dev Kit (SDK carrier), not Tracker 1110 or XIAO. Official installation is J-Link/SWD and its connector is CH340C USB-UART, not proven native-USB UF2. The official blank application starts at address zero, not an identified Adafruit factory bootloader layout. Exact bootloader/SoftDevice identity, UART recovery and NFC configuration still need verification.",
+      "qualification": {"status": "source-blocked", "sourceBoard": null, "storage": "unknown", "factoryIdentity": "unverified", "hardwareQualified": false, "blockers": ["Exact bootloader/SoftDevice identity and layout; confirmed J-Link/SWD installation alone does not establish factory UF2 identity.", "Safe Dev Kit UART transport/entry, recovery protocol and NFC configuration (CH340C UART0 TX P0.08/RX P0.06).", "Native USB reachability is unproven; do not treat CH340C USB-UART as UF2."], "evidence": ["https://wiki.seeedstudio.com/Get_Started_with_Wio-WM1110_Dev_Kit/", "https://github.com/Seeed-Studio/Seeed_Wio_WM1110_Dev_Board/blob/e34742993932c97731f513ffa3028d284b163d31/pca10056/blank/ses_blinky/wm1110_dev_kit_pca10056.emProject", "https://wiki.seeedstudio.com/Wio-WM1110_Dev_Kit/Introduction/", "https://github.com/meshcore-dev/MeshCore/pull/982"]}
+    }
   ]
 }

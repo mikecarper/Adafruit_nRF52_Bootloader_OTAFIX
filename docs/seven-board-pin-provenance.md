@@ -17,11 +17,11 @@ Review bots and generated PR summaries are not hardware evidence.
 | --- | --- | --- |
 | Nano G2 Ultra | Designer-authored Meshtastic pins match MeshCore and the published schematic. Factory HEX has USB identity **4251:8695**, unlike the generic application board JSON. | Add `nano_g2_ultra` as a source port with external flash, pending hardware qualification. |
 | Meshtiny | The manufacturer's Meshtastic port changes three flash pins to avoid encoder/buzzer conflicts. Manufacturer product and downloadable bootloader confirm external flash and MT001 identity. | Add `meshtiny` as a source port with external flash, pending hardware qualification. Do not alias GAT562. |
-| MeshTracker X1 | Both firmware projects agree on the active-high button and LEDs. MeshCore adds powered QSPI in a separate PR; Seeed's factory ZIP confirms **2886:0057**. | Need a dedicated profile. Keep unpublished until the flash rail and complete boot-time power/reset behavior are corroborated for the production revision. |
+| MeshTracker X1 | Both firmware projects agree on the active-high button and LEDs. MeshCore adds powered QSPI in a separate PR; Seeed's factory ZIP confirms **2886:0057**. | Dedicated internal-staging qualification source port added 2026-10-02, avoiding unverified QSPI/rail outputs. Keep unpublished until complete boot-time power/reset behavior and physical updates are qualified. |
 | ThinkNode M8 | Initial vendor V0.1 work and a newer V0.3-tested port establish the separate controls. M1's bootloader button would use M8's display-enable pin. | Add `thinknode_m8` as a compile-only source port, pending factory USB identity, power/entry verification and physical qualification. |
 | ThinkNode M4 | The port author explicitly says M4 has a bespoke MCU/radio PCB, rather than M3's module. Manufacturer says it has 2 MB external flash, but neither current firmware variant provides that flash map. | Need a dedicated profile. Do not infer M3 flash wiring; obtain the actual flash routing and factory bootloader identity. |
 | Wio WM1110 | MeshCore's original PR identifies the **Wio-WM1110 Dev Kit**, which matches Meshtastic's SDK carrier, not Tracker 1110 or XIAO. | Carrier identity is resolved. No existing OTAFIX alias fits. Verify the Dev Kit installation path and bootloader identity before adding a port. |
-| Heltec Mesh Solar | The same Heltec contributor introduced the original definitions and later reported a compatible watchdog hardware revision. Manufacturer pin map contradicts its Arduino BSP LED/button definitions. | Keep unpublished. Do not choose between the conflicting LED/flash definitions or reuse a T114/T1 profile. |
+| Heltec Mesh Solar | The same Heltec contributor introduced the original definitions and later reported a compatible watchdog hardware revision. Manufacturer pin map contradicts its Arduino BSP LED/button definitions. | Internal/no-LED/no-QSPI qualification port added 2026-10-02 using the confirmed carrier button and watchdog pulse. Keep unpublished; disputed indicator/flash/rail outputs remain unused. |
 
 None of these seven gained a released OTAFIX download from this research.
 The three new ports have `OTAFIX_BOARD_QUALIFICATION_PENDING ON`, so release
@@ -115,6 +115,14 @@ button-driven USB reset/DFU procedure. A generic double-reset instruction
 is therefore insufficient. No independent manufacturer flash-rail schematic
 was located in the checked documentation.
 
+Follow-up on 2026-10-02: a guarded **internal-staging** X1 source port now uses
+the confirmed factory identity, red/green LEDs, active-high button and S140
+7.3.0. It neither probes flash nor drives uncertain peripheral/power rails.
+This is a functional compiler/host-test candidate, not hardware qualification
+or a claim that the device lacks external flash. Its explicit test-mode/version
+guards and pending marker keep it out of normal/recovery downloads. See the
+[X1 qualification plan](meshtracker-x1-qualification.md) for exact limits.
+
 ## ThinkNode M8
 
 - MeshCore `3e828277066f`,
@@ -201,9 +209,16 @@ corroboration, not a manufacturer-issued bootloader qualification.
 
 The manufacturer's Dev Kit diagram places **CH340C USB-to-UART** on the USB
 connector. Thus even a correctly compiled nRF native-USB bootloader would
-not prove that UF2 drag-and-drop is available through that connector. The
-Dev Kit installation path, NFC configuration and correct bootloader identity
-need verification; a Tracker factory ZIP must not be offered for this target.
+not prove that UF2 drag-and-drop is available through that connector. A Tracker
+factory ZIP must not be offered for this target.
+
+Follow-up on 2026-10-02: the official [Dev Kit getting-started tutorial](https://wiki.seeedstudio.com/Get_Started_with_Wio-WM1110_Dev_Kit/)
+confirms **J-Link/SWD installation** and UART0 **TX P0.08 / RX P0.06** through
+CH340C. Its pinned [blank SES application project](https://github.com/Seeed-Studio/Seeed_Wio_WM1110_Dev_Board/blob/e34742993932c97731f513ffa3028d284b163d31/pca10056/blank/ses_blinky/wm1110_dev_kit_pca10056.emProject)
+links an application from address zero across 1 MiB, not an independently
+identified Adafruit factory USB/SoftDevice layout. The local install route is
+therefore known; exact bootloader/SoftDevice identity, safe UART recovery/entry
+and NFC configuration remain the source-port gates.
 
 ## Heltec Mesh Solar
 
@@ -239,6 +254,14 @@ Factory HT-n5262 HEX CF2 confirms **239A:0071**, but a common factory USB ID
 does not resolve the board's GPIO differences. A safe Solar port needs the
 exact carrier revision schematic, indicator type, actual staging storage and
 watchdog behavior during lengthy DFU before promotion.
+
+Follow-up on 2026-10-02: an internal-staging/no-LED/no-QSPI source candidate
+avoids those disputed outputs. It uses the carrier-confirmed P1.10 button,
+source-confirmed P0.09 watchdog DONE with the author's 1 ms pulse, and preserved
+factory HT-n5262 identity. The existing common watchdog support feeds throughout
+DFU and before flash apply. Explicit test-mode/version guards and the pending
+marker remain until the production revision's power/reset, waveform and update
+behavior are physically qualified. See the [Solar qualification plan](meshsolar-qualification.md).
 
 ## Verification scope
 

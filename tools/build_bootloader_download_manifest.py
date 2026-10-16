@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 
 from build_bootloader_mota_release import QUALIFIED_BOARDS, version_from_tag
+from check_board_coverage import validate_coverage
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -36,6 +37,9 @@ def build_manifest(release, mapping):
     aliases += [name for item in unavailable for name in item["meshcoreHardware"]]
     if len(aliases) != len(set(aliases)):
         raise ValueError("ambiguous hardware alias")
+    # Source additions must be represented without silently publishing untested
+    # hardware or presenting an external port as an internal app-compatible one.
+    coverage = validate_coverage(mapping)
     profiles = []
     for definition in definitions:
         board = definition["id"]
@@ -74,7 +78,7 @@ def build_manifest(release, mapping):
     return {"schemaVersion": 1, "repository": repo, "tag": tag,
             "version": label, "releaseUrl": release_url,
             "prerelease": bool(release.get("prerelease")), "profiles": profiles,
-            "unavailableProfiles": unavailable}
+            "unavailableProfiles": unavailable, "coverage": coverage}
 
 
 def main():

@@ -57,6 +57,38 @@ readback_internal_test: readback_test.c $(SRC)/ota_delta.c $(SRC)/detools/detool
 		readback_test.c $(SRC)/detools/detools.c $(SRC)/sha256.c \
 		$(SRC)/usb/uf2/bootloader_image.c -o $@
 
+X1_INTERNAL_FLAGS = -DOTA_DELTA_HOST_TEST -DMOTA_INTERNAL_BOOTLOADER_UPDATE \
+	-DMOTA_RAM_ARENA_SIZE=65536 -DMOTA_NRF52_APP_BASE=0x00027000u \
+	-DUSB_DESC_VID=0x2886 -DUSB_DESC_UF2_PID=0x0057 -DDEVICE_NAME='"X1INT_DFU"'
+readback_x1_internal_v7_test: readback_test.c $(SRC)/ota_delta.c $(SRC)/detools/detools.c \
+    $(SRC)/sha256.c $(SRC)/usb/uf2/bootloader_image.c $(SRC)/crc32.h \
+    $(SRC)/ota_hybrid_handoff.h $(SRC)/ota_ram_info.h $(SRC)/ota_layout.h
+	$(CC) $(CFLAGS) $(X1_INTERNAL_FLAGS) $(INC) readback_test.c \
+		$(SRC)/detools/detools.c $(SRC)/sha256.c $(SRC)/usb/uf2/bootloader_image.c -o $@
+bootloader_mota_x1_internal_v7_test: bootloader_mota_test.c $(SRC)/ota_delta.c \
+    $(SRC)/detools/detools.c $(SRC)/sha256.c $(SRC)/usb/uf2/bootloader_image.c \
+    $(SRC)/crc32.h $(SRC)/ota_hybrid_handoff.h $(SRC)/ota_ram_info.h $(SRC)/ota_layout.h
+	$(CC) $(CFLAGS) $(X1_INTERNAL_FLAGS) -DTEST_GENERIC_INTERNAL=1 \
+		-DTEST_HW_ID='"NRF_BL_28860057_X1INT_DFU"' -DTEST_TARGET_ID=0xCDDA9FF9u \
+		-DTEST_SOFTDEVICE_FWID=0x0123u $(INC) bootloader_mota_test.c \
+		$(SRC)/detools/detools.c $(SRC)/sha256.c $(SRC)/usb/uf2/bootloader_image.c -o $@
+
+SOLAR_INTERNAL_FLAGS = -DOTA_DELTA_HOST_TEST -DMOTA_INTERNAL_BOOTLOADER_UPDATE \
+	-DMOTA_RAM_ARENA_SIZE=65536 -DUSB_DESC_VID=0x239A -DUSB_DESC_UF2_PID=0x0071 \
+	-DDEVICE_NAME='"SOLARINT_DFU"'
+readback_solar_internal_test: readback_test.c $(SRC)/ota_delta.c $(SRC)/detools/detools.c \
+    $(SRC)/sha256.c $(SRC)/usb/uf2/bootloader_image.c $(SRC)/crc32.h \
+    $(SRC)/ota_hybrid_handoff.h $(SRC)/ota_ram_info.h $(SRC)/ota_layout.h
+	$(CC) $(CFLAGS) $(SOLAR_INTERNAL_FLAGS) $(INC) readback_test.c \
+		$(SRC)/detools/detools.c $(SRC)/sha256.c $(SRC)/usb/uf2/bootloader_image.c -o $@
+bootloader_mota_solar_internal_test: bootloader_mota_test.c $(SRC)/ota_delta.c \
+    $(SRC)/detools/detools.c $(SRC)/sha256.c $(SRC)/usb/uf2/bootloader_image.c \
+    $(SRC)/crc32.h $(SRC)/ota_hybrid_handoff.h $(SRC)/ota_ram_info.h $(SRC)/ota_layout.h
+	$(CC) $(CFLAGS) $(SOLAR_INTERNAL_FLAGS) -DTEST_GENERIC_INTERNAL=1 \
+		-DTEST_HW_ID='"NRF_BL_239A0071_SOLARINT_DFU"' -DTEST_TARGET_ID=0xA980F844u \
+		$(INC) bootloader_mota_test.c $(SRC)/detools/detools.c $(SRC)/sha256.c \
+		$(SRC)/usb/uf2/bootloader_image.c -o $@
+
 bootloader_image_recovery_test: override CFLAGS += -DRECOVERY_ALLOW_ALL_BOARDS=1
 bootloader_image_test bootloader_image_recovery_test: bootloader_image_test.c $(SRC)/usb/uf2/bootloader_image.c \
                        $(SRC)/usb/uf2/bootloader_image.h
@@ -295,12 +327,14 @@ check: apply_sim readback_test readback_test_v7 readback_internal_test bootloade
 	python3 ../tools/test_otafix_mota_update.py
 	python3 bootloader_mota_release_test.py
 	python3 bootloader_download_manifest_test.py
+	python3 board_coverage_test.py
 	python3 pending_board_profiles_test.py
 	python3 recovery_release_test.py
 	python3 recovery_release_provenance_test.py
 	python3 recovery_workflow_test.py
 	python3 ../tools/check_internal_bootloader_targets.py
 	python3 internal_bootloader_targets_test.py
+	python3 ../tools/check_board_coverage.py
 	@echo
 	./apply_sim vectors/base.img vectors/delta.mota vectors/new.img
 	@echo
@@ -309,6 +343,8 @@ check: apply_sim readback_test readback_test_v7 readback_internal_test bootloade
 	./readback_test_v7
 	@echo
 	./readback_internal_test
+	./readback_x1_internal_v7_test
+	./readback_solar_internal_test
 	@echo
 	./bootloader_image_test
 	./bootloader_image_recovery_test
@@ -325,6 +361,8 @@ check: apply_sim readback_test readback_test_v7 readback_internal_test bootloade
 	./bootloader_mota_recovery_test
 	@echo
 	./bootloader_mota_internal_test
+	./bootloader_mota_x1_internal_v7_test
+	./bootloader_mota_solar_internal_test
 	./bootloader_mota_rak_auto_3401_test
 	./bootloader_mota_rak_auto_4631_test
 	./bootloader_mota_rak_recovery_3401_test
@@ -369,6 +407,8 @@ sanitize:
 	$(MAKE) CFLAGS="$(SANITIZER_CFLAGS)" check
 
 clean:
+	rm -f readback_x1_internal_v7_test bootloader_mota_x1_internal_v7_test
+	rm -f readback_solar_internal_test bootloader_mota_solar_internal_test
 	rm -f tower_dual_sd_test tower_dual_internal_test tower_dual_boot_sd_test tower_dual_boot_internal_test
 	rm -f bootloader_mota_rak_auto_3401_test bootloader_mota_rak_auto_4631_test
 	rm -f bootloader_mota_rak_recovery_3401_test bootloader_mota_rak_recovery_4631_test
@@ -404,3 +444,5 @@ check: bootloader_mota_rak_recovery_3401_test bootloader_mota_rak_recovery_4631_
 check: uf2_volume_test
 check: check-tower-dual
 check: rak_auto_apply_4631_test rak_auto_apply_3401_test rak_auto_hybrid_4631_test rak_auto_hybrid_3401_test
+check: readback_x1_internal_v7_test bootloader_mota_x1_internal_v7_test
+check: readback_solar_internal_test bootloader_mota_solar_internal_test

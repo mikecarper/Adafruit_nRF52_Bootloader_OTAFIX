@@ -379,11 +379,31 @@ static void check_dfu_mode(void) {
 
   // With no application and no explicitly requested transport, briefly offer
   // USB first. If an active host does not enumerate us, fall back to BLE OTA.
-  bool const probe_usb = !valid_app && !_ota_dfu && !serial_only_dfu && !uf2_dfu && !double_reset;
+  bool probe_usb = !valid_app && !_ota_dfu && !serial_only_dfu && !uf2_dfu && !double_reset;
 
   if ((dfu_start || !valid_app) && !serial_only_dfu && !uf2_dfu && !double_reset && !probe_usb) {
     _ota_dfu = true; // set default to OTA only when no explicit UF2/serial/dbl-reset
   }
+
+#if defined(BUTTON_DFU_PROBE_USB) && BUTTON_DFU_PROBE_USB == 1 && defined(BUTTON_DFU)
+  // X1's documented held-button + USB entry must reach UF2/CDC. Use the existing
+  // serviced USB probe rather than a one-shot cold VBUS sample, then fall back
+  // to BLE when no host arrives. Explicit application transport requests win.
+  dfu_single_button_route_t const button_route = dfu_entry_single_button_route(
+    gpregret == DFU_MAGIC_OTA_APPJUM || gpregret == DFU_MAGIC_OTA_RESET,
+    serial_only_dfu || uf2_dfu, double_reset, button_pressed(BUTTON_DFU));
+  bool const single_button_probe = button_route == DFU_SINGLE_BUTTON_USB_PROBE;
+  if (button_route == DFU_SINGLE_BUTTON_USB_PROBE) {
+    _ota_dfu = false;
+    probe_usb = true;
+  } else if (button_route == DFU_SINGLE_BUTTON_USB) {
+    _ota_dfu = false;
+  } else if (button_route == DFU_SINGLE_BUTTON_BLE) {
+    _ota_dfu = true;
+  }
+#else
+  bool const single_button_probe = false;
+#endif
 
   // Enter DFU mode accordingly to input
   if (dfu_start || !valid_app) {
@@ -422,13 +442,14 @@ static void check_dfu_mode(void) {
     }
 
     // Initiate an update of the firmware.
-    if (app_single_tap || uf2_dfu || serial_only_dfu) {
+    if ((app_single_tap || uf2_dfu || serial_only_dfu) && !single_button_probe) {
       // Explicit 0x4E/0x57 entry gets the complete host-enumeration window;
       // MakeCode-style single-tap entry intentionally remains brief.
       uint32_t const timeout_ms = dfu_buttonless_timeout_ms(serial_only_dfu, uf2_dfu);
       bootloader_dfu_start(_ota_dfu, timeout_ms, true);
     } else {
       // No timeout if bootloader requires user action (double-reset). A
+      // real held X1 button also overrides MakeCode's brief single-tap timeout.
       // no-application USB probe still exits when VBUS is removed so the next
       // reset can fall back to BLE recovery without requiring a reset button.
       bootloader_dfu_start(_ota_dfu, 0, probe_usb);
