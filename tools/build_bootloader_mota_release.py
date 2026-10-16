@@ -27,9 +27,15 @@ LEGACY_RAK_PROFILES = frozenset((
 RETIRED_NORMAL_PROFILES = frozenset(("heltec_mesh_tower_v2",))
 
 
+def source_directories(root: Path) -> tuple[Path, ...]:
+    """Ignore empty directories left by Git branch switches, never partial ports."""
+    return tuple(path for path in sorted(root.iterdir())
+                 if path.is_dir() and any(path.iterdir()))
+
+
 def pending_boards(root: Path = Path(__file__).resolve().parents[1] / "src" / "boards") -> frozenset[str]:
     """Build source-verified ports in CI without publishing untested board images."""
-    return frozenset(path.name for path in root.iterdir() if path.is_dir() and
+    return frozenset(path.name for path in source_directories(root) if
                      "set(OTAFIX_BOARD_QUALIFICATION_PENDING ON)" in
                      (path / "board.cmake").read_text(encoding="ascii"))
 
@@ -37,7 +43,7 @@ def pending_boards(root: Path = Path(__file__).resolve().parents[1] / "src" / "b
 def release_boards(root: Path = Path(__file__).resolve().parents[1] / "src" / "boards") -> tuple[str, ...]:
     """Require complete release coverage, never silently omit a new board."""
     boards = []
-    for directory in sorted(path for path in root.iterdir() if path.is_dir()):
+    for directory in source_directories(root):
         cmake = (directory / "board.cmake").read_text(encoding="ascii")
         make = (directory / "board.mk").read_text(encoding="ascii")
         # The reviewed RAK4631 exception keeps the historical adaptive identity
@@ -101,7 +107,7 @@ PENDING_BOARDS = pending_boards()
 def ci_boards(*, production: bool = False) -> tuple[str, ...]:
     """Compile pending ports only in qualification CI, not production builds."""
     root = Path(__file__).resolve().parents[1] / "src" / "boards"
-    return tuple(path.name for path in sorted(root.iterdir()) if path.is_dir() and
+    return tuple(path.name for path in source_directories(root) if
                  (not production or path.name not in PENDING_BOARDS))
 
 

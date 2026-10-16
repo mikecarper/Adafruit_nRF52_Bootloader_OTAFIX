@@ -37,7 +37,7 @@ class Targets(unittest.TestCase):
                 wrong = struct.pack('<II', 0x20030000, 0x1001)+bytes(248)
                 with self.assertRaises(ValueError):
                     init_packet(wrong, **profile)
-        board_count = sum(path.is_dir() for path in (ROOT / "src/boards").iterdir())
+        board_count = sum((path / "board.cmake").is_file() for path in (ROOT / "src/boards").iterdir())
         self.assertEqual(len(ids), board_count)
         self.assertEqual(hardware_version('wiscore_rak3401'), 0x3401)
 

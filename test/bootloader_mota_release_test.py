@@ -62,7 +62,7 @@ def define_hex(text: str, key: str) -> int:
 
 class QualifiedReleaseInventoryTest(unittest.TestCase):
     def test_inventory_covers_every_release_board(self) -> None:
-        boards = {path.name for path in (ROOT / "src" / "boards").iterdir() if path.is_dir()}
+        boards = {path.name for path in release.source_directories(ROOT / "src" / "boards")}
         self.assertEqual(set(release.QUALIFIED_BOARDS), boards - release.LEGACY_RAK_PROFILES - release.RETIRED_NORMAL_PROFILES - release.PENDING_BOARDS)
         self.assertEqual(len(release.QUALIFIED_BOARDS), len(boards) - 6 - len(release.PENDING_BOARDS))
         self.assertEqual({name for name in release.QUALIFIED_BOARDS if name.startswith("wiscore_rak")},
@@ -100,6 +100,17 @@ class QualifiedReleaseInventoryTest(unittest.TestCase):
             (board / "board.cmake").write_text("set(MCU_VARIANT nrf52840)\n")
             (board / "board.mk").write_text("")
             with self.assertRaisesRegex(ValueError, "missing exact"):
+                release.release_boards(root)
+
+    def test_empty_git_leftover_is_ignored_but_partial_port_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            board = root / "retired_empty_directory"
+            board.mkdir()
+            self.assertEqual((), release.source_directories(root))
+            (board / "board.h").write_text("/* incomplete new source port */\n")
+            self.assertEqual((board,), release.source_directories(root))
+            with self.assertRaises(FileNotFoundError):
                 release.release_boards(root)
 
     def test_adaptive_profile_requires_matching_make_and_qspi_flags(self) -> None:
