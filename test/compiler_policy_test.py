@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
-"""Host-only qualification of exact RAK compiler selection and LTO flags."""
+"""Host-only qualification of shared compiler selection and RAK LTO flags."""
 from pathlib import Path
 import os
+import json
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tools"))
+import compiler_policy
 FLAGS = ("-fno-schedule-insns", "-fno-schedule-insns2", "-fno-code-hoisting",
          "-fno-tree-ter", "-fno-tree-dominator-opts", "-fno-tree-tail-merge",
          "-fno-optimize-sibling-calls", "-fno-if-conversion", "-mbranch-cost=3",
          "-fno-tree-loop-im", "-fno-early-inlining")
 RAK = "wiscore_rak4631_auto"
-CI_RELEASE = "${{ matrix.board == 'wiscore_rak4631_auto' && '15.3.Rel1' || '14.2.Rel1' }}"
 
 
 class CompilerPolicyTests(unittest.TestCase):
@@ -28,6 +31,9 @@ class CompilerPolicyTests(unittest.TestCase):
         cls.compiler.write_text("#!" + sys.executable + "\nimport os\n"
                                 "print(os.environ['OTAFIX_FAKE_GCC_VERSION'])\n")
         cls.compiler.chmod(0o755)
+        cls.tool_bin = cls.work / "selected-bin"
+        cls.tool_bin.mkdir()
+        (cls.tool_bin / "arm-none-eabi-gcc").symlink_to(cls.compiler)
         cls.script = cls.work / "compiler-policy.cmake"
         cls.script.write_text('include("' + (ROOT / "cmake/mota_compiler_policy.cmake").as_posix() + '")\n'
                               'mota_require_arm_gcc("${TEST_ID}" "${TEST_VERSION}")\n'
@@ -38,11 +44,11 @@ class CompilerPolicyTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.temp.cleanup()
 
-    def cmake_policy(self, board, version, *, combined=False, compiler="GNU"):
+    def cmake_policy(self, board, version, *, combined=False, compiler="GNU", extra=()):
         return subprocess.run(["cmake", "-DBOARD=" + board, "-DTEST_ID=" + compiler,
                                "-DTEST_VERSION=" + version,
                                "-DMOTA_RAK_SD_STORE=" + ("ON" if combined else "OFF"),
-                               "-P", str(self.script)], capture_output=True, text=True, timeout=15)
+                               *extra, "-P", str(self.script)], capture_output=True, text=True, timeout=15)
 
     def make_variable(self, name, *, board=RAK, version="15.3.1", recovery=False,
                       test_version="0x02040B7E", git_tag=None):
@@ -138,12 +144,116 @@ class CompilerPolicyTests(unittest.TestCase):
         unchanged = self.make_variable("CFLAGS", board="wiscore_rak3401_auto", version="14.2.1")
         self.assertNotIn(FLAGS[0], unchanged.stdout)
 
-    def test_ci_selects_new_compiler_only_for_exact_rak_in_both_matrices(self):
+    def test_ci_selects_each_board_from_the_shared_table(self):
         for name in ("githubci.yml", "recovery.yml"):
             workflow = (ROOT / ".github/workflows" / name).read_text()
-            self.assertEqual(1, workflow.count("release: " + CI_RELEASE))
-            self.assertIn("release: '14.2.Rel1'", workflow)
+            self.assertIn("tools/compiler_policy.py --board '${{ matrix.board }}'", workflow)
+            self.assertIn("release: ${{ steps.compiler.outputs.release }}", workflow)
+            self.assertNotIn("matrix.board == 'wiscore_rak4631_auto' &&", workflow)
+        workflow = (ROOT / ".github/workflows/githubci.yml").read_text()
+        self.assertIn("board: [heltec_t096, heltec_t114]", workflow)
+        self.assertEqual(2, workflow.count("release: ${{ steps.compiler.outputs.release }}"))
         self.assertIn("ARG ARM_GNU_RELEASE=14.2.rel1", (ROOT / "Dockerfile").read_text())
+
+    def test_policy_table_contains_only_known_boards_and_qualified_releases(self):
+        policy = json.loads(compiler_policy.POLICY_PATH.read_text())
+        self.assertEqual("14.2.Rel1", policy["default_release"])
+        self.assertEqual("15.3.Rel1", compiler_policy.preferred_release(RAK))
+        for board, release in policy["board_releases"].items():
+            self.assertTrue((ROOT / "src/boards" / board / "board.mk").is_file(), board)
+            self.assertIn(release, ("14.2.Rel1", "15.3.Rel1"))
+
+    def test_default_make_resolves_selected_family_and_rejects_unqualified_path(self):
+        env = os.environ.copy()
+        env["ARM_GNU_TOOLCHAIN_15_3"] = str(self.tool_bin)
+        env["OTAFIX_FAKE_GCC_VERSION"] = "15.3.1"
+        command = ["make", "--no-print-directory", "BOARD=" + RAK,
+                   "PYTHON=" + sys.executable, "MOTA_BOOTLOADER_TEST_BUILD=1",
+                   "MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE=0x02040B7E", "print-CC"]
+        accepted = subprocess.run(command, cwd=ROOT, env=env, capture_output=True, text=True)
+        self.assertEqual(0, accepted.returncode, accepted.stderr)
+        self.assertIn(str(self.tool_bin / "arm-none-eabi-gcc"), accepted.stdout)
+        env["OTAFIX_FAKE_GCC_VERSION"] = "16.2.0"
+        rejected = subprocess.run(command, cwd=ROOT, env=env, capture_output=True, text=True)
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertIn("selects Arm GNU 15.3.Rel1; found 16.2.0", rejected.stderr)
+        self.assertIn("ARM_GNU_TOOLCHAIN_15_3", rejected.stderr)
+
+    def test_missing_optional_install_root_falls_back_to_matching_path(self):
+        env = os.environ.copy()
+        env.update(ARM_GNU_TOOLCHAIN_15_3=str(self.work / "not-installed"),
+                   OTAFIX_FAKE_GCC_VERSION="15.3.2",
+                   PATH=str(self.tool_bin) + os.pathsep + env["PATH"])
+        result = subprocess.run([sys.executable, str(ROOT / "tools/compiler_policy.py"),
+                                 "--board", RAK, "--field", "prefix"],
+                                env=env, capture_output=True, text=True)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(str(self.tool_bin / "arm-none-eabi-"), result.stdout.strip())
+
+    def test_windows_executable_suffix_is_removed_before_selecting_sibling_tools(self):
+        for suffix in ("gcc.exe", "gcc.EXE", "gcc.Exe"):
+            compiler = "C:/Arm/bin/arm-none-eabi-" + suffix
+            with self.subTest(suffix=suffix), \
+                 mock.patch.object(compiler_policy.shutil, "which", return_value=compiler), \
+                 mock.patch.object(compiler_policy, "compiler_version", return_value=((15, 3), "15.3.1")):
+                self.assertEqual("C:/Arm/bin/arm-none-eabi-", compiler_policy.toolchain_prefix(RAK))
+
+    def test_default_make_runs_compiler_from_installation_with_spaces(self):
+        root = self.work / "qualified tools"
+        directory = root / "bin"
+        directory.mkdir(parents=True)
+        (directory / "arm-none-eabi-gcc").symlink_to(self.compiler)
+        env = os.environ.copy()
+        env.update(ARM_GNU_TOOLCHAIN_15_3=str(root), OTAFIX_FAKE_GCC_VERSION="15.3.1")
+        command = ["make", "--no-print-directory", "BOARD=" + RAK,
+                   "PYTHON=" + sys.executable, "MOTA_BOOTLOADER_TEST_BUILD=1",
+                   "MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE=0x02040B7E", "print-CC",
+                   "print-ARM_GCC_VERSION"]
+        result = subprocess.run(command, cwd=ROOT, env=env, capture_output=True, text=True)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("CC = " + str(directory / "arm-none-eabi-gcc"), result.stdout)
+        self.assertIn("ARM_GCC_VERSION = 15.3.1", result.stdout)
+
+    def test_cmake_resolves_a_relative_qualification_prefix_on_path(self):
+        with mock.patch.dict(os.environ, {"PATH": str(self.tool_bin) + os.pathsep + os.environ["PATH"]}):
+            result = self.cmake_policy(RAK, "15.3.1", combined=True,
+                                      extra=("-DARM_GNU_SELECTED_PREFIX=arm-none-eabi-",
+                                             "-DCMAKE_C_COMPILER=" + str(self.tool_bin / "arm-none-eabi-gcc")))
+        self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_ordinary_environment_cc_does_not_bypass_the_selected_compiler(self):
+        old_bin = self.work / "old-path-bin"
+        old_bin.mkdir()
+        old_compiler = old_bin / "arm-none-eabi-gcc"
+        old_compiler.write_text("#!" + sys.executable + "\nprint('14.2.1')\n")
+        old_compiler.chmod(0o755)
+        env = os.environ.copy()
+        env.update(CC="gcc", ARM_GNU_TOOLCHAIN_15_3=str(self.tool_bin),
+                   OTAFIX_FAKE_GCC_VERSION="15.3.1",
+                   PATH=str(old_bin) + os.pathsep + env["PATH"])
+        command = ["make", "--no-print-directory", "BOARD=" + RAK,
+                   "PYTHON=" + sys.executable, "MOTA_BOOTLOADER_TEST_BUILD=1",
+                   "MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE=0x02040B7E", "print-CC",
+                   "print-ARM_GCC_VERSION"]
+        result = subprocess.run(command, cwd=ROOT, env=env, capture_output=True, text=True)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("CC = " + str(self.tool_bin / "arm-none-eabi-gcc"), result.stdout)
+        self.assertIn("ARM_GCC_VERSION = 15.3.1", result.stdout)
+
+    def test_cmake_rejects_cached_compiler_after_selection_changes(self):
+        result = self.cmake_policy(RAK, "15.3.1", combined=True,
+                                   extra=("-DARM_GNU_SELECTED_PREFIX=" + str(self.tool_bin / "arm-none-eabi-"),
+                                          "-DCMAKE_C_COMPILER=/cached/arm-none-eabi-gcc"))
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("fresh build directory", " ".join(result.stderr.split()))
+
+    def test_gnu_c17_does_not_reach_assembly(self):
+        cflags = self.make_variable("CFLAGS")
+        assembly = self.make_variable("ASFLAGS")
+        self.assertIn("-std=gnu17", cflags.stdout)
+        self.assertNotIn("-std=", assembly.stdout)
+        cmake = (ROOT / "CMakeLists.txt").read_text()
+        self.assertIn("$<$<COMPILE_LANGUAGE:C>:-std=gnu17>", cmake)
 
     def test_cmake_rak_production_labels_keep_complete_version_with_fixed_length(self):
         for tag, packed in (("0.11.0-OTAFIX2.4.11-preview.1", "0x02040B01"),

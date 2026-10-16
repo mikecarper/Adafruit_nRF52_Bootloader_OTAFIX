@@ -82,8 +82,9 @@ The combined profile requires Arm GNU Toolchain **15.3.Rel1** with the
 profile-specific, standards-conforming size options in
 `cmake/mota_compiler_policy.cmake` and `Makefile`. No constant-object merging,
 flash-boundary expansion or validation removal is used. Other profiles retain
-their GCC 14.2 baseline. CI selects the matching compiler, and Docker can
-select it with `--build-arg ARM_GNU_RELEASE=15.3.rel1`.
+their board-qualified compiler from `tools/compiler_policy.json`. CI selects
+the matching compiler, and the default Docker image includes both qualified
+releases for mixed all-board builds.
 
 The normal production USB/BLE version text is the complete packed identifier
 `BL_0xXXXXXXXX`, including major, minor, patch and release channel. Full Git

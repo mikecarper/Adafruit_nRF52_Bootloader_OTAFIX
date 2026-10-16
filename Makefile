@@ -184,14 +184,36 @@ UF2_FAMILY_ID_BOOTLOADER = 0xd663823c
 # Tool Configure
 #------------------------------------------------------------------------------
 
+# Default builds use the board-qualified release shared with CMake and CI.
+# Effective CC/CROSS_COMPILE overrides remain available for qualification.
+# Ordinary environment/file CC values are overwritten below, as before.
+ARM_GCC_PREFERRED := $(shell $(PYTHON) tools/compiler_policy.py --board "$(BOARD)")
+ARM_GCC_EFFECTIVE_CC_OVERRIDE :=
+ifeq ($(origin CC),command line)
+  ARM_GCC_EFFECTIVE_CC_OVERRIDE := 1
+endif
+ifeq ($(origin CC),override)
+  ARM_GCC_EFFECTIVE_CC_OVERRIDE := 1
+endif
+ifeq ($(origin CC),environment override)
+  ARM_GCC_EFFECTIVE_CC_OVERRIDE := 1
+endif
+ifeq ($(origin CROSS_COMPILE),undefined)
+  ifneq ($(ARM_GCC_EFFECTIVE_CC_OVERRIDE),1)
+    CROSS_COMPILE := $(shell $(PYTHON) tools/compiler_policy.py --board "$(BOARD)" --field prefix)
+    ifeq ($(CROSS_COMPILE),)
+      $(error Board-qualified Arm GNU $(ARM_GCC_PREFERRED) is unavailable; see compiler selection hint above)
+    endif
+  endif
+endif
+
 # Toolchain commands
-# Should be added to your PATH
 CROSS_COMPILE ?= arm-none-eabi-
-CC      = $(CROSS_COMPILE)gcc
-AS      = $(CROSS_COMPILE)as
-OBJCOPY = $(CROSS_COMPILE)objcopy
-SIZE    = $(CROSS_COMPILE)size
-GDB     = $(CROSS_COMPILE)gdb
+CC      = "$(CROSS_COMPILE)gcc"
+AS      = "$(CROSS_COMPILE)as"
+OBJCOPY = "$(CROSS_COMPILE)objcopy"
+SIZE    = "$(CROSS_COMPILE)size"
+GDB     = "$(CROSS_COMPILE)gdb"
 
 ARM_GCC_VERSION := $(shell $(CC) -dumpfullversion -dumpversion 2>$(NULL_DEVICE))
 ARM_GCC_MINIMUM := 14.2
@@ -490,6 +512,7 @@ IPATH += \
 # in-place delta. NOTE: LTO REQUIRES ota_delta.c's volatile fl_read (the in-place readback aliases the
 # nrfx flash write through a cast pointer; without volatile, LTO caches a stale read -> apply refused).
 CFLAGS += \
+	-std=gnu17 \
 	-mthumb \
 	-mabi=aapcs \
 	-mcpu=cortex-m4 \
@@ -611,7 +634,7 @@ CFLAGS += -DDFU_APP_DATA_RESERVED=$(DFU_APP_DATA_RESERVED)
 #------------------------------------------------------------------------------
 
 # Exact all-in-one RAK4631 pass choices must also reach the LTO link via CFLAGS.
-# Keep other boards, and their existing GCC 14.2 qualification, unchanged.
+# Other boards use the normal size options with their qualified compiler.
 ifneq ($(call mota_feature_flag,MOTA_RAK_SD_STORE),)
 CFLAGS += -fno-schedule-insns -fno-schedule-insns2 -fno-code-hoisting \
   -fno-tree-ter -fno-tree-dominator-opts -fno-tree-tail-merge \
@@ -643,7 +666,7 @@ LIBS += -lm -lc
 # Assembler flags
 #------------------------------------------------------------------------------
 
-ASFLAGS += $(CFLAGS)
+ASFLAGS += $(filter-out -std=%,$(CFLAGS))
 
 # Keep intermediates version-scoped, then guard that tree with a content-hashed
 # build profile. GNU Make tracks source timestamps, but it does not notice that

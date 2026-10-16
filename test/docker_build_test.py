@@ -36,23 +36,26 @@ curl() {
 sha256sum() {
     read -r digest filename
     printf 'verify:%s:%s\n' "$digest" "$filename"
-    test "$digest" = "$OTAFIX_TEST_HASH" || return 1
+    test "$digest" = "$OTAFIX_TEST_HASH" || test "$digest" = "$OTAFIX_TEST_HASH_OTHER" || return 1
     test "$OTAFIX_TEST_HASH_FAIL" = 0
 }
 mkdir() { printf 'mkdir:%s\n' "$*"; }
 tar() { printf 'extract:%s\n' "$*"; }
 rm() { printf 'remove:%s\n' "$*"; }
+ln() { printf 'link:%s\n' "$*"; }
 """
 
 
 class DockerBuildTest(unittest.TestCase):
-    def run_installer(self, arch, *, bad_hash=False, download_failure=False, release="14.2.rel1"):
+    def run_installer(self, arch, *, bad_hash=False, download_failure=False, release="14.2.rel1", both=False):
         shell = shutil.which("sh")
         if shell is None:
             self.skipTest("POSIX shell is required for the Docker RUN test")
         hashes = HASHES_15_3 if release == "15.3.rel1" else HASHES
         env = dict(os.environ, OTAFIX_TEST_ARCH=arch, ARM_GNU_RELEASE=release,
+                   ARM_GNU_INSTALL_BOTH=str(int(both)),
                    OTAFIX_TEST_HASH=hashes.get(arch, "unsupported"),
+                   OTAFIX_TEST_HASH_OTHER=HASHES_15_3.get(arch, "unsupported") if both else "unused",
                    OTAFIX_TEST_HASH_FAIL=str(int(bad_hash)),
                    OTAFIX_TEST_CURL_FAIL=str(int(download_failure)))
         return subprocess.run([shell, "-c", HARMLESS_TOOLS + INSTALL],
@@ -93,6 +96,16 @@ class DockerBuildTest(unittest.TestCase):
         self.assertNotEqual(0, result.returncode)
         self.assertIn("ARM_GNU_RELEASE must be", result.stderr)
         self.assertNotIn("download:", result.stdout)
+
+    def test_default_image_installs_both_qualified_compilers_and_exports_roots(self):
+        self.assertIn("ARG ARM_GNU_INSTALL_BOTH=1", DOCKERFILE)
+        for arch in ("amd64", "arm64"):
+            result = self.run_installer(arch, both=True)
+            self.assertEqual(0, result.returncode, result.stderr)
+            for digest in (HASHES[arch], HASHES_15_3[arch]):
+                self.assertIn("verify:" + digest, result.stdout)
+        self.assertIn('ENV ARM_GNU_TOOLCHAIN_14_2="/opt/arm-gnu-toolchains/14.2.rel1"', DOCKERFILE)
+        self.assertIn('ENV ARM_GNU_TOOLCHAIN_15_3="/opt/arm-gnu-toolchains/15.3.rel1"', DOCKERFILE)
 
     def test_failed_download_never_verifies_or_extracts(self):
         result = self.run_installer("arm64", download_failure=True)

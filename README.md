@@ -619,28 +619,42 @@ update; neither a name nor a shared USB VID/PID alone identifies an exact board.
 
 ## Building from source (Docker)
 
-The Docker environment defaults to Arm GNU Toolchain **14.2.Rel1**, with pinned
-archive checksums for Linux x86_64 and AArch64. It includes both Make and
+The Docker environment installs Arm GNU Toolchains **14.2.Rel1 and 15.3.Rel1**,
+with pinned archive checksums for Linux x86_64 and AArch64. It includes Make and
 CMake, Node.js for CF2 inspection, and the Python DFU/signing dependencies.
 The firmware sources and initialized submodules come from your mounted
 checkout, not from a separately downloaded source tree.
 
 The Debian 13 base supplies a modern native sanitizer runtime for host tests.
-The ARM firmware compiler is still the separately downloaded, checksum-pinned
-14.2.Rel1 toolchain.
+The ARM firmware compilers are separately downloaded and checksum pinned.
 
-The combined `wiscore_rak4631_auto` profile requires **15.3.Rel1 or newer**
-for both normal and recovery builds; other boards retain the 14.2 minimum.
-Select the checksum-pinned newer Docker toolchain explicitly:
+Make, CMake, CI and `tools/build_all.py` select each board's qualified compiler
+from `tools/compiler_policy.json`. The selection applies to normal, recovery,
+and display feature builds. C sources use GNU C17 with both compiler releases.
+All current boards select 15.3.Rel1 after the complete board comparison.
+See [GCC 15 board qualification](docs/gcc15-board-qualification.md) for the
+per-board size comparisons and validation limits.
+The combined `wiscore_rak4631_auto` profile also requires at least 15.3 for
+explicit compiler qualification builds, retaining its complete update features.
+Both compilers are available in the default image, so an all-board build can
+select the appropriate release for every board.
+
+For a smaller image containing only one compiler, use:
 
 ```sh
-docker build --build-arg ARM_GNU_RELEASE=15.3.rel1 -t otafix-rak-sd .
+docker build --build-arg ARM_GNU_INSTALL_BOTH=0 \
+  --build-arg ARM_GNU_RELEASE=15.3.rel1 -t otafix-gcc15 .
 ```
 
-Use that image for this RAK profile or an all-board build. The default 14.2
-image rejects an all-board run before clearing outputs if the combined RAK
-profile is selected; intentionally omitting it requires
-`--exclude-board wiscore_rak4631_auto` in `tools/build_all.py`.
+On a native host, set `ARM_GNU_TOOLCHAIN_14_2` and `ARM_GNU_TOOLCHAIN_15_3` to
+their installation directories, or put a board's selected compiler on `PATH`.
+Default builds reject a different compiler family with an installation hint.
+The all-board helper checks all selected compilers before clearing outputs.
+Use a fresh CMake build directory when a board's selected compiler changes.
+For controlled compiler comparisons, Make accepts an explicit `CROSS_COMPILE`
+prefix, CMake accepts `-DARM_GNU_PREFIX=/path/to/arm-none-eabi-`, and the all-board
+helper accepts `--compiler-release 15.3.Rel1`. These overrides retain the
+minimum compiler guards; they do not change the qualified compiler table.
 
 To keep that combined RAK inside the fixed bootloader space, its production
 UF2 information and BLE firmware text use `BL_0xXXXXXXXX`: the complete packed

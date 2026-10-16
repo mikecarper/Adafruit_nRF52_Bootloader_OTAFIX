@@ -362,10 +362,10 @@ class BuildProfileTest(unittest.TestCase):
             self.assertIn("set(MOTA_INTERNAL_BOOTLOADER_UPDATE ON)", cmake)
             self.assertNotIn("set(MOTA_INTERNAL_BOOTLOADER_UPDATE OFF)", cmake)
 
-    def test_ci_pins_gcc_14_2_and_builds_the_tightest_profiles(self) -> None:
+    def test_ci_uses_board_compiler_policy_and_builds_the_tightest_profiles(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
-        self.assertEqual(1, workflow.count("release: '14.2.Rel1'"))
-        self.assertIn("matrix.board == 'wiscore_rak4631_auto' && '15.3.Rel1' || '14.2.Rel1'", workflow)
+        self.assertEqual(2, workflow.count("release: ${{ steps.compiler.outputs.release }}"))
+        self.assertIn("tools/compiler_policy.py --board '${{ matrix.board }}'", workflow)
         self.assertIn('_build/signed-dualbank-$board', workflow)
         self.assertIn('cmake-build-signed-dualbank-$board', workflow)
 

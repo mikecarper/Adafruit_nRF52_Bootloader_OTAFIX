@@ -14,6 +14,7 @@ from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tools"))
 SPEC = importlib.util.spec_from_file_location(
     "otafix_build_all", ROOT / "tools" / "build_all.py"
 )
@@ -24,26 +25,27 @@ SPEC.loader.exec_module(BUILD_ALL)
 
 
 class BuildAllTest(unittest.TestCase):
-    def test_toolchain_preflight_uses_the_selected_board_set(self) -> None:
-        for version, boards, accepted in (
-            ("14.2.1", ["heltec_t096", "wiscore_rak3401_auto"], True),
-            ("14.2.1", ["wiscore_rak4631_auto"], False),
-            ("15.2.1", ["wiscore_rak4631_auto"], False),
-            ("15.3.1", ["wiscore_rak4631_auto"], True),
-        ):
-            result = subprocess.CompletedProcess([], 0, stdout=version)
-            with self.subTest(version=version, boards=boards), \
-                 mock.patch.object(BUILD_ALL.shutil, "which", side_effect=lambda name: name), \
-                 mock.patch.object(BUILD_ALL.subprocess, "run", return_value=result):
-                if accepted:
-                    self.assertEqual(version, BUILD_ALL.require_toolchain(boards)[1])
-                else:
-                    with self.assertRaisesRegex(RuntimeError, "ARM_GNU_RELEASE=15.3.rel1"):
-                        BUILD_ALL.require_toolchain(boards)
+    def test_toolchain_preflight_resolves_and_reuses_each_selected_release(self) -> None:
+        boards = ["heltec_t096", "heltec_t114", "wiscore_rak4631_auto"]
+        with mock.patch.object(BUILD_ALL, "preferred_release", side_effect=lambda board:
+                               "15.3.Rel1" if board == boards[-1] else "14.2.Rel1"), \
+             mock.patch.object(BUILD_ALL, "toolchain_prefix", side_effect=lambda board, release:
+                               "/" + release + "/arm-none-eabi-") as prefixes, \
+             mock.patch.object(BUILD_ALL.shutil, "which", side_effect=lambda name: name), \
+             mock.patch.object(BUILD_ALL, "compiler_version", side_effect=lambda compiler:
+                               ((15, 3), "15.3.1") if "15.3" in compiler else ((14, 2), "14.2.1")):
+            result = BUILD_ALL.require_toolchains(boards)
+        self.assertEqual(2, prefixes.call_count)
+        self.assertEqual(result[boards[0]], result[boards[1]])
+        self.assertIn("15.3.Rel1", result[boards[-1]][0])
+
+    def test_override_keeps_the_combined_rak_minimum(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "15.3.Rel1"):
+            BUILD_ALL.require_toolchains(["wiscore_rak4631_auto"], "14.2.Rel1")
 
     def test_bad_compiler_is_rejected_before_any_output_cleanup_or_board_job(self) -> None:
         with mock.patch.object(sys, "argv", ["build_all.py"]), \
-             mock.patch.object(BUILD_ALL, "require_toolchain", side_effect=RuntimeError("compiler too old")) as check, \
+             mock.patch.object(BUILD_ALL, "require_toolchains", side_effect=RuntimeError("compiler unavailable")) as check, \
              mock.patch.object(BUILD_ALL.shutil, "rmtree") as remove, \
              mock.patch.object(BUILD_ALL, "build_board") as build, \
              mock.patch.object(sys, "stderr", io.StringIO()):
@@ -79,6 +81,7 @@ class BuildAllTest(unittest.TestCase):
             (build / "secure.out").write_bytes(b"test")
             def fake_run(command, **kwargs):
                 self.assertIn("SECURE_DFU_TEST=1", command)
+                self.assertIn("CROSS_COMPILE=/qualified/arm-none-eabi-", command)
                 self.assertIn("RECOVERY_ALLOW_ALL_BOARDS=0", command)
                 self.assertIn("MOTA_BOOTLOADER_TEST_BUILD=1", command)
                 output = "OUT_NAME = secure\n" if command[-1] == "print-OUT_NAME" else "built\n"
@@ -86,7 +89,8 @@ class BuildAllTest(unittest.TestCase):
             with mock.patch.object(BUILD_ALL.subprocess, "run", side_effect=fake_run), \
                  mock.patch.object(BUILD_ALL, "image_sizes", return_value=(40000, 35000)):
                 result = BUILD_ALL.build_board("heltec_t096", 1, "0x02040709", "size", root,
-                                               secure_dfu_test=True)
+                                               secure_dfu_test=True,
+                                               compiler_prefix="/qualified/arm-none-eabi-")
             self.assertTrue(result[1], result[-1])
 
     def test_recovery_defaults_are_isolated_and_opt_in(self) -> None:

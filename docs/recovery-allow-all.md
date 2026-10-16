@@ -106,8 +106,11 @@ been installed on physical boards as part of this repair.
 
 ## Linux build
 
-Use the repository's Arm GNU 14.2.Rel1-or-newer toolchain and Python prerequisites,
-including `adafruit-nrfutil`, `intelhex`, and initialized submodules.
+Use the board-qualified Arm GNU releases in `tools/compiler_policy.json` and
+the Python prerequisites, including `adafruit-nrfutil`, `intelhex`, and
+initialized submodules. The default Docker image includes both selected releases;
+native hosts can set `ARM_GNU_TOOLCHAIN_14_2` and `ARM_GNU_TOOLCHAIN_15_3` to
+their installation directories.
 
 From an untagged or dirty development checkout:
 

@@ -98,9 +98,14 @@ jobs:
           ref: ${{ needs.prepare.outputs.source_commit }}
           fetch-depth: 0
           submodules: true
+      - name: Select board-qualified ARM GCC
+        id: compiler
+        run: |
+          compiler_release=$(python3 tools/compiler_policy.py --board '${{ matrix.board }}')
+          echo "release=$compiler_release" >> "$GITHUB_OUTPUT"
       - uses: carlosperate/arm-none-eabi-gcc-action@v1
         with:
-          release: ${{ matrix.board == 'wiscore_rak4631_auto' && '15.3.Rel1' || '14.2.Rel1' }}
+          release: ${{ steps.compiler.outputs.release }}
       - name: Install packaging tools
         run: pip3 install adafruit-nrfutil intelhex setuptools
       - name: Build recovery bridge

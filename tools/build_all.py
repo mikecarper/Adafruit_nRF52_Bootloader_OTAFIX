@@ -5,11 +5,12 @@ import argparse
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-import re
 import shutil
 import subprocess
 import sys
 import time
+
+from compiler_policy import compiler_version, preferred_release, release_version, toolchain_prefix
 
 
 SUCCEEDED = "\033[32msucceeded\033[0m"
@@ -61,6 +62,8 @@ def parse_args():
                         choices=sorted(path.name for path in (REPO_ROOT / "src/boards").iterdir()
                                        if path.is_dir()),
                         help="explicitly omit a board (repeatable); report the omission")
+    parser.add_argument("--compiler-release", choices=("14.2.Rel1", "15.3.Rel1"),
+                        help="override per-board release selection for compiler qualification")
     parser.add_argument(
         "--keep-build",
         action="store_true",
@@ -83,31 +86,22 @@ def parse_args():
     return args
 
 
-def require_toolchain(boards=()):
-    compiler = shutil.which("arm-none-eabi-gcc")
-    size_tool = shutil.which("arm-none-eabi-size")
-    if compiler is None or size_tool is None:
-        raise RuntimeError("Arm GNU Toolchain is missing from PATH")
-
-    result = subprocess.run(
-        [compiler, "-dumpfullversion", "-dumpversion"],
-        check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
-    match = re.match(r"(\d+)\.(\d+)", result.stdout.strip())
-    minimum = (15, 3) if "wiscore_rak4631_auto" in boards else (14, 2)
-    if match is None or tuple(map(int, match.groups())) < minimum:
-        release = ".".join(map(str, minimum))
-        selected = " for the combined wiscore_rak4631_auto profile" if minimum == (15, 3) else ""
-        raise RuntimeError(
-            f"Arm GNU Toolchain {release}.Rel1 or newer is required{selected}; "
-            f"found {result.stdout.strip()}. Select it on PATH; Docker: "
-            f"--build-arg ARM_GNU_RELEASE={release}.rel1. "
-            "Use --exclude-board wiscore_rak4631_auto only if intentionally omitting that profile."
-        )
-    return size_tool, result.stdout.strip()
+def require_toolchains(boards, override=None):
+    """Resolve every selected release before any build directory is removed."""
+    selected = {}
+    resolved = {}
+    for board in boards:
+        release = override or preferred_release(board)
+        if board == "wiscore_rak4631_auto" and release_version(release) < (15, 3):
+            raise RuntimeError("wiscore_rak4631_auto requires Arm GNU 15.3.Rel1 or newer")
+        if release not in resolved:
+            prefix = toolchain_prefix(board, release)
+            size_tool = shutil.which(prefix + "size")
+            if size_tool is None:
+                raise RuntimeError(f"Arm GNU {release} size tool is missing: {prefix}size")
+            resolved[release] = (prefix, size_tool, compiler_version(prefix + "gcc")[1])
+        selected[board] = resolved[release]
+    return selected
 
 
 def image_sizes(size_tool, image):
@@ -124,9 +118,11 @@ def image_sizes(size_tool, image):
 
 
 def build_board(board, make_jobs, test_version, size_tool, build_root, recovery_allow_all_boards=False,
-                secure_dfu_test=False):
+                secure_dfu_test=False, compiler_prefix=None):
     board_build = build_root / f"build-{board}"
     make_args = [f"BOARD={board}", f"BUILD={board_build}", f"PYTHON={sys.executable}"]
+    if compiler_prefix is not None:
+        make_args.append(f"CROSS_COMPILE={compiler_prefix}")
     # Explicit zero prevents a local Makefile.user/environment setting from
     # turning an ordinary all-board build into an unlabelled recovery run.
     make_args.append(f"RECOVERY_ALLOW_ALL_BOARDS={int(recovery_allow_all_boards)}")
@@ -196,7 +192,7 @@ def main():
         return 2
     try:
         # Fail before clearing any build directory or launching board jobs.
-        size_tool, compiler_version = require_toolchain(boards)
+        toolchains = require_toolchains(boards, args.compiler_release)
     except (OSError, RuntimeError, subprocess.SubprocessError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
@@ -227,7 +223,9 @@ def main():
 
     worker_count = min(args.jobs, len(boards))
 
-    print(f"Arm GNU Toolchain {compiler_version}; {worker_count} board workers")
+    print(f"Board-qualified Arm GNU toolchains; {worker_count} board workers")
+    for board in boards:
+        print(f"{board}: GCC {toolchains[board][2]}")
     for board in sorted(set(args.exclude_board)):
         print(f"Explicitly excluded board: {board}")
     if args.recovery_allow_all_boards:
@@ -248,10 +246,11 @@ def main():
                 board,
                 args.make_jobs,
                 args.test_version,
-                size_tool,
+                toolchains[board][1],
                 build_root,
                 args.recovery_allow_all_boards,
                 args.secure_dfu_test,
+                toolchains[board][0],
             ): board
             for board in boards
         }

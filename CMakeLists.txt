@@ -300,6 +300,7 @@ target_link_options(bootloader PUBLIC
   --specs=nosys.specs --specs=nano.specs
   )
 target_compile_options(bootloader PUBLIC
+  $<$<COMPILE_LANGUAGE:C>:-std=gnu17>
   -mabi=aapcs
   -Oz
   -fno-jump-tables
