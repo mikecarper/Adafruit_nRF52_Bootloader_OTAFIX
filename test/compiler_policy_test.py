@@ -20,6 +20,15 @@ FLAGS = ("-fno-schedule-insns", "-fno-schedule-insns2", "-fno-code-hoisting",
 RAK = "wiscore_rak4631_auto"
 
 
+def isolated_make_environment():
+    """Keep recursive host-test flags from replacing firmware board options."""
+    env = os.environ.copy()
+    for variable in ("MAKEFLAGS", "MFLAGS", "MAKELEVEL", "MAKEOVERRIDES",
+                     "CFLAGS", "LDFLAGS", "RECOVERY_ALLOW_ALL_BOARDS"):
+        env.pop(variable, None)
+    return env
+
+
 class CompilerPolicyTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -52,10 +61,7 @@ class CompilerPolicyTests(unittest.TestCase):
 
     def make_variable(self, name, *, board=RAK, version="15.3.1", recovery=False,
                       test_version="0x02040B7E", git_tag=None):
-        env = os.environ.copy()
-        for variable in ("MAKEFLAGS", "MFLAGS", "MAKELEVEL", "MAKEOVERRIDES",
-                         "CFLAGS", "LDFLAGS", "RECOVERY_ALLOW_ALL_BOARDS"):
-            env.pop(variable, None)
+        env = isolated_make_environment()
         env["OTAFIX_FAKE_GCC_VERSION"] = version
         command = ["make", "--no-print-directory", "BOARD=" + board,
                    "CC=" + str(self.compiler), "PYTHON=" + sys.executable,
@@ -164,7 +170,7 @@ class CompilerPolicyTests(unittest.TestCase):
             self.assertIn(release, ("14.2.Rel1", "15.3.Rel1"))
 
     def test_default_make_resolves_selected_family_and_rejects_unqualified_path(self):
-        env = os.environ.copy()
+        env = isolated_make_environment()
         env["ARM_GNU_TOOLCHAIN_15_3"] = str(self.tool_bin)
         env["OTAFIX_FAKE_GCC_VERSION"] = "15.3.1"
         command = ["make", "--no-print-directory", "BOARD=" + RAK,
@@ -203,7 +209,7 @@ class CompilerPolicyTests(unittest.TestCase):
         directory = root / "bin"
         directory.mkdir(parents=True)
         (directory / "arm-none-eabi-gcc").symlink_to(self.compiler)
-        env = os.environ.copy()
+        env = isolated_make_environment()
         env.update(ARM_GNU_TOOLCHAIN_15_3=str(root), OTAFIX_FAKE_GCC_VERSION="15.3.1")
         command = ["make", "--no-print-directory", "BOARD=" + RAK,
                    "PYTHON=" + sys.executable, "MOTA_BOOTLOADER_TEST_BUILD=1",
@@ -227,7 +233,7 @@ class CompilerPolicyTests(unittest.TestCase):
         old_compiler = old_bin / "arm-none-eabi-gcc"
         old_compiler.write_text("#!" + sys.executable + "\nprint('14.2.1')\n")
         old_compiler.chmod(0o755)
-        env = os.environ.copy()
+        env = isolated_make_environment()
         env.update(CC="gcc", ARM_GNU_TOOLCHAIN_15_3=str(self.tool_bin),
                    OTAFIX_FAKE_GCC_VERSION="15.3.1",
                    PATH=str(old_bin) + os.pathsep + env["PATH"])

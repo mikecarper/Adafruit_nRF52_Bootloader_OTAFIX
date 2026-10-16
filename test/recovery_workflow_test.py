@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the actual recovery publisher against simulated GitHub asset metadata."""
+"""Run actual recovery workflow steps with isolated source and asset fixtures."""
 
 import hashlib
 import io
@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -18,6 +19,58 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = (ROOT / ".github/workflows/recovery.yml").read_text(encoding="ascii")
 SOURCE = textwrap.dedent(re.search(
     r"          python3 - <<'PY'\n(.*?)\n          PY", WORKFLOW, re.S).group(1))
+COMPILER_SOURCE = textwrap.dedent(re.search(
+    r"      - name: Select board-qualified ARM GCC\n"
+    r"        id: compiler\n        shell: bash\n        run: \|\n"
+    r"((?:          .*\n)+)", WORKFLOW).group(1))
+
+
+class RecoveryCompilerTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="otafix-recovery-compiler-")
+        self.addCleanup(self.temp.cleanup)
+        self.checkout = Path(self.temp.name)
+        self.output = self.checkout / "github-output"
+
+    def select(self, board):
+        self.output.unlink(missing_ok=True)
+        env = os.environ.copy()
+        env["GITHUB_OUTPUT"] = str(self.output)
+        source = COMPILER_SOURCE.replace("${{ matrix.board }}", board)
+        return subprocess.run(["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", source],
+                              cwd=self.checkout, env=env, capture_output=True, text=True)
+
+    def test_current_checkout_uses_the_shared_board_policy(self):
+        tools = self.checkout / "tools"
+        tools.mkdir()
+        for name in ("compiler_policy.py", "compiler_policy.json"):
+            shutil.copyfile(ROOT / "tools" / name, tools / name)
+        for board in ("heltec_t096", "wiscore_rak4631_auto"):
+            with self.subTest(board=board):
+                board_dir = self.checkout / "src" / "boards" / board
+                board_dir.mkdir(parents=True)
+                shutil.copyfile(ROOT / "src" / "boards" / board / "board.mk", board_dir / "board.mk")
+                result = self.select(board)
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertEqual("release=15.3.Rel1\n", self.output.read_text(encoding="ascii"))
+
+    def test_historical_checkout_uses_its_original_compiler_families(self):
+        for board, release in (("heltec_t096", "14.2.Rel1"),
+                               ("wiscore_rak3401_auto", "14.2.Rel1"),
+                               ("wiscore_rak4631_auto", "15.3.Rel1")):
+            with self.subTest(board=board):
+                result = self.select(board)
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertEqual(f"release={release}\n", self.output.read_text(encoding="ascii"))
+
+    def test_present_but_broken_selector_fails_without_historical_fallback(self):
+        tools = self.checkout / "tools"
+        tools.mkdir()
+        (tools / "compiler_policy.py").write_text("raise SystemExit('selector failure')\n", encoding="ascii")
+        result = self.select("heltec_t096")
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("selector failure", result.stderr)
+        self.assertFalse(self.output.exists())
 
 
 class RecoveryPublisherTest(unittest.TestCase):

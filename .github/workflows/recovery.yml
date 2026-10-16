@@ -100,8 +100,16 @@ jobs:
           submodules: true
       - name: Select board-qualified ARM GCC
         id: compiler
+        shell: bash
         run: |
-          compiler_release=$(python3 tools/compiler_policy.py --board '${{ matrix.board }}')
+          if [[ -f tools/compiler_policy.py ]]; then
+            compiler_release=$(python3 tools/compiler_policy.py --board '${{ matrix.board }}')
+          elif [[ '${{ matrix.board }}' == 'wiscore_rak4631_auto' ]]; then
+            # Existing recovery tags predate the shared compiler policy.
+            compiler_release=15.3.Rel1
+          else
+            compiler_release=14.2.Rel1
+          fi
           echo "release=$compiler_release" >> "$GITHUB_OUTPUT"
       - uses: carlosperate/arm-none-eabi-gcc-action@v1
         with:
