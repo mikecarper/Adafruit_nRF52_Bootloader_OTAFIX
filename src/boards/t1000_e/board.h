@@ -35,9 +35,14 @@
 /*------------------------------------------------------------------*/
 /* BUTTON
  *------------------------------------------------------------------*/
-#define BUTTON_DFU     PINNUM(0, 6)  // Primary Button
-#define BUTTON_DFU_OTA PINNUM(0, 18) // unusable: RESET
-#define BUTTON_PULL    NRF_GPIO_PIN_PULLUP
+// P0.06 is active HIGH; P0.18 is RESET, not a second user button. A brief
+// wake-up press belongs to the application. Hold through boot for 3 seconds
+// to offer USB recovery first, using the existing bounded USB/BLE fallback.
+// See Meshtastic OTAFIX commit 0f415c3ee26816ad52a7587b3d6cdd30547987ec.
+#define BUTTON_DFU           PINNUM(0, 6)
+#define BUTTON_PULL          NRF_GPIO_PIN_PULLDOWN
+#define BUTTON_DFU_DELAY_MS  3000
+#define BUTTON_DFU_PROBE_USB 1
 
 //--------------------------------------------------------------------+
 // BLE OTA

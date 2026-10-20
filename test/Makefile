@@ -295,6 +295,7 @@ check: apply_sim readback_test readback_test_v7 readback_internal_test bootloade
 	python3 cf2_guard_test.py
 	python3 peer_data_linker_test.py
 	python3 bootloader_handoff_test.py
+	python3 t1000_button_entry_test.py
 	python3 ble_advertising_test.py
 	python3 ble_dis_layout_test.py
 	python3 ble_gatt_cache_test.py

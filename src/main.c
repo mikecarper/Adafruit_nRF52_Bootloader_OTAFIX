@@ -316,17 +316,33 @@ static void check_dfu_mode(void) {
   /*------------- Determine DFU mode (Serial, OTA, FRESET or normal) -------------*/
   // Allow wake button presses to be released before selecting DFU mode.
 #if defined(BUTTON_DFU_DELAY_MS) && defined(BUTTON_DFU)
+#if defined(BUTTON_DFU_PROBE_USB) && BUTTON_DFU_PROBE_USB == 1
+  // An explicit transport request or double reset already selected DFU; only
+  // a physical single-button request needs hold qualification.
+  if (!dfu_start) {
+#endif
   for (uint16_t waited = 0; waited < BUTTON_DFU_DELAY_MS; waited += 10) {
     if (!button_pressed(BUTTON_DFU)) {
       break;
     }
     NRFX_DELAY_MS(10);
   }
+#if defined(BUTTON_DFU_PROBE_USB) && BUTTON_DFU_PROBE_USB == 1
+  }
+#endif
 #endif
 
   // DFU button pressed
 #if defined(BUTTON_DFU)
+#if defined(BUTTON_DFU_PROBE_USB) && BUTTON_DFU_PROBE_USB == 1
+  // Keep the qualified hold decision stable if the user releases the button
+  // while the later transport selection runs. Do not sample the physical
+  // button when an explicit request has already chosen DFU.
+  bool const dfu_button_pressed = !dfu_start && button_pressed(BUTTON_DFU);
+  dfu_start = dfu_start || dfu_button_pressed;
+#else
   dfu_start = dfu_start || button_pressed(BUTTON_DFU);
+#endif
 #endif
 
   // DFU + FRESET are pressed --> OTA
@@ -391,7 +407,7 @@ static void check_dfu_mode(void) {
   // to BLE when no host arrives. Explicit application transport requests win.
   dfu_single_button_route_t const button_route = dfu_entry_single_button_route(
     gpregret == DFU_MAGIC_OTA_APPJUM || gpregret == DFU_MAGIC_OTA_RESET,
-    serial_only_dfu || uf2_dfu, double_reset, button_pressed(BUTTON_DFU));
+    serial_only_dfu || uf2_dfu, double_reset, dfu_button_pressed);
   bool const single_button_probe = button_route == DFU_SINGLE_BUTTON_USB_PROBE;
   if (button_route == DFU_SINGLE_BUTTON_USB_PROBE) {
     _ota_dfu = false;
