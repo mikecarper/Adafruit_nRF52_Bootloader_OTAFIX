@@ -36,6 +36,12 @@
 #ifdef SECURE_DFU_TEST
 #include "secure_dfu_ble.h"
 #endif
+#ifdef DUAL_BLE_DFU_TEST
+  #include "dual_ble_dfu.h"
+  #include "dfu_ble_shared.h"
+static ble_dfu_t m_secure_dfu;
+static uint8_t   m_dual_owner;
+#endif
 
 #define DFU_REV_MAJOR                        0x00                                                    /** DFU Major revision number to be exposed. */
 #define DFU_REV_MINOR                        0x08                                                    /** DFU Minor revision number to be exposed. */
@@ -160,7 +166,13 @@ static void service_change_try(void) {
   // start and 0xFFFF end made newer SoftDevices reject the indication, and
   // that error used to be discarded. DIS follows DFU with one service plus
   // three declaration/value pairs, so its final value is seven handles on.
+#ifdef DUAL_BLE_DFU_TEST
+  // Secure follows the unchanged Legacy + DIS layout and is part of the fence.
+  err_code =
+    sd_ble_gatts_service_changed(m_conn_handle, m_dfu.service_handle, m_secure_dfu.dfu_rev_handles.value_handle);
+#else
   err_code = sd_ble_gatts_service_changed(m_conn_handle, m_dfu.service_handle, m_dfu.dfu_rev_handles.value_handle + 7U);
+#endif
   if (err_code == NRF_SUCCESS) {
     m_service_change_pending = false;
   }
@@ -855,9 +867,8 @@ static void advertising_add(ble_data_t* adv_data, uint8_t type, const void* fiel
  * @details   Encodes the required advertising data and passes it to the stack.
  *            Also builds a structure to be passed to the stack when starting advertising.
  */
-static void advertising_init(ble_data_t* adv_data, uint8_t adv_flags)
-{
-#ifdef SECURE_DFU_TEST
+static void advertising_init(ble_data_t *adv_data, uint8_t adv_flags) {
+#if defined(SECURE_DFU_TEST) && !defined(DUAL_BLE_DFU_TEST)
   uint8_t const uuid16[2] = {0x59, 0xFE};
   advertising_add(adv_data, BLE_GAP_AD_TYPE_FLAGS, &adv_flags, 1);
   advertising_add(adv_data, BLE_GAP_AD_TYPE_16BIT_SERVICE_UUID_COMPLETE, uuid16, sizeof(uuid16));
@@ -869,6 +880,10 @@ static void advertising_init(ble_data_t* adv_data, uint8_t adv_flags)
 
   advertising_add(adv_data, BLE_GAP_AD_TYPE_FLAGS, &adv_flags, 1);
   advertising_add(adv_data, BLE_GAP_AD_TYPE_128BIT_SERVICE_UUID_MORE_AVAILABLE, uuid128, 16);
+#endif
+#ifdef DUAL_BLE_DFU_TEST
+  const uint8_t secure_uuid16[2] = {0x59, 0xFE};
+  advertising_add(adv_data, BLE_GAP_AD_TYPE_16BIT_SERVICE_UUID_COMPLETE, secure_uuid16, sizeof(secure_uuid16));
 #endif
 
   uint8_t const name_len = (uint8_t)strlen(DEVICE_NAME);
@@ -1199,9 +1214,47 @@ static void on_ble_evt(ble_evt_t * p_ble_evt)
  *
  * @param[in] p_ble_evt S110 SoftDevice event.
  */
-/*static*/ void ble_evt_dispatch(ble_evt_t * p_ble_evt)
-{
-#ifdef SECURE_DFU_TEST
+#ifdef DUAL_BLE_DFU_TEST
+// CCCD/discovery traffic does not select a protocol. The first write to either
+// protocol's control/data value locks the shared backend until a DFU reset.
+static bool dual_ble_write_allowed(const ble_evt_t *event) {
+  uint16_t   handle;
+  const bool authorize = event->header.evt_id == BLE_GATTS_EVT_RW_AUTHORIZE_REQUEST;
+  if (event->header.evt_id == BLE_GATTS_EVT_WRITE) {
+    handle = event->evt.gatts_evt.params.write.handle;
+  } else if (authorize && event->evt.gatts_evt.params.authorize_request.type == BLE_GATTS_AUTHORIZE_TYPE_WRITE) {
+    // Legacy's control point uses authorized writes, not WRITE events.
+    handle = event->evt.gatts_evt.params.authorize_request.request.write.handle;
+  } else {
+    return true;
+  }
+  uint8_t protocol;
+  if (handle == m_dfu.dfu_ctrl_pt_handles.value_handle || handle == m_dfu.dfu_pkt_handles.value_handle) {
+    protocol = DUAL_DFU_LEGACY;
+  } else if (handle == m_secure_dfu.dfu_ctrl_pt_handles.value_handle ||
+             handle == m_secure_dfu.dfu_pkt_handles.value_handle) {
+    protocol = DUAL_DFU_SECURE;
+  } else {
+    return true;
+  }
+  const bool allowed = dual_dfu_claim(&m_dual_owner, protocol);
+  if (!allowed && authorize) {
+    ble_gatts_rw_authorize_reply_params_t reply = {0};
+    reply.type                                  = BLE_GATTS_AUTHORIZE_TYPE_WRITE;
+    reply.params.write.gatt_status              = BLE_GATT_STATUS_ATTERR_WRITE_NOT_PERMITTED;
+    APP_ERROR_CHECK(sd_ble_gatts_rw_authorize_reply(event->evt.gatts_evt.conn_handle, &reply));
+  }
+  return allowed;
+}
+#endif
+
+/*static*/ void ble_evt_dispatch(ble_evt_t *p_ble_evt) {
+#ifdef DUAL_BLE_DFU_TEST
+  if (dual_ble_write_allowed(p_ble_evt)) {
+    ble_dfu_on_ble_evt(&m_dfu, p_ble_evt);
+    secure_dfu_ble_event(&m_secure_dfu, p_ble_evt);
+  }
+#elif defined(SECURE_DFU_TEST)
     secure_dfu_ble_event(&m_dfu, p_ble_evt);
 #else
     ble_dfu_on_ble_evt(&m_dfu, p_ble_evt);
@@ -1211,7 +1264,13 @@ static void on_ble_evt(ble_evt_t * p_ble_evt)
 
 #ifdef SECURE_DFU_TEST
 void dfu_transport_ble_poll(void) {
-    if (IS_CONNECTED() && !m_tear_down_in_progress) secure_dfu_ble_poll(&m_dfu);
+  if (IS_CONNECTED() && !m_tear_down_in_progress) {
+  #ifdef DUAL_BLE_DFU_TEST
+    secure_dfu_ble_poll(&m_secure_dfu);
+  #else
+    secure_dfu_ble_poll(&m_dfu);
+  #endif
+  }
 }
 
 void dfu_secure_connection_policy(bool writing) {
@@ -1261,11 +1320,15 @@ static void service_error_handler(uint32_t nrf_error)
 }
 
 
-static void dis_string_add(uint16_t service_handle,
-                           uint16_t uuid,
-                           char const * p_string,
-                           uint16_t length)
-{
+static void dis_string_add(uint16_t service_handle, uint16_t uuid, const char *p_string, uint16_t length) {
+#ifdef DUAL_BLE_SHARE_INFORMATION
+  // The helper writes its returned handles synchronously. Only the service
+  // identifier and UUID type are read from this temporary descriptor.
+  ble_dfu_t service;
+  service.service_handle = service_handle;
+  service.uuid_type      = BLE_UUID_TYPE_BLE;
+  APP_ERROR_CHECK(dfu_gatt_characteristic_add(&service, uuid, DFU_GATT_INFORMATION, p_string, length));
+#else
     ble_gatts_char_md_t char_md = {0};
     char_md.char_props.read = 1;
 
@@ -1286,8 +1349,8 @@ static void dis_string_add(uint16_t service_handle,
         .p_value = (uint8_t *)p_string,
     };
     ble_gatts_char_handles_t handles;
-    APP_ERROR_CHECK(sd_ble_gatts_characteristic_add(service_handle, &char_md,
-                                                     &value, &handles));
+  APP_ERROR_CHECK(sd_ble_gatts_characteristic_add(service_handle, &char_md, &value, &handles));
+#endif
 }
 
 static void device_information_init(void)
@@ -1313,9 +1376,12 @@ static void device_information_init(void)
 
 /**@brief     Function for initializing services that will be used by the application.
  */
-static void services_init(void)
-{
-#ifdef SECURE_DFU_TEST
+#ifdef DUAL_BLE_DFU_TEST
+// Bound setup inlining without changing service order or cached handles.
+__attribute__((noinline, noclone))
+#endif
+static void services_init(void) {
+#if defined(SECURE_DFU_TEST) && !defined(DUAL_BLE_DFU_TEST)
     APP_ERROR_CHECK(secure_dfu_ble_init(&m_dfu));
 #else
     uint32_t       err_code;
@@ -1334,7 +1400,9 @@ static void services_init(void)
 #endif
     // Keep the legacy DIS attribute layout stable for bonded/cacheing clients.
     device_information_init();
-
+#ifdef DUAL_BLE_DFU_TEST
+    APP_ERROR_CHECK(secure_dfu_ble_init(&m_secure_dfu));
+#endif
 }
 
 
@@ -1357,6 +1425,10 @@ uint32_t dfu_transport_ble_update_start(void)
 {
     uint32_t err_code;
 
+#ifdef DUAL_BLE_DFU_TEST
+    m_dual_owner = DUAL_DFU_NONE;
+#endif
+
     m_accum_len = 0;
     m_accum_active = false;
     m_num_of_firmware_bytes_rcvd = 0;
@@ -1369,7 +1441,7 @@ uint32_t dfu_transport_ble_update_start(void)
     m_service_change_pending = false;
     m_service_attrs_initialized = false;
 
-#ifndef SECURE_DFU_TEST
+#if !defined(SECURE_DFU_TEST) || defined(DUAL_BLE_DFU_TEST)
     dfu_register_callback(dfu_cb_handler);
 #endif
 
@@ -1389,7 +1461,9 @@ uint32_t dfu_transport_ble_update_start(void)
         APP_ERROR_CHECK(err_code);
 
         // Increase the BLE address by one when advertising openly.
-#ifdef SECURE_DFU_TEST
+#ifdef DUAL_BLE_DFU_TEST
+        addr.addr[0] += 3; // Separate cache identity for the dual-service database.
+#elif defined(SECURE_DFU_TEST)
         // A different GATT protocol must not reuse a phone's cached Legacy
         // bootloader database. Application is +0, Legacy +1, this lab profile +2.
         addr.addr[0] += 2;

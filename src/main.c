@@ -512,6 +512,13 @@ static void check_dfu_mode(void) {
 
 // Initializes the SoftDevice by following SD specs section
 // "Master Boot Record and SoftDevice initializaton procedure"
+#ifdef DUAL_BLE_SHARE_STACK_CONFIG
+  #include "dfu_ble_config.h"
+#endif
+#ifdef DUAL_BLE_DFU_TEST
+// Keep the setup frame separate from DFU entry and application handoff.
+__attribute__((noinline, noclone))
+#endif
 static uint32_t ble_stack_init(void) {
   // Forward vector table to bootloader address so that we can handle BLE events
   sd_softdevice_vector_table_base_set(BOOTLOADER_REGION_START);
@@ -534,6 +541,9 @@ static uint32_t ble_stack_init(void) {
   extern uint32_t __data_start__[]; // defined in linker
   uint32_t ram_start = (uint32_t) __data_start__;
 
+#ifdef DUAL_BLE_SHARE_STACK_CONFIG
+  dfu_ble_stack_configure(ram_start);
+#else
   ble_cfg_t blecfg;
 
   // Configure the maximum number of connections.
@@ -548,6 +558,13 @@ static uint32_t ble_stack_init(void) {
   varclr(&blecfg);
   blecfg.gatts_cfg.service_changed.service_changed = 1;
   sd_ble_cfg_set(BLE_GATTS_CFG_SERVICE_CHANGED, &blecfg, ram_start);
+
+  #ifdef DUAL_BLE_DFU_TEST
+  // Legacy and Secure use distinct vendor-specific characteristic UUID bases.
+  varclr(&blecfg);
+  blecfg.common_cfg.vs_uuid_cfg.vs_uuid_count = 2;
+  APP_ERROR_CHECK(sd_ble_cfg_set(BLE_COMMON_CFG_VS_UUID, &blecfg, ram_start));
+  #endif
 
   // ATT MTU
   varclr(&blecfg);
@@ -573,6 +590,7 @@ static uint32_t ble_stack_init(void) {
   blecfg.conn_cfg.conn_cfg_tag = BLE_CONN_CFG_HIGH_BANDWIDTH;
   blecfg.conn_cfg.params.gattc_conn_cfg.write_cmd_tx_queue_size = BLEGATTC_WRCMD_QSIZE;
   sd_ble_cfg_set(BLE_CONN_CFG_GATTC, &blecfg, ram_start);
+#endif
 
   // Enable BLE stack.
   // Note: Interrupt state (enabled, forwarding) is not work properly if not enable ble

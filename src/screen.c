@@ -271,7 +271,31 @@ static void draw_screen(const uint8_t *fb) {
 // lines. This preserves the useful recovery information without an indexed
 // framebuffer, palette or icon decoder in internal-update builds.
 __attribute__((noinline, noclone)) static void draw_dfu(bool ble) {
-    #if defined(SIGNED_FW) && defined(DUALBANK_FW)
+    #if defined(DUAL_BLE_DFU_TEST)
+  // Fit experiment: three 5x7 block letters, no font table or instructions.
+  (void)ble;
+  static const uint8_t columns[15] = {
+    0x7f, 0x41, 0x41, 0x22, 0x1c, // D
+    0x7f, 0x09, 0x09, 0x09, 0x01, // F
+    0x3f, 0x40, 0x40, 0x40, 0x3f, // U
+  };
+  const int scale = DISPLAY_WIDTH / 23;
+  const int left  = (DISPLAY_WIDTH - 17 * scale) / 2;
+  const int top   = (DISPLAY_HEIGHT - 7 * scale) / 2;
+  for (int x = 0; x < DISPLAY_WIDTH; ++x) {
+    uint16_t  line[DISPLAY_HEIGHT] = {0};
+    const int column               = (x - left) / scale;
+    if (x >= left && column < 17 && column % 6 < 5) {
+      const uint8_t bits = columns[(column / 6) * 5 + column % 6];
+      for (int y = 0; y < 7 * scale; ++y) {
+        if (bits & (1u << (y / scale))) {
+          line[top + y] = 0xffff;
+        }
+      }
+    }
+    board_display_draw_line(x, (const uint8_t *)line, sizeof(line));
+  }
+    #elif defined(SIGNED_FW) && defined(DUALBANK_FW)
   // This optional combination uses the board status LED. Normal releases and
   // signed-only or dual-only builds retain the recovery information.
   (void)ble;

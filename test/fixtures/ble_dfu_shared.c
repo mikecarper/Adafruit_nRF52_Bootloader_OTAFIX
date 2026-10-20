@@ -5,6 +5,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include "ble_dfu.h"
+#ifdef DUAL_BLE_DFU_TEST
+  #include "dfu_ble_shared.h"
+#endif
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define VERIFY_SUCCESS(code) do { if ((code) != NRF_SUCCESS) return (code); } while (0)
 
@@ -28,6 +31,9 @@ static uint8_t *event_param_data;
 static ble_gatts_evt_write_t *active_write;
 static char trace[16];
 static unsigned trace_count;
+static unsigned               schema_kind;
+static const uint8_t          information[] = "Test";
+static bool                   secure_service;
 
 static void trace_event(char letter) { if (control_trace) trace[trace_count++] = letter; }
 static void event_handler(ble_dfu_t *dfu, ble_dfu_evt_t *evt) {
@@ -66,7 +72,8 @@ uint32_t sd_ble_gatts_rw_authorize_reply(uint16_t conn, ble_gatts_rw_authorize_r
 uint32_t sd_ble_uuid_vs_add(ble_uuid128_t const *uuid, uint8_t *type) {
   const uint8_t expected[16] = {0x23,0xd1,0xbc,0xea,0x5f,0x78,0x23,0x15,
                                0xde,0xef,0x12,0x12,0,0,0,0};
-  assert(memcmp(uuid->uuid128, expected, sizeof(expected)) == 0);
+  const uint8_t secure[16] = {0x50, 0xea, 0xda, 0x30, 0x88, 0x83, 0xb8, 0x9f, 0x60, 0x4f, 0x15, 0xf3, 0, 0, 0xc9, 0x8e};
+  assert(memcmp(uuid->uuid128, secure_service ? secure : expected, sizeof(expected)) == 0);
   uuid_calls++;
   if (fail_at == -2) return 0x72;
   *type = 0x42;
@@ -74,7 +81,9 @@ uint32_t sd_ble_uuid_vs_add(ble_uuid128_t const *uuid, uint8_t *type) {
 }
 
 uint32_t sd_ble_gatts_service_add(uint8_t type, ble_uuid_t const *uuid, uint16_t *handle) {
-  assert(type == BLE_GATTS_SRVC_TYPE_PRIMARY && uuid->type == 0x42 && uuid->uuid == BLE_DFU_SERVICE_UUID);
+  assert(type == BLE_GATTS_SRVC_TYPE_PRIMARY);
+  assert(uuid->type == (secure_service ? BLE_UUID_TYPE_BLE : 0x42));
+  assert(uuid->uuid == (secure_service ? 0xfe59 : BLE_DFU_SERVICE_UUID));
   service_calls++;
   if (fail_at == -1) return 0x73;
   *handle = 77;
@@ -85,6 +94,42 @@ uint32_t sd_ble_gatts_characteristic_add(uint16_t service, ble_gatts_char_md_t c
                                        ble_gatts_attr_t const *attr,
                                        ble_gatts_char_handles_t *handles) {
   char_calls++;
+  if (schema_kind) {
+    const bool info = schema_kind == 9, control = schema_kind == 4;
+    assert(service == 77);
+    ble_gatts_char_md_t expected_md      = {0};
+    expected_md.char_props.read          = info;
+    expected_md.char_props.write         = control;
+    expected_md.char_props.write_wo_resp = !info && !control;
+    expected_md.char_props.notify        = control;
+    ble_gatts_attr_md_t cccd             = {0};
+    if (control) {
+      BLE_GAP_CONN_SEC_MODE_SET_OPEN(&cccd.read_perm);
+      BLE_GAP_CONN_SEC_MODE_SET_OPEN(&cccd.write_perm);
+      cccd.vloc = BLE_GATTS_VLOC_STACK;
+      assert(md->p_cccd_md && memcmp(md->p_cccd_md, &cccd, sizeof(cccd)) == 0);
+      expected_md.p_cccd_md = md->p_cccd_md;
+    }
+    assert(memcmp(md, &expected_md, sizeof(expected_md)) == 0);
+    ble_gatts_attr_md_t expected_attr = {0};
+    if (info) {
+      BLE_GAP_CONN_SEC_MODE_SET_OPEN(&expected_attr.read_perm);
+    } else {
+      BLE_GAP_CONN_SEC_MODE_SET_OPEN(&expected_attr.write_perm);
+    }
+    expected_attr.vloc = BLE_GATTS_VLOC_STACK;
+    expected_attr.vlen = !info;
+    assert(memcmp(attr->p_attr_md, &expected_attr, sizeof(expected_attr)) == 0);
+    assert(attr->p_uuid->uuid == (info ? 0x2a29 : control ? 1 : 2));
+    assert(attr->p_uuid->type == 0x42);
+    assert(attr->init_len == (info ? 4 : 0) && attr->init_offs == 0);
+    assert(attr->max_len == (info ? 4 : control ? 20 : 244));
+    assert(attr->p_value == (info ? information : NULL));
+    assert(handles == (info      ? &active_dfu->dfu_rev_handles
+                       : control ? &active_dfu->dfu_ctrl_pt_handles
+                                 : &active_dfu->dfu_pkt_handles));
+    return NRF_SUCCESS;
+  }
   assert(service == 77 && char_calls <= 3);
   const bool packet = char_calls == 1;
   const bool control = char_calls == 2;
@@ -149,6 +194,8 @@ static void reset(ble_dfu_t *dfu, ble_dfu_init_t *init) {
   control_trace = false; cccd_enabled = true; cccd_result = authorize_result = NRF_SUCCESS;
   control_events = authorize_calls = error_calls = trace_count = 0;
   memset(trace, 0, sizeof(trace)); active_write = NULL;
+  schema_kind                                                  = 0;
+  secure_service                                               = false;
 }
 
 static void expect(uint8_t kind, uint32_t count, uint8_t procedure, uint8_t response) {
@@ -172,6 +219,39 @@ int main(int argc, char **argv) {
   ble_dfu_t dfu;
   ble_dfu_init_t init;
   reset(&dfu, &init);
+#ifdef DUAL_BLE_DFU_TEST
+  if (scenario == 7) {
+    dfu.service_handle    = 77;
+    dfu.uuid_type         = 0x42;
+    const uint8_t kinds[] = {DFU_GATT_SECURE, DFU_GATT_SECURE | DFU_GATT_PACKET, DFU_GATT_INFORMATION};
+    for (unsigned i = 0; i < sizeof(kinds); ++i) {
+      schema_kind = kinds[i];
+      assert(dfu_gatt_characteristic_add(&dfu,
+                                         schema_kind == 9   ? 0x2a29
+                                         : schema_kind == 4 ? 1
+                                                            : 2,
+                                         schema_kind, schema_kind == 9 ? information : NULL, 4) == NRF_SUCCESS);
+    }
+    return 0;
+  }
+  if (scenario == 8) {
+    const ble_uuid128_t base = {
+      {0x50, 0xea, 0xda, 0x30, 0x88, 0x83, 0xb8, 0x9f, 0x60, 0x4f, 0x15, 0xf3, 0, 0, 0xc9, 0x8e}};
+    for (int failure = -2; failure <= 0; ++failure) {
+      reset(&dfu, &init);
+      secure_service = true;
+      fail_at        = failure;
+      assert(dfu_gatt_service_add(&dfu, &base, 0xfe59, true) == (uint32_t)(failure == -2   ? 0x72
+                                                                           : failure == -1 ? 0x73
+                                                                                           : NRF_SUCCESS));
+      assert(uuid_calls == 1 && service_calls == (failure != -2));
+      if (failure == 0) {
+        assert(dfu.service_handle == 77 && dfu.uuid_type == 0x42);
+      }
+    }
+    return 0;
+  }
+#endif
   if (scenario == 0) {
     assert(ble_dfu_init(&dfu, &init) == NRF_SUCCESS);
     assert(uuid_calls == 1 && service_calls == 1 && char_calls == 3);

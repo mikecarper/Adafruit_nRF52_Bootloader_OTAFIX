@@ -308,17 +308,21 @@ check: apply_sim readback_test readback_test_v7 readback_internal_test bootloade
 	python3 compiler_policy_test.py
 	python3 rak_spi_driver_test.py
 	python3 ble_dfu_shared_test.py
+	python3 ble_stack_config_test.py
+	python3 dual_ble_fit_test.py
 	python3 shared_helpers_test.py
 	python3 lfclk_source_test.py
 	python3 svc_ipa_guard_test.py
 	python3 legacy_dfu_bounds_test.py
 	python3 secure_dfu_test.py
 	python3 secure_dfu_ble_test.py
+	DUAL_BLE_DFU_TEST=1 python3 secure_dfu_ble_test.py
 	python3 secure_dfu_uploader_test.py
 	python3 secure_dfu_target_test.py
 	python3 legacy_ble_dfu_host_test.py
 	python3 signed_legacy_package_test.py
 	python3 usb_descriptor_test.py
+	python3 usb_scsi_dispatch_test.py
 	python3 screen_render_test.py
 	python3 usb_task_budget_test.py
 	python3 ../lib/tinyusb/test/otafix/nrf5x_power_test.py

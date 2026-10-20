@@ -34,9 +34,15 @@ class SecureDfuBleTest(unittest.TestCase):
                         '-Wno-pointer-to-int-cast', '-Wno-unused-variable',
                         '-DNRF52840_XXAA', '-DS140', '-DSVCALL_AS_NORMAL_FUNCTION',
                         '-DSECURE_DFU_HW_VERSION=0x3401',
+                        *(['-DDUAL_BLE_DFU_TEST=1', '-DDUAL_BLE_SHARE_CHARACTERISTICS=1',
+                           '-DDUAL_BLE_SHARE_SERVICES=1', '-DDUAL_BLE_SHARE_NOTIFICATIONS=1',
+                           '-DDUAL_BLE_SHARE_INFORMATION=1',
+                           '-D__STATIC_INLINE=static inline', '-D__REV(value)=__builtin_bswap32(value)']
+                          if os.environ.get('DUAL_BLE_DFU_TEST') == '1' else []),
                         '-DDFU_APP_DATA_RESERVED=0xA000', *sanitizers, '-shared', '-fPIC',
                         *['-I' + str(ROOT / path) for path in includes],
                         str(ROOT / 'test/secure_dfu_ble_host.c'), str(ROOT / 'src/secure_dfu.c'),
+                        *([str(ROOT / 'src/dfu_ble_shared.c')] if os.environ.get('DUAL_BLE_DFU_TEST') == '1' else []),
                         str(ROOT / 'src/sha256.c'), '-o', str(library)], check=True)
         cls.lib = ctypes.CDLL(str(library))
         if os.name == 'nt':

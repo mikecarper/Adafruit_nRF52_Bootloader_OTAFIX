@@ -16,6 +16,9 @@
 #include "ble_srv_common.h"
 #include <stddef.h>
 #include "sdk_common.h"
+#ifdef DUAL_BLE_DFU_TEST
+  #include "dfu_ble_shared.h"
+#endif
 
 #define MAX_DFU_PKT_LEN                 (BLEGATT_ATT_MTU_MAX - 3) /**< Maximum length (in bytes) of the DFU Packet characteristic. */
 #define PKT_START_DFU_PARAM_LEN         2                                               /**< Length (in bytes) of the parameters for Packet Start DFU Request. */
@@ -46,51 +49,55 @@ static uint8_t  m_notif_buffer[MAX_NOTIF_BUFFER_LEN];                           
 // construction of their identical zeroed metadata. Do not clone this helper
 // for each constant UUID under LTO: the fixed bootloader envelope needs one
 // constructor, not three inlined copies.
+#ifndef DUAL_BLE_SHARE_CHARACTERISTICS
 __attribute__((noinline, noclone))
-static uint32_t dfu_characteristic_add(ble_dfu_t * const p_dfu, uint16_t uuid,
-                                      const uint16_t *revision)
-{
-    ble_gatts_char_md_t char_md;
-    ble_gatts_attr_t    attr_char_value;
-    ble_uuid_t          char_uuid;
-    ble_gatts_attr_md_t attr_md;
-    const bool is_revision = uuid == BLE_DFU_REV_CHAR_UUID;
-    const bool is_packet = uuid == BLE_DFU_PKT_CHAR_UUID;
-    ble_gatts_char_handles_t *handles = is_revision ? &p_dfu->dfu_rev_handles :
-        is_packet ? &p_dfu->dfu_pkt_handles : &p_dfu->dfu_ctrl_pt_handles;
+#endif
+static uint32_t dfu_characteristic_add(ble_dfu_t *const p_dfu, uint16_t uuid, const uint16_t *revision) {
+#ifdef DUAL_BLE_SHARE_CHARACTERISTICS
+  uint8_t kind = uuid == BLE_DFU_REV_CHAR_UUID   ? DFU_GATT_REVISION
+                 : uuid == BLE_DFU_PKT_CHAR_UUID ? DFU_GATT_PACKET
+                                                 : DFU_GATT_CONTROL;
+  return dfu_gatt_characteristic_add(p_dfu, uuid, kind, revision, sizeof(*revision));
+#else
+  ble_gatts_char_md_t       char_md;
+  ble_gatts_attr_t          attr_char_value;
+  ble_uuid_t                char_uuid;
+  ble_gatts_attr_md_t       attr_md;
+  const bool                is_revision = uuid == BLE_DFU_REV_CHAR_UUID;
+  const bool                is_packet   = uuid == BLE_DFU_PKT_CHAR_UUID;
+  ble_gatts_char_handles_t *handles     = is_revision ? &p_dfu->dfu_rev_handles
+                                          : is_packet ? &p_dfu->dfu_pkt_handles
+                                                      : &p_dfu->dfu_ctrl_pt_handles;
 
-    memset(&char_md, 0, sizeof(char_md));
-    char_md.char_props = (ble_gatt_char_props_t) {
-        .read = is_revision,
-        .write = !is_revision,
-        .write_wo_resp = is_packet,
-        .notify = !is_revision && !is_packet
-    };
-    // Keep all optional descriptors, including p_cccd_md, NULL as before.
-    char_uuid.type = p_dfu->uuid_type;
-    char_uuid.uuid = uuid;
+  memset(&char_md, 0, sizeof(char_md));
+  char_md.char_props = (ble_gatt_char_props_t){.read          = is_revision,
+                                               .write         = !is_revision,
+                                               .write_wo_resp = is_packet,
+                                               .notify        = !is_revision && !is_packet};
+  // Keep all optional descriptors, including p_cccd_md, NULL as before.
+  char_uuid.type = p_dfu->uuid_type;
+  char_uuid.uuid = uuid;
 
-    memset(&attr_md, 0, sizeof(attr_md));
-    if (is_revision) {
-        BLE_GAP_CONN_SEC_MODE_SET_OPEN(&attr_md.read_perm);
-        BLE_GAP_CONN_SEC_MODE_SET_NO_ACCESS(&attr_md.write_perm);
-    } else {
-        BLE_GAP_CONN_SEC_MODE_SET_NO_ACCESS(&attr_md.read_perm);
-        BLE_GAP_CONN_SEC_MODE_SET_OPEN(&attr_md.write_perm);
-    }
-    attr_md.vloc = BLE_GATTS_VLOC_STACK;
-    attr_md.wr_auth = !is_revision && !is_packet;
-    attr_md.vlen = 1;
+  memset(&attr_md, 0, sizeof(attr_md));
+  if (is_revision) {
+    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&attr_md.read_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_NO_ACCESS(&attr_md.write_perm);
+  } else {
+    BLE_GAP_CONN_SEC_MODE_SET_NO_ACCESS(&attr_md.read_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&attr_md.write_perm);
+  }
+  attr_md.vloc    = BLE_GATTS_VLOC_STACK;
+  attr_md.wr_auth = !is_revision && !is_packet;
+  attr_md.vlen    = 1;
 
-    memset(&attr_char_value, 0, sizeof(attr_char_value));
-    attr_char_value.p_uuid = &char_uuid;
-    attr_char_value.p_attr_md = &attr_md;
-    attr_char_value.init_len = is_revision ? sizeof(uint16_t) : 0;
-    attr_char_value.max_len = is_revision ? sizeof(uint16_t) :
-        is_packet ? MAX_DFU_PKT_LEN : BLE_GATT_ATT_MTU_DEFAULT;
-    attr_char_value.p_value = is_revision ? (uint8_t *)revision : NULL;
-    return sd_ble_gatts_characteristic_add(p_dfu->service_handle, &char_md,
-                                            &attr_char_value, handles);
+  memset(&attr_char_value, 0, sizeof(attr_char_value));
+  attr_char_value.p_uuid    = &char_uuid;
+  attr_char_value.p_attr_md = &attr_md;
+  attr_char_value.init_len  = is_revision ? sizeof(uint16_t) : 0;
+  attr_char_value.max_len   = is_revision ? sizeof(uint16_t) : is_packet ? MAX_DFU_PKT_LEN : BLE_GATT_ATT_MTU_DEFAULT;
+  attr_char_value.p_value   = is_revision ? (uint8_t *)revision : NULL;
+  return sd_ble_gatts_characteristic_add(p_dfu->service_handle, &char_md, &attr_char_value, handles);
+#endif
 }
 
 /**@brief       Function for adding DFU Packet characteristic to the BLE Stack.
@@ -340,7 +347,6 @@ uint32_t ble_dfu_init(ble_dfu_t * p_dfu, ble_dfu_init_t * p_dfu_init)
 
     p_dfu->conn_handle = BLE_CONN_HANDLE_INVALID;
 
-    ble_uuid_t service_uuid = {0};
     uint32_t   err_code;
 
     const ble_uuid128_t base_uuid128 =
@@ -351,7 +357,11 @@ uint32_t ble_dfu_init(ble_dfu_t * p_dfu, ble_dfu_init_t * p_dfu_init)
         }
     };
 
-    service_uuid.uuid = BLE_DFU_SERVICE_UUID;
+#ifdef DUAL_BLE_SHARE_SERVICES
+    err_code = dfu_gatt_service_add(p_dfu, &base_uuid128, BLE_DFU_SERVICE_UUID, false);
+    VERIFY_SUCCESS(err_code);
+#else
+    ble_uuid_t service_uuid = {.uuid = BLE_DFU_SERVICE_UUID};
 
     err_code = sd_ble_uuid_vs_add(&base_uuid128, &(service_uuid.type));
     VERIFY_SUCCESS(err_code);
@@ -362,6 +372,7 @@ uint32_t ble_dfu_init(ble_dfu_t * p_dfu, ble_dfu_init_t * p_dfu_init)
     VERIFY_SUCCESS(err_code);
 
     p_dfu->uuid_type = service_uuid.type;
+#endif
 
     err_code = dfu_pkt_char_add(p_dfu);
     VERIFY_SUCCESS(err_code);
@@ -440,9 +451,6 @@ static uint32_t dfu_notification_send(ble_dfu_t * p_dfu, uint16_t length,
     uint32_t err_code;
 	do {
 
-        ble_gatts_hvx_params_t hvx_params;
-        uint16_t               index = length;
-
         m_notif_buffer[0] = length == 5u ? OP_CODE_PKT_RCPT_NOTIF : OP_CODE_RESPONSE;
         m_notif_buffer[1] = (uint8_t)response;
         m_notif_buffer[2] = (uint8_t)(response >> 8);
@@ -451,6 +459,11 @@ static uint32_t dfu_notification_send(ble_dfu_t * p_dfu, uint16_t length,
             uint32_encode(count, &m_notif_buffer[length - sizeof(uint32_t)]);
         }
 
+#ifdef DUAL_BLE_SHARE_NOTIFICATIONS
+        err_code = dfu_gatt_notify(p_dfu, m_notif_buffer, length);
+#else
+        ble_gatts_hvx_params_t hvx_params;
+        uint16_t               index = length;
         memset(&hvx_params, 0, sizeof(hvx_params));
 
         hvx_params.handle = p_dfu->dfu_ctrl_pt_handles.value_handle;
@@ -460,9 +473,10 @@ static uint32_t dfu_notification_send(ble_dfu_t * p_dfu, uint16_t length,
         hvx_params.p_data = m_notif_buffer;
 
         err_code = sd_ble_gatts_hvx(p_dfu->conn_handle, &hvx_params);
-    } while (err_code == NRF_ERROR_RESOURCES);
+#endif
+  } while (err_code == NRF_ERROR_RESOURCES);
 
-    return err_code;
+  return err_code;
 }
 
 

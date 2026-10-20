@@ -248,6 +248,10 @@ void board_teardown(void) {
 // Note don't use SPIM3 since it has lots of errata
 NRF_SPIM_Type* _spim = NRF_SPIM0;
 
+#ifdef DUAL_BLE_DFU_TEST
+// Keep the command/data transfers in one implementation in the fit profile.
+__attribute__((noinline, noclone))
+#endif
 static void spi_write(NRF_SPIM_Type *p_spim, uint8_t const *tx_buf, size_t tx_len) {
   nrf_spim_tx_buffer_set(p_spim, tx_buf, tx_len);
   nrf_spim_rx_buffer_set(p_spim, NULL, 0);

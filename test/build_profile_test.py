@@ -279,9 +279,9 @@ class BuildProfileTest(unittest.TestCase):
             cmake,
         )
         screen = (ROOT / "src" / "screen.c").read_text(encoding="utf-8")
-        self.assertIn(
-            "#if defined(SIGNED_FW) && defined(DUALBANK_FW)",
+        self.assertRegex(
             screen,
+            r"#(?:if|elif) defined\(SIGNED_FW\) && defined\(DUALBANK_FW\)",
         )
 
     def test_qualification_text_is_bounded_but_filenames_keep_provenance(self) -> None:

@@ -7,6 +7,9 @@
 #include "dfu_transport.h"
 #include "nrf_sdm.h"
 #include <string.h>
+#ifdef DUAL_BLE_DFU_TEST
+  #include "dfu_ble_shared.h"
+#endif
 
 static secure_dfu_t      session;
 static volatile bool     flash_done;
@@ -49,6 +52,11 @@ void secure_dfu_activity(void) {
 }
 
 bool secure_dfu_begin(const secure_dfu_image_t *image) {
+#ifdef DUAL_BLE_DFU_TEST
+  // The dual dispatcher has already latched Secure ownership. Do not replace
+  // Legacy's asynchronous callback merely because both GATT services exist.
+  dfu_register_callback(flash_callback);
+#endif
   flash_done = false;
   dfu_secure_connection_policy(true);
   uint32_t result = dfu_secure_start(image->size, image->sha256);
@@ -91,14 +99,18 @@ static void clear_receipts(void) {
 
 static void flush_notifications(ble_dfu_t *service) {
   while (!connection_blocked && queue_count && notifications_enabled && service->conn_handle != BLE_CONN_HANDLE_INVALID) {
+    last_notification_attempt = app_timer_cnt_get();
+#ifdef DUAL_BLE_SHARE_NOTIFICATIONS
+    uint32_t err = dfu_gatt_notify(service, notifications[queue_head], lengths[queue_head]);
+#else
     uint16_t               len    = lengths[queue_head];
     ble_gatts_hvx_params_t params = {0};
     params.handle                 = service->dfu_ctrl_pt_handles.value_handle;
     params.type                   = BLE_GATT_HVX_NOTIFICATION;
     params.p_len                  = &len;
     params.p_data                 = notifications[queue_head];
-    last_notification_attempt     = app_timer_cnt_get();
     uint32_t err                  = sd_ble_gatts_hvx(service->conn_handle, &params);
+#endif
     if (err == NRF_ERROR_RESOURCES || err == NRF_ERROR_BUSY) {
       return;
     }
@@ -134,6 +146,10 @@ void secure_dfu_ble_poll(ble_dfu_t *service) {
 }
 
 static uint32_t characteristic(ble_dfu_t *service, uint16_t uuid, bool control) {
+#ifdef DUAL_BLE_SHARE_CHARACTERISTICS
+  return dfu_gatt_characteristic_add(service, uuid, DFU_GATT_SECURE | (control ? DFU_GATT_CONTROL : DFU_GATT_PACKET),
+                                     NULL, 0);
+#else
   ble_gatts_char_md_t md      = {0};
   ble_gatts_attr_md_t attr_md = {0}, cccd_md = {0};
   ble_uuid_t          id      = {.uuid = uuid, .type = service->uuid_type};
@@ -155,21 +171,28 @@ static uint32_t characteristic(ble_dfu_t *service, uint16_t uuid, bool control) 
   value.max_len          = control ? 20 : BLEGATT_ATT_MTU_MAX - 3;
   return sd_ble_gatts_characteristic_add(service->service_handle, &md, &value,
                                          control ? &service->dfu_ctrl_pt_handles : &service->dfu_pkt_handles);
+#endif
 }
 
 uint32_t secure_dfu_ble_init(ble_dfu_t *service) {
   secure_dfu_init(&session);
   connection_blocked = true;
+#ifndef DUAL_BLE_DFU_TEST
   dfu_register_callback(flash_callback);
+#endif
   service->conn_handle     = BLE_CONN_HANDLE_INVALID;
   const ble_uuid128_t base = {
     {0x50, 0xEA, 0xDA, 0x30, 0x88, 0x83, 0xB8, 0x9F, 0x60, 0x4F, 0x15, 0xF3, 0, 0, 0xC9, 0x8E}};
+#ifdef DUAL_BLE_SHARE_SERVICES
+  uint32_t err = dfu_gatt_service_add(service, &base, 0xFE59, true);
+#else
   uint32_t err = sd_ble_uuid_vs_add(&base, &service->uuid_type);
   if (err != NRF_SUCCESS) {
     return err;
   }
   ble_uuid_t uuid = {.uuid = 0xFE59, .type = BLE_UUID_TYPE_BLE};
   err             = sd_ble_gatts_service_add(BLE_GATTS_SRVC_TYPE_PRIMARY, &uuid, &service->service_handle);
+#endif
   if (err != NRF_SUCCESS) {
     return err;
   }

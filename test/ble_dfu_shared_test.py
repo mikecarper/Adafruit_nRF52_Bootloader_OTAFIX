@@ -73,7 +73,8 @@ static inline uint8_t uint32_encode(uint32_t value, uint8_t *out) {
 ''')
         cls.binaries = {}
         try:
-            for api in ("s140_nrf52_6.1.1", "s140_nrf52_7.3.0", "s132_nrf52_6.1.1"):
+            for api, shared in ((api, shared) for api in
+                    ("s140_nrf52_6.1.1", "s140_nrf52_7.3.0", "s132_nrf52_6.1.1") for shared in (False, True)):
                 family = api.split("_")[0]
                 headers = ROOT / "lib/softdevice" / api / (api + "_API/include")
                 # Directory names omit the version in their API prefix.
@@ -81,19 +82,24 @@ static inline uint8_t uint32_encode(uint32_t value, uint8_t *out) {
                     headers = ROOT / "lib/softdevice" / api / (api + "_API") / "include"
                 if not headers.is_dir():
                     raise AssertionError("missing real SoftDevice headers: " + str(headers))
-                binary = cls.work / api
+                label = api + ("-shared" if shared else "-original")
+                binary = cls.work / label
                 sanitizers = (["-fsanitize=address,undefined", "-fno-sanitize-recover=all",
                                "-fno-pie", "-no-pie"] if sys.platform.startswith("linux") else [])
                 result = subprocess.run([cls.cc, "-std=c11", "-O2", "-g", "-Wall", "-Wextra", "-Werror",
                     "-DSVCALL_AS_NORMAL_FUNCTION", "-DNRF52840_XXAA", "-D__STATIC_INLINE=static inline",
                     "-DBLEGATT_ATT_MTU_MAX=247", *sanitizers,
+                    *(["-DDUAL_BLE_DFU_TEST=1", "-DDUAL_BLE_SHARE_CHARACTERISTICS=1",
+                       "-DDUAL_BLE_SHARE_SERVICES=1", "-DDUAL_BLE_SHARE_NOTIFICATIONS=1"] if shared else []),
                     "-I" + str(cls.work), "-I" + str(SOURCE.parent), "-I" + str(headers),
+                    "-I" + str(ROOT / "src"), "-I" + str(ROOT / "test/secure_dfu_ble_stubs"),
                     "-I" + str(headers / "nrf52"), "-I" + str(ROOT / "lib/nrfx/mdk"),
-                    "-I" + str(ROOT / "src/cmsis/include"), str(cls.work / "main.c"), "-o", str(binary)],
+                    "-I" + str(ROOT / "src/cmsis/include"), str(cls.work / "main.c"),
+                    *([str(ROOT / "src/dfu_ble_shared.c")] if shared else []), "-o", str(binary)],
                     text=True, capture_output=True, timeout=60)
                 if result.returncode:
                     raise AssertionError(family + "\n" + result.stdout + result.stderr)
-                cls.binaries[api] = binary
+                cls.binaries[label] = binary
         except BaseException:
             cls.temp.cleanup()
             raise
@@ -102,8 +108,10 @@ static inline uint8_t uint32_encode(uint32_t value, uint8_t *out) {
     def tearDownClass(cls):
         cls.temp.cleanup()
 
-    def run_scenario(self, scenario):
+    def run_scenario(self, scenario, shared_only=False):
         for api, binary in self.binaries.items():
+            if shared_only and not api.endswith("-shared"):
+                continue
             with self.subTest(api=api):
                 result = subprocess.run([str(binary), str(scenario)], capture_output=True, text=True, timeout=30)
                 self.assertEqual(0, result.returncode, result.stdout + result.stderr)
@@ -128,6 +136,12 @@ static inline uint8_t uint32_encode(uint32_t value, uint8_t *out) {
 
     def test_control_authorization_and_cccd_error_order_is_unchanged(self):
         self.run_scenario(6)
+
+    def test_secure_and_information_attributes_preserve_exact_metadata(self):
+        self.run_scenario(7, shared_only=True)
+
+    def test_shared_service_builder_preserves_secure_uuid_type_and_errors(self):
+        self.run_scenario(8, shared_only=True)
 
 
 if __name__ == "__main__":

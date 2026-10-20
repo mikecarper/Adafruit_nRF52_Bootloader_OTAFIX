@@ -268,50 +268,29 @@ bool tud_msc_test_unit_ready_cb(uint8_t lun)
 // - READ10 and WRITE10 has their own callbacks
 int32_t tud_msc_scsi_cb (uint8_t lun, uint8_t const scsi_cmd[16], void* buffer, uint16_t bufsize)
 {
-  void const* response = NULL;
-  uint16_t resplen = 0;
-
-  // most scsi handled is input
-  bool in_xfer = true;
+  (void)buffer;
+  (void)bufsize;
 
   switch (scsi_cmd[0])
   {
     case SCSI_CMD_PREVENT_ALLOW_MEDIUM_REMOVAL:
       // Host is about to read/write etc ... better not to disconnect disk
-      resplen = 0;
-    break;
+      return 0;
 
     case 0x35: // SCSI SYNCHRONIZE CACHE (10)
       // A Linux filesystem sync can issue this while other virtual-FAT bios
       // remain queued. It is activity, not permission to disconnect. Start a
       // fresh idle interval only after TinyUSB has returned this command's CSW.
-      resplen = 0;
-    break;
+      return 0;
 
     default:
       // Set Sense = Invalid Command Operation
       tud_msc_set_sense(lun, SCSI_SENSE_ILLEGAL_REQUEST, 0x20, 0x00);
 
-      // negative means error -> tinyusb could stall and/or response with failed status
-      resplen = -1;
-    break;
+      // Return a signed error directly. Storing -1 in an unsigned response
+      // length would turn it into a successful transfer of uninitialized data.
+      return -1;
   }
-
-  // return resplen must not larger than bufsize
-  if ( resplen > bufsize ) resplen = bufsize;
-
-  if ( response && (resplen > 0) )
-  {
-    if(in_xfer)
-    {
-      memcpy(buffer, response, resplen);
-    }else
-    {
-      // SCSI output
-    }
-  }
-
-  return resplen;
 }
 
 // Callback invoked when received READ10 command.
