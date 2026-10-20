@@ -53,6 +53,9 @@
 
 #define CFG_TUD_MSC_DEFERRED_WRITE_RETRY 1
 
+// CDC and MSC use control, bulk and interrupt transfers only.
+#define CFG_TUD_NRF5X_ISO            0
+
 //------------- Class enabled -------------//
 #define CFG_TUD_CDC                 1
 #if !defined(SIGNED_FW) || defined(FORCE_UF2)

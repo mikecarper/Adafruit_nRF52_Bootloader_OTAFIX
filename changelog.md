@@ -7,6 +7,7 @@
 - Size `CURRENT.UF2` from the installed application's recorded size, including its SoftDevice, with a bounded full-region fallback for unknown sizes. Freeze the mounted file extent so cached writes remain read-only during an update.
 - Build merge-queue candidates in CI and avoid relinking unchanged Make builds when packaging changes the build directory.
 - Use the upstream PowerShell-based Windows UF2 drive discovery and suppress SCSI completion actions after failed USB commands.
+- Backport the nRF52840 USB DMA latch, DMA-safe control requests, and stale OUT recovery fixes. Cancel retired DMA work before reusing buffers, and omit unused isochronous support from CDC/MSC builds to preserve flash space.
 
 - Treat the synthetic `CURRENT.UF2` disk extent as read-only so Windows cached sectors cannot corrupt a new UF2 copy; a saved `CURRENT.UF2` copied back as a new file remains installable.
 - Keep TinyUSB shut down after a USB probe falls back to BLE DFU, including delayed SoftDevice power events and direct USB callbacks.

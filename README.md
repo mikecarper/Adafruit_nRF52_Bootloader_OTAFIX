@@ -1099,11 +1099,15 @@ handling even though a USB capture shows successful bulk OUT transactions.
 Upgrade the TinyUSB core and controller driver together. OTAFIX keeps the
 compatible vendored driver and pins a minimal backport of upstream TinyUSB
 commit `6af4ee2c5` for the independent post-SoftDevice HFCLK retry. The
-`mikecarper/tinyusb` fork's `otafix-0.12-nrf5x` branch contains the two nRF5x
-controller fixes on the pinned TinyUSB 0.12-era base plus an MSC-local deferred
-WRITE10 retry used by this bootloader's flash-erasure state machine. The generic
-TinyUSB task retains its upstream drain-to-empty behavior. This keeps the
-backport reproducible from a clean clone without unrelated core changes.
+`mikecarper/tinyusb` fork's `otafix-0.12-nrf5x` branch also backports the Nordic
+anomaly 199 DMA latch, DMA-safe SETUP reads and captured control direction, and
+stale OUT cancellation across clear-halt. These use the pinned TinyUSB 0.12-era
+core and preserve the MSC-local deferred WRITE10 retry used by this bootloader's
+flash-erasure state machine. The generic TinyUSB task retains its upstream
+drain-to-empty behavior. Register-level DMA, stall and power regressions run
+through `test/Makefile` against the production controller source.
+The bootloader disables unused isochronous transfers with
+`CFG_TUD_NRF5X_ISO=0`; the generic driver keeps them enabled by default.
 
 If the first valid UF2 flash sector instead makes an older bootloader reset,
 while ordinary non-UF2 disk traffic remains stable, the recovery path may have
