@@ -75,7 +75,7 @@ jobs:
         echo "release=$compiler_release" >> "$GITHUB_OUTPUT"
 
     - name: Install ARM GCC
-      uses: carlosperate/arm-none-eabi-gcc-action@v1
+      uses: carlosperate/arm-none-eabi-gcc-action@0edbb000a5a98e2292b051b463bff6f512547118 # v1.14.0
       with:
         release: ${{ steps.compiler.outputs.release }}
 
@@ -111,7 +111,7 @@ jobs:
       run: |
         python3 -c 'import sys; sys.path.insert(0, "tools"); from build_bootloader_mota_release import QUALIFIED_BOARDS, PENDING_BOARDS, RETIRED_NORMAL_PROFILES; print("publish=" + str(sys.argv[1] in QUALIFIED_BOARDS).lower()); print("publish_recovery=" + str(sys.argv[1] not in PENDING_BOARDS | RETIRED_NORMAL_PROFILES).lower())' "${{ matrix.board }}" >> "$GITHUB_OUTPUT"
 
-    - uses: actions/upload-artifact@v7
+    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       if: ${{ env.OTAFIX_RELEASE_BUILD != 'true' || steps.release-profile.outputs.publish == 'true' }}
       with:
         name: bootloader-${{ matrix.board }}
@@ -123,7 +123,7 @@ jobs:
       run: |
         make BOARD=${{ matrix.board }} RECOVERY_ALLOW_ALL_BOARDS=1 SECURE_DFU_TEST=0 all copy-artifact
 
-    - uses: actions/upload-artifact@v7
+    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       if: ${{ env.OTAFIX_RELEASE_BUILD == 'true' && steps.release-profile.outputs.publish_recovery == 'true' }}
       with:
         name: recovery-${{ matrix.board }}
@@ -153,7 +153,7 @@ jobs:
           echo "release=$compiler_release" >> "$GITHUB_OUTPUT"
 
       - name: Install ARM GCC
-        uses: carlosperate/arm-none-eabi-gcc-action@v1
+        uses: carlosperate/arm-none-eabi-gcc-action@0edbb000a5a98e2292b051b463bff6f512547118 # v1.14.0
         with:
           release: ${{ steps.compiler.outputs.release }}
 
@@ -237,7 +237,7 @@ jobs:
         run: python3 -m pip install intelhex==2.3.0
 
       - name: Download bootloader artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: bootloader-*
           path: _release
@@ -276,7 +276,7 @@ jobs:
           )
 
       - name: Upload bootloader mOTA release bundle
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bootloader-mota-release
           path: |
@@ -291,7 +291,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: recovery-*
           path: _recovery-input
@@ -301,7 +301,7 @@ jobs:
         run: |
           python3 tools/build_recovery_release.py --artifacts-dir _recovery-input \
             --output-dir _recovery-release --tag "$GITHUB_REF_NAME"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bootloader-recovery-release
           path: |
@@ -320,7 +320,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Download build artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: _release
           pattern: bootloader-*

@@ -66,7 +66,7 @@ jobs:
           echo "boards=$(echo "$boards" | jq -R -s -c 'split("\n")[:-1]')" >> "$GITHUB_OUTPUT"
           echo "source_commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Install ARM GCC for recovery regression
-        uses: carlosperate/arm-none-eabi-gcc-action@v1
+        uses: carlosperate/arm-none-eabi-gcc-action@0edbb000a5a98e2292b051b463bff6f512547118 # v1.14.0
         with:
           release: '14.2.Rel1'
       - name: Install DFU emulator
@@ -111,7 +111,7 @@ jobs:
             compiler_release=14.2.Rel1
           fi
           echo "release=$compiler_release" >> "$GITHUB_OUTPUT"
-      - uses: carlosperate/arm-none-eabi-gcc-action@v1
+      - uses: carlosperate/arm-none-eabi-gcc-action@0edbb000a5a98e2292b051b463bff6f512547118 # v1.14.0
         with:
           release: ${{ steps.compiler.outputs.release }}
       - name: Install packaging tools
@@ -125,7 +125,7 @@ jobs:
             version_args=(MOTA_BOOTLOADER_TEST_BUILD=1 MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE=0x02040703)
           fi
           make BOARD=${{ matrix.board }} RECOVERY_ALLOW_ALL_BOARDS=1 "${version_args[@]}" all copy-artifact
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: R_${{ matrix.board }}
           path: _bin/recovery-allow-all/${{ matrix.board }}/
@@ -142,7 +142,7 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.source_commit }}
           fetch-depth: 0
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: R_*
           path: _recovery-release
