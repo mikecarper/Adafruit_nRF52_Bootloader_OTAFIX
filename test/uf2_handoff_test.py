@@ -173,15 +173,21 @@ def source_guards() -> None:
         MSC_SOURCE.index("void tud_msc_reset_cb") :
         MSC_SOURCE.index("// tinyusb callbacks")
     ]
+    finish = MSC_SOURCE[
+        MSC_SOURCE.index("static void finish_msc_command(void)") :
+        MSC_SOURCE.index("// TinyUSB invokes these around every valid MSC command")
+    ]
     if "_app_msc_command_active = true;" not in begin:
         raise AssertionError("every accepted CBW must open the command guard")
-    if "_app_msc_command_active = false;" not in complete:
+    if "finish_msc_command();" not in complete or "_app_msc_command_active = false;" not in finish:
         raise AssertionError("an accepted CSW must close the command guard")
-    if "_app_msc_command_active = false;" not in reset:
+    if "finish_msc_command();" not in reset:
         raise AssertionError("transport reset must release an abandoned command")
-    if "_app_completion_after_eject = false;" not in reset:
+    if "_app_completion_after_eject = false;" not in finish:
         raise AssertionError("transport reset must cancel an incomplete eject")
-    if "_app_completion_pending = false" in reset or "take_pending_app_completion" in reset:
+    if any(operation in reset + finish for operation in (
+        "_app_completion_pending = false", "take_pending_app_completion",
+    )):
         raise AssertionError("transport reset must not bless or cancel a complete image")
 
     for declaration in (

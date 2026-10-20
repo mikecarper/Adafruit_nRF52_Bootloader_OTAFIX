@@ -43,6 +43,11 @@
 #define BUTTON_PULL          NRF_GPIO_PIN_PULLDOWN
 #define BUTTON_DFU_DELAY_MS  3000
 #define BUTTON_DFU_PROBE_USB 1
+// A held wake from System OFF can override the application's one-shot DFU skip.
+#define BUTTON_DFU_SKIP_HOLD 1
+
+// With no separate reset button, host eject also leaves idle UF2 recovery.
+#define UF2_EXIT_ON_EJECT
 
 //--------------------------------------------------------------------+
 // BLE OTA

@@ -104,7 +104,8 @@ extern void tusb_hal_nrf_power_event(uint32_t event);
  * - DFU_MAGIC_OTA_RESET         : entered by soft reset, SD is not inited yet
  * - DFU_MAGIC_SERIAL_ONLY_RESET : with CDC interface only
  * - DFU_MAGIC_UF2_RESET         : with CDC and MSC interfaces
- * - DFU_MAGIC_SKIP              : skip DFU entirely including double reset delay,
+ * - DFU_MAGIC_SKIP              : skip DFU including double reset delay; boards can
+ *                                 opt into a qualified wake hold overriding the skip
  *                                 Can be used with systemoff or quick reset to app
  *
  * Note: DFU_MAGIC_OTA_APPJUM arrives through a direct application jump. main() converts it to
@@ -308,37 +309,62 @@ static void check_dfu_mode(void) {
     NRF_POWER->GPREGRET = 0;
   }
 
+  // The T1000-E application can request SKIP before System OFF. Let a held
+  // wake button qualify for recovery while idle and brief wakes still skip.
+#if defined(BUTTON_DFU_SKIP_HOLD) && BUTTON_DFU_SKIP_HOLD == 1
+  if (dfu_skip && !button_pressed(BUTTON_DFU)) {
+    return;
+  }
+#else
   // skip dfu entirely
   if (dfu_skip) {
     return;
   }
+#endif
 
   /*------------- Determine DFU mode (Serial, OTA, FRESET or normal) -------------*/
+#if defined(BUTTON_DFU_PROBE_USB) && BUTTON_DFU_PROBE_USB == 1 && defined(BUTTON_DFU)
+  bool dfu_button_pressed = false;
+#endif
   // Allow wake button presses to be released before selecting DFU mode.
 #if defined(BUTTON_DFU_DELAY_MS) && defined(BUTTON_DFU)
 #if defined(BUTTON_DFU_PROBE_USB) && BUTTON_DFU_PROBE_USB == 1
   // An explicit transport request or double reset already selected DFU; only
   // a physical single-button request needs hold qualification.
   if (!dfu_start) {
-#endif
+    uint32_t waited = 0;
+    while (button_pressed(BUTTON_DFU)) {
+      if (waited >= BUTTON_DFU_DELAY_MS) {
+        dfu_button_pressed = true;
+        break;
+      }
+      NRFX_DELAY_MS(10);
+      waited += 10;
+    }
+  }
+  #else
   for (uint16_t waited = 0; waited < BUTTON_DFU_DELAY_MS; waited += 10) {
     if (!button_pressed(BUTTON_DFU)) {
       break;
     }
     NRFX_DELAY_MS(10);
   }
-#if defined(BUTTON_DFU_PROBE_USB) && BUTTON_DFU_PROBE_USB == 1
-  }
-#endif
+  #endif
 #endif
 
   // DFU button pressed
 #if defined(BUTTON_DFU)
 #if defined(BUTTON_DFU_PROBE_USB) && BUTTON_DFU_PROBE_USB == 1
-  // Keep the qualified hold decision stable if the user releases the button
-  // while the later transport selection runs. Do not sample the physical
-  // button when an explicit request has already chosen DFU.
-  bool const dfu_button_pressed = !dfu_start && button_pressed(BUTTON_DFU);
+    // Keep an uninterrupted qualified hold latched through transport selection.
+    // Boards without a hold delay take one physical snapshot instead.
+    #if !defined(BUTTON_DFU_DELAY_MS)
+  dfu_button_pressed = !dfu_start && button_pressed(BUTTON_DFU);
+    #endif
+    #if defined(BUTTON_DFU_SKIP_HOLD) && BUTTON_DFU_SKIP_HOLD == 1
+  if (dfu_skip && !dfu_button_pressed) {
+    return;
+  }
+    #endif
   dfu_start = dfu_start || dfu_button_pressed;
 #else
   dfu_start = dfu_start || button_pressed(BUTTON_DFU);

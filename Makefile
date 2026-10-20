@@ -819,7 +819,7 @@ $(OBJECT_BUILD)/%.o: %.S $(PROFILE_STAMP)
 	@$(CC) -x assembler-with-cpp $(ASFLAGS) $(INC_PATHS) -MMD -MP -MF $(@:.o=.d) -c -o $@ $<
 
 # Link
-$(BUILD)/$(OUT_NAME).out: $(BUILD) $(PROFILE_STAMP) $(OBJECTS) $(LD_FILE)
+$(BUILD)/$(OUT_NAME).out: $(PROFILE_STAMP) $(OBJECTS) $(LD_FILE) | $(BUILD)
 	@echo LD $(notdir $@)
 	@$(CC) -o $@ $(LDFLAGS) $(OBJECTS) -Wl,--start-group $(LIBS) -Wl,--end-group
 	@$(SIZE) $@

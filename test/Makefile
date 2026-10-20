@@ -242,9 +242,10 @@ uf2_write_state_test: uf2_write_state_test.c $(SRC)/usb/uf2/uf2_app_flash.h \
                       $(SRC)/usb/uf2/uf2_current_echo.h
 	$(CC) $(CFLAGS) -I $(SRC)/usb/uf2 uf2_write_state_test.c -o $@
 
-uf2_volume_test: uf2_volume_test.c $(SRC)/usb/uf2/ghostfat.c $(wildcard uf2_stubs/*.h) \
+uf2_volume_test: UF2_VOLUME_FLAGS = -DMOTA_QSPI_BOOTLOADER_UPDATE
+uf2_volume_test uf2_volume_standard_test: uf2_volume_test.c $(SRC)/usb/uf2/ghostfat.c $(wildcard uf2_stubs/*.h) \
                  $(wildcard $(SRC)/usb/uf2/*.h)
-	$(CC) $(CFLAGS) -Wno-int-to-pointer-cast -DNRF52840_XXAA -DMOTA_QSPI_BOOTLOADER_UPDATE \
+	$(CC) $(CFLAGS) -Wno-int-to-pointer-cast -DNRF52840_XXAA $(UF2_VOLUME_FLAGS) \
 		-I uf2_stubs -I . -I $(SRC) -I $(SRC)/usb/uf2 uf2_volume_test.c -o $@
 
 bootloader_settings_guard_test: bootloader_settings_guard_test.c \
@@ -321,9 +322,12 @@ check: apply_sim readback_test readback_test_v7 readback_internal_test bootloade
 	python3 screen_render_test.py
 	python3 usb_task_budget_test.py
 	python3 ../lib/tinyusb/test/otafix/nrf5x_power_test.py
+	python3 ../lib/tinyusb/test/otafix/msc_status_test.py
 	python3 uf2_243_differential_test.py
 	python3 uf2_handoff_test.py
+	python3 uf2_eject_test.py
 	python3 uf2_drive_hil_test.py
+	python3 uf2conv_discovery_test.py
 	python3 test_otafix_mota_update.py
 	python3 ../tools/test_otafix_mota_update.py
 	python3 bootloader_mota_release_test.py
@@ -389,6 +393,7 @@ check: apply_sim readback_test readback_test_v7 readback_internal_test bootloade
 	@echo
 	./uf2_write_state_test
 	./uf2_volume_test
+	./uf2_volume_standard_test
 	@echo
 	./bootloader_settings_guard_test
 	@echo
@@ -414,7 +419,7 @@ clean:
 	rm -f bootloader_mota_rak_auto_3401_test bootloader_mota_rak_auto_4631_test
 	rm -f bootloader_mota_rak_recovery_3401_test bootloader_mota_rak_recovery_4631_test
 	rm -f rak_auto_apply_4631_test rak_auto_apply_3401_test rak_auto_hybrid_4631_test rak_auto_hybrid_3401_test
-	rm -f uf2_volume_test
+	rm -f uf2_volume_test uf2_volume_standard_test
 	rm -f bootloader_mota_techo_lite_test
 	rm -f bootloader_mota_qspi_generic_test bootloader_mota_qspi_generic_v7_test
 	rm -f bootloader_image_recovery_test dfu_image_policy_recovery_test bootloader_mota_recovery_test
@@ -442,7 +447,7 @@ check: bootloader_image_recovery_test dfu_image_policy_recovery_test bootloader_
 check: bootloader_mota_qspi_generic_test bootloader_mota_qspi_generic_v7_test bootloader_mota_techo_lite_test
 check: bootloader_mota_rak_auto_3401_test bootloader_mota_rak_auto_4631_test
 check: bootloader_mota_rak_recovery_3401_test bootloader_mota_rak_recovery_4631_test
-check: uf2_volume_test
+check: uf2_volume_test uf2_volume_standard_test
 check: check-tower-dual
 check: rak_auto_apply_4631_test rak_auto_apply_3401_test rak_auto_hybrid_4631_test rak_auto_hybrid_3401_test
 check: readback_x1_internal_v7_test bootloader_mota_x1_internal_v7_test

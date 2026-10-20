@@ -51,6 +51,7 @@ static uint32_t now_ms, held_until, gpio_reads, usb_calls, ble_calls, dfu_calls;
 static uint32_t primary_reads, secondary_reads;
 static uint32_t last_timeout;
 static bool last_ota, last_cancel, release_after_qualification, second_held;
+static bool repress_after_release;
 enum { STATE_USB_UNMOUNTED, STATE_BLE_DISCONNECTED };
 static uint32_t nrf_gpio_pin_read(uint32_t pin) {
   gpio_reads++;
@@ -58,6 +59,7 @@ static uint32_t nrf_gpio_pin_read(uint32_t pin) {
   if (pin == BUTTON_DFU) {
     primary_reads++;
     pressed = now_ms < held_until;
+    if (repress_after_release && !pressed) held_until = UINT32_MAX;
     if (release_after_qualification && now_ms >= 3000) held_until = 0;
 #ifdef BUTTON_DFU_OTA
   } else if (pin == BUTTON_DFU_OTA) {
@@ -91,13 +93,14 @@ static void bootloader_dfu_start(bool ota, uint32_t timeout, bool cancel) {
         harness += function(main, "static void check_dfu_mode(void) {") + "\n"
         harness += r'''
 int main(int argc, char **argv) {
-  if (argc != 8) return 2;
+  if (argc != 9) return 2;
   held_until = strtoul(argv[1], NULL, 0);
   power.GPREGRET = strtoul(argv[2], NULL, 0);
   host_mounts = atoi(argv[3]);
   release_after_qualification = atoi(argv[4]);
   single_tap = atoi(argv[5]);
   second_held = atoi(argv[7]);
+  repress_after_release = atoi(argv[8]);
   if (atoi(argv[6])) {
     dbl_reset_word = DFU_DBL_RESET_MAGIC;
     power.RESETREAS = POWER_RESETREAS_RESETPIN_Msk;
@@ -113,9 +116,11 @@ int main(int argc, char **argv) {
   return 0;
 }
 '''
-        for board in ("t1000_e", "pca10056", "wismesh_tag"):
+        for board in ("t1000_e", "pca10056", "wismesh_tag", "meshtracker_x1"):
             binary = Path(cls.temp.name) / board
             flags = ["-DREQUIRE_SINGLE_BUTTON=1"] if board == "t1000_e" else []
+            if board == "meshtracker_x1":
+                flags.append("-DOTAFIX_X1_QUALIFICATION_ONLY=1")
             subprocess.run(["cc", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
                             *flags, f'-DBOARD_HEADER="boards/{board}/board.h"',
                             "-x", "c", "-", "-I", str(ROOT / "src"),
@@ -129,11 +134,11 @@ int main(int argc, char **argv) {
 
     def run_entry(self, held_ms=0, magic=0, host=True, release=False,
                   single_tap=False, double_reset=False, second_held=False,
-                  board="t1000_e"):
+                  board="t1000_e", repress=False):
         output = subprocess.check_output([str(self.binaries[board]), str(held_ms), str(magic),
                                           str(int(host)), str(int(release)),
                                           str(int(single_tap)), str(int(double_reset)),
-                                          str(int(second_held))])
+                                          str(int(second_held)), str(int(repress))])
         return json.loads(output)
 
     def test_electrical_contract_and_idle_boot(self):
@@ -153,6 +158,14 @@ int main(int argc, char **argv) {
         self.assertEqual((state["elapsed_ms"], state["dfu_calls"], state["usb_calls"],
                           state["ble_calls"], state["ota"], state["cancel"]),
                          (3000, 1, 1, 0, 0, 1))
+
+    def test_repress_after_short_release_cannot_qualify_a_hold(self):
+        for magic in (0, 0x6d):
+            for duration in (1, 100, 1500, 2990):
+                with self.subTest(magic=magic, duration=duration):
+                    state = self.run_entry(duration, magic=magic, repress=True)
+                    self.assertEqual((state["dfu_calls"], state["usb_calls"],
+                                      state["ble_calls"]), (0, 0, 0))
 
     def test_release_after_hold_does_not_change_transport(self):
         state = self.run_entry(3001, release=True)
@@ -178,10 +191,37 @@ int main(int argc, char **argv) {
         self.assertEqual((state["usb_calls"], state["ble_calls"], state["ota"]), (0, 1, 1))
         self.assertEqual((state["elapsed_ms"], state["gpio_reads"]), (0, 0))
 
-    def test_explicit_skip_does_not_qualify_physical_hold(self):
-        state = self.run_entry(10000, magic=0x6d)
-        self.assertEqual((state["elapsed_ms"], state["gpio_reads"], state["dfu_calls"]),
-                         (0, 0, 0))
+    def test_system_off_skip_allows_qualified_wake_hold(self):
+        for host in (True, False):
+            with self.subTest(host=host):
+                state = self.run_entry(10000, magic=0x6d, host=host)
+                self.assertEqual((state["elapsed_ms"], state["usb_calls"],
+                                  state["dfu_calls"], state["ota"]),
+                                 (3000, 1, 1, not host))
+
+    def test_system_off_idle_and_short_wakes_keep_skip(self):
+        for duration in (0, 1, 100, 1500, 2990, 3000):
+            for single_tap in (True, False):
+                with self.subTest(duration=duration, single_tap=single_tap):
+                    state = self.run_entry(duration, magic=0x6d, single_tap=single_tap)
+                    self.assertEqual((state["usb_calls"], state["ble_calls"],
+                                      state["dfu_calls"]), (0, 0, 0))
+                    self.assertLessEqual(state["elapsed_ms"], 3000)
+
+    def test_other_boards_keep_unconditional_skip(self):
+        for board in ("pca10056", "wismesh_tag", "meshtracker_x1"):
+            with self.subTest(board=board):
+                state = self.run_entry(10000, magic=0x6d, board=board)
+                self.assertEqual((state["elapsed_ms"], state["gpio_reads"],
+                                 state["dfu_calls"]), (0, 0, 0))
+
+    def test_x1_without_hold_delay_keeps_immediate_usb_probe(self):
+        for host in (True, False):
+            with self.subTest(host=host):
+                state = self.run_entry(10000, host=host, board="meshtracker_x1")
+                self.assertEqual((state["elapsed_ms"], state["usb_calls"],
+                                  state["dfu_calls"], state["ota"]),
+                                 (0, 1, 1, not host))
 
     def test_non_opt_in_two_button_behavior_is_preserved(self):
         # Ordinary boot retains both original primary-button observations.

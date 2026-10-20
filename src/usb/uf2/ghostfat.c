@@ -213,7 +213,11 @@ STATIC_ASSERT(TRUE_USER_FLASH_SIZE % UF2_FIRMWARE_BYTES_PER_SECTOR == 0); // UF2
 STATIC_ASSERT(UF2_SECTORS == ((UF2_SIZE/2) / 256)); // Not a requirement ... ensuring replacement of literal value is not a change
 
   #define UF2_FIRST_SECTOR   ((NUM_INFO_SECTORS + 2) * BPB_SECTORS_PER_CLUSTER)
-  #define UF2_LAST_SECTOR    ((UF2_FIRST_SECTOR + UF2_SECTORS - 1) * BPB_SECTORS_PER_CLUSTER)
+// Freeze the visible extent before USB mounts. Settings are invalidated during
+// an app write, but cached CURRENT sectors must keep their read-only identity
+// until the next USB initialization. Based on meshtastic commits 18758d9 and
+// ba96d6e; the local writer already records an app-relative validated size.
+static uint32_t current_uf2_sectors;
 #endif
 
 #define FS_START_FAT0_SECTOR      BPB_RESERVED_SECTORS
@@ -296,8 +300,21 @@ static inline bool in_uicr_space(uint32_t addr)
 //
 //--------------------------------------------------------------------+
 
-void uf2_init(void)
-{
+void uf2_init(void) {
+#if defined(UF2_HAS_CURRENT_FILE)
+  const bootloader_settings_t *settings;
+  bootloader_util_settings_get(&settings);
+  const uint32_t app_start = DFU_BANK_0_REGION_START;
+  const uint32_t app_size  = settings->bank_0_size;
+
+  current_uf2_sectors = UF2_SECTORS;
+  // Validate before adding the SoftDevice span or rounding. Erased, unknown,
+  // oversized and wrapping settings retain the historical full-region dump.
+  if (app_start - USER_FLASH_START < TRUE_USER_FLASH_SIZE && app_size - 1u < USER_FLASH_END - app_start) {
+    current_uf2_sectors =
+      (app_start - USER_FLASH_START + app_size + UF2_FIRMWARE_BYTES_PER_SECTOR - 1u) / UF2_FIRMWARE_BYTES_PER_SECTOR;
+  }
+#endif
 }
 
 /*------------------------------------------------------------------*/
@@ -339,15 +356,14 @@ __attribute__((noinline)) void read_block(uint32_t block_no, uint8_t *data) {
             //            and all non-NULL .content fit in one sector
             //            and requires it be the last element of the array
             uint32_t const end = (NUM_INFO_SECTORS + 3u) * FAT_ENTRY_SIZE;
-            for (uint32_t i = 1; i < end; ++i) {
-                data[i] = 0xff;
-            }
+            memset(data + 1, 0xff, end - 1u);
         }
 #if defined(UF2_HAS_CURRENT_FILE)
+        uint32_t const current_last_sector = UF2_FIRST_SECTOR + current_uf2_sectors - 1u;
         for (uint32_t i = 0; i < FAT_ENTRIES_PER_SECTOR; ++i) { // Generate the FAT chain for the firmware "file"
             uint32_t v = (sectionIdx * FAT_ENTRIES_PER_SECTOR) + i;
-            if (UF2_FIRST_SECTOR <= v && v <= UF2_LAST_SECTOR)
-                ((uint16_t *)(void *)data)[i] = v == UF2_LAST_SECTOR ? 0xffff : v + 1;
+            if (v - UF2_FIRST_SECTOR < current_uf2_sectors)
+                ((uint16_t *)(void *)data)[i] = v == current_last_sector ? 0xffff : v + 1;
         }
 #endif
     } else if (block_no < FS_START_CLUSTERS_SECTOR) { // Requested root directory sector
@@ -365,6 +381,7 @@ __attribute__((noinline)) void read_block(uint32_t block_no, uint8_t *data) {
             d++;
 #if defined(UF2_COMPACT_RECOVERY_VOLUME)
             memcpy(d, compactFiles, sizeof(compactFiles));
+            d[NUM_FILES - 1u].size = current_uf2_sectors * BPB_SECTOR_SIZE;
 #else
             remainingEntries--;
 #endif
@@ -390,7 +407,7 @@ __attribute__((noinline)) void read_block(uint32_t block_no, uint8_t *data) {
             d->updateDate       = __DOSDATE__;
             d->startCluster     = startCluster & 0xFFFF;
 #if defined(UF2_HAS_CURRENT_FILE)
-            d->size = inf->content ? strlen(inf->content) : UF2_SIZE;
+            d->size = inf->content ? strlen(inf->content) : current_uf2_sectors * BPB_SECTOR_SIZE;
 #else
             d->size = strlen(inf->content);
 #endif
@@ -414,13 +431,13 @@ __attribute__((noinline)) void read_block(uint32_t block_no, uint8_t *data) {
 #endif
             sectionIdx -= NUM_INFO_SECTORS;
             uint32_t addr = USER_FLASH_START + (sectionIdx * UF2_FIRMWARE_BYTES_PER_SECTOR);
-            if (addr < CFG_UF2_FLASH_SIZE) {
+            if (sectionIdx < current_uf2_sectors) {
                 UF2_Block *bl = (void *)data;
                 bl->magicStart0 = UF2_MAGIC_START0;
                 bl->magicStart1 = UF2_MAGIC_START1;
                 bl->magicEnd = UF2_MAGIC_END;
                 bl->blockNo = sectionIdx;
-                bl->numBlocks = UF2_SECTORS;
+                bl->numBlocks = current_uf2_sectors;
                 bl->targetAddr = addr;
                 bl->payloadSize = UF2_FIRMWARE_BYTES_PER_SECTOR;
                 bl->flags = UF2_FLAG_FAMILYID;
@@ -523,7 +540,7 @@ __attribute__((noinline)) int write_block(uint32_t block_no, uint8_t* data, Writ
   // A saved CURRENT.UF2 copied as a new file uses other clusters and remains a
   // valid application transfer.
   if (uf2_current_lba_is_synthetic(block_no, CURRENT_UF2_FIRST_LBA,
-                                   UF2_SECTORS)) {
+                                   current_uf2_sectors)) {
     return BPB_SECTOR_SIZE;
   }
 #endif
@@ -547,6 +564,11 @@ __attribute__((noinline)) int write_block(uint32_t block_no, uint8_t* data, Writ
       return -1;
   }
 
+  // The installed SoftDevice is unchanged during this call: application UF2
+  // only verifies its bytes, and bootloader UF2 writes the scratch region.
+  // Share its runtime-derived boundary across every validation below.
+  const uint32_t app_start = DFU_BANK_0_REGION_START;
+
   uf2_transfer_result_t const transfer_result =
     uf2_transfer_prepare(block->numBlocks, block->blockNo, update_kind, MAX_BLOCKS,
                          &state->numBlocks, &state->updateKind, &state->aborted,
@@ -557,7 +579,7 @@ __attribute__((noinline)) int write_block(uint32_t block_no, uint8_t* data, Writ
   if (transfer_result == UF2_TRANSFER_DUPLICATE) {
     uf2_application_target_t const target_kind =
       uf2_application_target_classify(block->targetAddr, USER_FLASH_START,
-                                      DFU_BANK_0_REGION_START, USER_FLASH_END);
+                                      app_start, USER_FLASH_END);
     bool const destination_matches =
       update_kind != UF2_UPDATE_KIND_APPLICATION ||
       (target_kind != UF2_APPLICATION_TARGET_REQUIRE_MATCH &&
@@ -583,7 +605,7 @@ __attribute__((noinline)) int write_block(uint32_t block_no, uint8_t* data, Writ
 
       uf2_application_target_t const target_kind =
         uf2_application_target_classify(block->targetAddr, USER_FLASH_START,
-                                        DFU_BANK_0_REGION_START, USER_FLASH_END);
+                                        app_start, USER_FLASH_END);
 
       if (block->targetAddr < USER_FLASH_END &&
           uf2_transfer_target_prepare(block->targetAddr, CFG_UF2_FLASH_SIZE,
@@ -660,7 +682,7 @@ __attribute__((noinline)) int write_block(uint32_t block_no, uint8_t* data, Writ
 
   if (update_kind == UF2_UPDATE_KIND_APPLICATION) {
     uf2_transfer_target_commit(block->targetAddr, state->targetMask);
-    if (block->targetAddr >= DFU_BANK_0_REGION_START &&
+    if (block->targetAddr >= app_start &&
         block->targetAddr + UF2_FIRMWARE_BYTES_PER_SECTOR >
           state->appMaximumWrittenEnd) {
       state->appMaximumWrittenEnd =
@@ -691,7 +713,6 @@ __attribute__((noinline)) int write_block(uint32_t block_no, uint8_t* data, Writ
       // Application UF2 programs erased pages directly in 256-byte blocks.
       // Never flush a cache that may belong to an abandoned CDC transfer.
       flash_nrf5x_discard();
-      uint32_t const app_start = DFU_BANK_0_REGION_START;
       uint32_t initial_sp = 0;
       uint32_t reset_vector = 0;
       if (app_start < USER_FLASH_END) {

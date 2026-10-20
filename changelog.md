@@ -3,6 +3,10 @@
 ## Unreleased
 
 - Correct the T1000-E active-high button, ignore RESET as a second user button, and require a three-second hold for USB-first recovery. Releasing the qualified hold keeps the USB request; a short wake press starts the application.
+- Allow a qualified T1000-E wake hold to enter recovery after System OFF, and leave idle UF2 recovery after the host acknowledges eject. Pending application updates keep their existing validation and completion path.
+- Size `CURRENT.UF2` from the installed application's recorded size, including its SoftDevice, with a bounded full-region fallback for unknown sizes. Freeze the mounted file extent so cached writes remain read-only during an update.
+- Build merge-queue candidates in CI and avoid relinking unchanged Make builds when packaging changes the build directory.
+- Use the upstream PowerShell-based Windows UF2 drive discovery and suppress SCSI completion actions after failed USB commands.
 
 - Treat the synthetic `CURRENT.UF2` disk extent as read-only so Windows cached sectors cannot corrupt a new UF2 copy; a saved `CURRENT.UF2` copied back as a new file remains installable.
 - Keep TinyUSB shut down after a USB probe falls back to BLE DFU, including delayed SoftDevice power events and direct USB callbacks.

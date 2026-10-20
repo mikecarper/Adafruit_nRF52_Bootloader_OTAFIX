@@ -29,7 +29,7 @@
 #include "app_timer.h"
 #include "boards.h"
 #include "crc16.h"
-#include "nrf_wdt.h"
+#include "watchdog.h"
 
 #if CFG_TUD_MSC
 
@@ -47,6 +47,9 @@ static bool _first_write = true;
 static bool _app_completion_pending = false;
 static bool _app_completion_after_eject = false;
 static bool _app_msc_command_active = false;
+  #ifdef UF2_EXIT_ON_EJECT
+static bool _exit_after_eject = false;
+  #endif
 static uint32_t _app_completion_last_activity = 0;
 
 #define UF2_APP_COMPLETION_IDLE_MS 1000u
@@ -73,17 +76,7 @@ static void complete_app_update(void)
     uint32_t const chunk = remaining > CODE_PAGE_SIZE ? CODE_PAGE_SIZE : remaining;
     app_crc = crc16_compute((uint8_t const*)(uintptr_t)(_wr_state.appStart + offset),
                             chunk, offset == 0 ? NULL : &app_crc);
-    if (nrf_wdt_started(NRF_WDT))
-    {
-      uint32_t const enabled_channels = NRF_WDT->RREN;
-      for (uint8_t channel = 0; channel < 8; channel++)
-      {
-        if (enabled_channels & (1UL << channel))
-        {
-          nrf_wdt_reload_request_set(NRF_WDT, channel);
-        }
-      }
-    }
+    otafix_watchdog_feed();
     board_watchdog_feed();
     offset += chunk;
   }
@@ -181,6 +174,9 @@ void uf2_write_session_reset(void)
   _app_completion_pending = false;
   _app_completion_after_eject = false;
   _app_msc_command_active = false;
+  #ifdef UF2_EXIT_ON_EJECT
+  _exit_after_eject = false;
+  #endif
 }
 
 void uf2_write_session_close(void)
@@ -190,6 +186,19 @@ void uf2_write_session_close(void)
     complete_app_update();
   }
   uf2_write_session_reset();
+}
+
+// Completion and bus/BOT reset both release command ownership and discard any
+// eject permission after the specialized successful-status callback has run.
+__attribute__((noinline)) static void finish_msc_command(void) {
+  _app_msc_command_active = false;
+  _app_completion_after_eject = false;
+#ifdef UF2_EXIT_ON_EJECT
+  _exit_after_eject = false;
+#endif
+  if (_app_completion_pending) {
+    _app_completion_last_activity = app_timer_cnt_get();
+  }
 }
 
 // TinyUSB invokes these around every valid MSC command, including READ10,
@@ -213,11 +222,9 @@ void tud_msc_command_complete_cb(uint8_t lun, uint8_t const scsi_cmd[16])
   (void) lun;
   (void) scsi_cmd;
 
-  _app_msc_command_active = false;
-  if (_app_completion_pending)
-  {
-    _app_completion_last_activity = app_timer_cnt_get();
-  }
+  // Specialized completion runs first only for a successful SCSI command.
+  // A failed eject must not leave permission for a later media-load command.
+  finish_msc_command();
 }
 
 void tud_msc_reset_cb(void)
@@ -226,12 +233,7 @@ void tud_msc_reset_cb(void)
   // permission to bless an image or honor a half-completed eject, but it must
   // release the lifecycle guard so a completed image can reach a fresh idle
   // boundary while the cable remains connected.
-  _app_msc_command_active = false;
-  _app_completion_after_eject = false;
-  if (_app_completion_pending)
-  {
-    _app_completion_last_activity = app_timer_cnt_get();
-  }
+  finish_msc_command();
 }
 
 //--------------------------------------------------------------------+
@@ -317,10 +319,9 @@ int32_t tud_msc_scsi_cb (uint8_t lun, uint8_t const scsi_cmd[16], void* buffer, 
 int32_t tud_msc_read10_cb (uint8_t lun, uint32_t lba, uint32_t offset, void* buffer, uint32_t bufsize)
 {
   (void) lun;
-  memset(buffer, 0, bufsize);
-
-  // since we return block size each, offset should always be zero
-  TU_ASSERT(offset == 0, -1);
+  // read_block initializes each complete sector, including unallocated space.
+  // Reject partial sectors before that routine can overrun the host buffer.
+  TU_ASSERT(offset == 0 && (bufsize % 512u) == 0, -1);
 
   uint32_t count = 0;
 
@@ -477,6 +478,18 @@ void tud_msc_scsi_complete_cb(uint8_t lun, uint8_t const scsi_cmd[16])
   {
     complete_app_update();
   }
+
+  #ifdef UF2_EXIT_ON_EJECT
+  if (_exit_after_eject && scsi_cmd[0] == SCSI_CMD_START_STOP_UNIT) {
+    // Only leave after the eject status reaches the host. A pending complete
+    // application keeps its validated completion path above; an incomplete
+    // transfer never receives valid settings from this exit.
+    uf2_write_session_reset();
+    dfu_update_status_t update_status = {0};
+    update_status.status_code         = DFU_RESET;
+    bootloader_dfu_update_process(update_status);
+  }
+  #endif
 }
 
 // Invoked when received SCSI_CMD_READ_CAPACITY_10 and SCSI_CMD_READ_FORMAT_CAPACITY to determine the disk size
@@ -513,7 +526,11 @@ bool tud_msc_start_stop_cb(uint8_t lun, uint8_t power_condition, bool start, boo
       }
       else
       {
+  #ifdef UF2_EXIT_ON_EJECT
+        _exit_after_eject = true;
+  #else
         uf2_write_session_reset();
+  #endif
       }
     }
   }

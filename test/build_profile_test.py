@@ -222,6 +222,13 @@ class BuildProfileTest(unittest.TestCase):
         self.make(str(linked_output), *timeout_profile)
         self.assertEqual(1, len(self.compiler_events("link")))
 
+        # Packaging writes beside the ELF and changes the directory mtime.
+        # That must not invalidate an otherwise unchanged linked image.
+        (self.build / "unrelated-package.zip").write_bytes(b"package")
+        self.assertGreater(self.build.stat().st_mtime_ns, linked_output.stat().st_mtime_ns)
+        self.make(str(linked_output), *timeout_profile)
+        self.assertEqual(1, len(self.compiler_events("link")))
+
         changed_link_profile = (
             "DFU_USB_ENUMERATION_TIMEOUT_MS=12345",
             "LDFLAGS=-Wl,--gc-sections",
@@ -328,6 +335,7 @@ class BuildProfileTest(unittest.TestCase):
 
     def test_ci_uses_the_documented_corrected_qualification_lineage(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
+        self.assertRegex(workflow, r"(?m)^  merge_group:\s*$")
         self.assertIn("branches: [ master, feature/ota-delta-apply ]", workflow)
         self.assertRegex(
             workflow,

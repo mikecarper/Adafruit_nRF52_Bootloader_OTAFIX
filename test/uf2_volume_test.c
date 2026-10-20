@@ -36,6 +36,11 @@ static int flash_memcmp(const void *left, const void *right, size_t len) {
 #undef memcmp
 
 uf2_test_ficr_t uf2_test_ficr = {.INFO = {.RAM = 256}};
+static bootloader_settings_t settings;
+
+void bootloader_util_settings_get(const bootloader_settings_t **out) {
+  *out = &settings;
+}
 
 void flash_nrf5x_erase(uint32_t dst, uint32_t len) {
   assert(len == CODE_PAGE_SIZE);
@@ -70,9 +75,15 @@ static uint32_t le32(const uint8_t *p) {
   return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
 }
 
-static void test_volume(void) {
+static void test_volume(uint32_t app_size, uint32_t expected_flash_size) {
   uint8_t sector[512] __attribute__((aligned(4)));
   uint8_t copy[512] __attribute__((aligned(4)));
+  for (size_t i = 0; i < sizeof(flash_image); i++) {
+    flash_image[i] = (uint8_t)(i ^ (i >> 8));
+  }
+  erases = programs = invalidations = 0;
+  settings.bank_0_size = app_size;
+  uf2_init();
   read_block(0, sector);
   assert(sector[510] == 0x55 && sector[511] == 0xAA);
   assert(le16(sector + 11) == 512 && sector[13] == 1 && sector[16] == 2);
@@ -93,7 +104,10 @@ static void test_volume(void) {
   assert(memcmp(sector + 96, "CURRENT UF2", 11) == 0);
   assert(le16(sector + 96 + 26) == 4 && sector[128] == 0);
   uint32_t blocks = le32(sector + 96 + 28) / 512u;
-  assert(blocks == (USER_FLASH_END - USER_FLASH_START) / 256u);
+  assert(blocks == (expected_flash_size + 255u) / 256u);
+  // Application writes invalidate settings. Keep the mounted volume's FAT,
+  // readback headers and protected physical extent stable across that change.
+  settings.bank_0_size = UINT32_MAX;
   read_block(first_data, sector);
   assert(strlen((const char *)sector) == info_sizes[0]);
   assert(strstr((const char *)sector, "UF2 Bootloader v0.11.0-OTAFIX2.4.10\r\n"));
@@ -138,6 +152,15 @@ static void test_volume(void) {
   }
   assert(erases == 0 && programs == 0 && invalidations == 0);
 
+  // Raw reads past the advertised file must never disclose reserved app data,
+  // the bootloader image, or its settings, even when the host bypasses the FAT.
+  for (uint32_t lba = first_data + blocks; lba < BPB_TOTAL_SECTORS; lba++) {
+    read_block(lba, sector);
+    for (unsigned i = 0; i < sizeof(sector); i++) {
+      assert(sector[i] == 0);
+    }
+  }
+
   // A new file in free clusters must still flash, even though CURRENT is visible.
   UF2_Block app = {
     .magicStart0 = UF2_MAGIC_START0, .magicStart1 = UF2_MAGIC_START1,
@@ -157,8 +180,16 @@ static void test_volume(void) {
 }
 
 int main(void) {
-  for (size_t i = 0; i < sizeof(flash_image); i++) flash_image[i] = (uint8_t)(i ^ (i >> 8));
-  test_volume();
-  puts("T-Echo Lite UF2: INFO/INDEX contents, FAT, readback, cached-write guard and drag-and-drop PASS");
+  const uint32_t sd_span       = DFU_BANK_0_REGION_START - USER_FLASH_START;
+  const uint32_t max_app_size  = USER_FLASH_END - DFU_BANK_0_REGION_START;
+  const uint32_t valid_sizes[] = {1, 255, 256, 257, 729528, max_app_size - 1u, max_app_size};
+  for (unsigned i = 0; i < ARRAY_SIZE(valid_sizes); i++) {
+    test_volume(valid_sizes[i], sd_span + valid_sizes[i]);
+  }
+  const uint32_t invalid_sizes[] = {0, UINT32_MAX, UINT32_MAX - sd_span + 1u, max_app_size + 1u, 0x80000000u};
+  for (unsigned i = 0; i < ARRAY_SIZE(invalid_sizes); i++) {
+    test_volume(invalid_sizes[i], TRUE_USER_FLASH_SIZE);
+  }
+  puts("T-Echo Lite UF2: bounded CURRENT size, mount snapshot, FAT, readback and drag-and-drop PASS");
   return 0;
 }
