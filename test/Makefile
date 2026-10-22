@@ -323,9 +323,12 @@ check: apply_sim readback_test readback_test_v7 readback_internal_test bootloade
 	python3 screen_render_test.py
 	python3 usb_task_budget_test.py
 	python3 ../lib/tinyusb/test/otafix/nrf5x_power_test.py
+	python3 ../lib/tinyusb/test/otafix/breakpoint_header_test.py
 	python3 ../lib/tinyusb/test/otafix/nrf5x_dma_test.py
 	python3 ../lib/tinyusb/test/otafix/nrf5x_dma_test.py --iso 0
+	python3 ../lib/tinyusb/test/otafix/ep0_setup_test.py
 	python3 ../lib/tinyusb/test/otafix/msc_status_test.py
+	python3 ../lib/tinyusb/test/otafix/msc_drain_test.py --negative-old --negative-reset-guard
 	python3 uf2_243_differential_test.py
 	python3 uf2_handoff_test.py
 	python3 uf2_eject_test.py

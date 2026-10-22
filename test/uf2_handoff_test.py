@@ -2,6 +2,7 @@
 """Model and source guards for clean UF2 application handoff."""
 
 from pathlib import Path
+import re
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -222,7 +223,13 @@ def source_guards() -> None:
     )
     if not specialized_complete < command_complete < next_cbw:
         raise AssertionError("command guard must end after specialized completion and before next CBW")
-    if TINYUSB_MSC_SOURCE.count("if (tud_msc_reset_cb) tud_msc_reset_cb();") < 2:
+    reset_hooks = re.findall(
+        r"\bif\s*\(\s*tud_msc_reset_cb\s*\)\s*"
+        r"(?:\{\s*tud_msc_reset_cb\s*\(\s*\)\s*;\s*\}"
+        r"|tud_msc_reset_cb\s*\(\s*\)\s*;)",
+        TINYUSB_MSC_SOURCE,
+    )
+    if len(reset_hooks) < 2:
         raise AssertionError("both BOT and USB bus resets must abandon command state")
 
     sync_case = MSC_SOURCE[
