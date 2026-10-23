@@ -746,10 +746,14 @@ void SD_EVT_IRQHandler(void) {
 // Error Handler
 //--------------------------------------------------------------------+
 void app_error_fault_handler(uint32_t id, uint32_t pc, uint32_t info) {
+#ifdef NRF_USBD
+  TU_BREAKPOINT();
+#else
   volatile uint32_t *ARM_CM_DHCSR = ((volatile uint32_t *)0xE000EDF0UL); /* Cortex M CoreDebug->DHCSR */
   if ((*ARM_CM_DHCSR) & 1UL) {
     __asm("BKPT #0\n");                                                  /* Only halt mcu if debugger is attached */
   }
+#endif
   otafix_system_reset();
 }
 

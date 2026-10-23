@@ -3,6 +3,7 @@
 
 from collections import deque
 from pathlib import Path
+import re
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -118,7 +119,11 @@ def main() -> None:
     assert "bool tud_msc_write10_retry_snapshot(uint32_t* generation);" in msc_header
     assert "bool tud_msc_write10_retry(uint32_t generation);" in msc_header
 
-    reset_start = msc.index("static void proc_bot_reset")
+    reset_match = re.search(
+        r"static\s+(?:__attribute__\s*\(\([^)]*\)\)\s+)?void\s+proc_bot_reset\s*\(", msc
+    )
+    assert reset_match, "BOT reset implementation not found"
+    reset_start = reset_match.start()
     reset_body = msc[reset_start : msc.index("// Invoked when", reset_start)]
     assert "clear_write10_retry(p_msc);" in reset_body
     fail_start = msc.index("static void fail_scsi_op")

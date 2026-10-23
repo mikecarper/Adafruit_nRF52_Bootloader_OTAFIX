@@ -55,6 +55,9 @@
 
 // CDC and MSC use control, bulk and interrupt transfers only.
 #define CFG_TUD_NRF5X_ISO            0
+// The bootloader runs endpoint STALL callbacks only from its serialized USB
+// task, outside caller-held global critical sections.
+#define CFG_TUD_NRF5X_CONTROL_STALL_QUIET 1
 
 //------------- Class enabled -------------//
 #define CFG_TUD_CDC                 1

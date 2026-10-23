@@ -271,7 +271,7 @@ static void gpregret_set(uint32_t v) {
 static uint32_t gpregret2_get(void) {
   return NRF_POWER->GPREGRET2;
 }
-static void gpregret2_set(uint32_t v) {
+__attribute__((noinline, noclone)) static void gpregret2_set(uint32_t v) {
   NRF_POWER->GPREGRET2 = v;
 }
 static uint16_t crc16_region(uint32_t a, uint32_t len) {
@@ -774,11 +774,13 @@ static int dt_pr(void *a, uint8_t *dst, size_t n) {
 }
 
 struct mota_min {
+  // Keep frequently tested flags in range of Thumb's narrow byte loads.
+  uint8_t is_full, approved, format_ver, flags, hash_algo, block_size_log2;
+  uint8_t identity_alignment[2];
   uint32_t total, image_size, payload_size, payload_addr, approval_addr;
   uint32_t target_id, fw_version, block_count;
   // Keep the byte-only image identity in wire order for one bounded copy.
   uint8_t image_hash[32], codec_id, hw_id[32], base_hash[8];
-  uint8_t is_full, approved, format_ver, flags, hash_algo, block_size_log2;
 };
 
 // The manifest prefix is invariant and byte-oriented. Byte arrays keep every
@@ -807,7 +809,8 @@ typedef struct {
 typedef char mota_fixed_header_size_must_match_wire_format
   [(sizeof(mota_fixed_header_t) == 8u + MOTA_MFL) ? 1 : -1];
 typedef char mota_image_identity_layout_must_match_wire_format
-  [(offsetof(struct mota_min, is_full) - offsetof(struct mota_min, image_hash) ==
+  [(offsetof(struct mota_min, base_hash) + sizeof(((struct mota_min *)0)->base_hash) -
+      offsetof(struct mota_min, image_hash) ==
     offsetof(mota_fixed_header_t, signer) - offsetof(mota_fixed_header_t, image_hash))
      ? 1
      : -1];

@@ -324,9 +324,28 @@ check: apply_sim readback_test readback_test_v7 readback_internal_test bootloade
 	python3 usb_task_budget_test.py
 	python3 ../lib/tinyusb/test/otafix/nrf5x_power_test.py
 	python3 ../lib/tinyusb/test/otafix/breakpoint_header_test.py
-	python3 ../lib/tinyusb/test/otafix/nrf5x_dma_test.py
-	python3 ../lib/tinyusb/test/otafix/nrf5x_dma_test.py --iso 0
+	python3 ../lib/tinyusb/test/otafix/nrf5x_dma_test.py --quiet-mode 0
+	python3 ../lib/tinyusb/test/otafix/nrf5x_dma_test.py --iso 0 --quiet-mode 0
+	python3 ../lib/tinyusb/test/otafix/nrf5x_dma_test.py --negative-clear-active
+	python3 ../lib/tinyusb/test/otafix/nrf5x_dma_test.py --iso 0 --negative-clear-active
+	python3 ../lib/tinyusb/test/otafix/nrf5x_dma_test.py --negative-abort-stale
+	python3 ../lib/tinyusb/test/otafix/nrf5x_dma_test.py --iso 0 --negative-abort-stale
+	python3 ../lib/tinyusb/test/otafix/nrf5x_dma_test.py --negative-stall-dma
+	python3 ../lib/tinyusb/test/otafix/nrf5x_dma_test.py --iso 0 --negative-stall-dma
+	python3 ../lib/tinyusb/test/otafix/nrf5x_dma_test.py --negative-abort-sibling
+	python3 ../lib/tinyusb/test/otafix/nrf5x_dma_test.py --iso 0 --negative-abort-sibling
+	python3 ../lib/tinyusb/test/otafix/nrf5x_dma_test.py --negative-abort-epoch
+	python3 ../lib/tinyusb/test/otafix/nrf5x_dma_test.py --iso 0 --negative-abort-epoch
+	python3 ../lib/tinyusb/test/otafix/nrf5x_dma_test.py --quiet-mode 1
+	python3 ../lib/tinyusb/test/otafix/nrf5x_dma_test.py --iso 0 --quiet-mode 1
+	python3 ../lib/tinyusb/test/otafix/nrf5x_dma_test.py --negative-quiet-status
+	python3 ../lib/tinyusb/test/otafix/nrf5x_dma_test.py --iso 0 --negative-quiet-status
+	python3 ../lib/tinyusb/test/otafix/nrf5x_dma_test.py --negative-quiet-stall
+	python3 ../lib/tinyusb/test/otafix/nrf5x_dma_test.py --iso 0 --negative-quiet-stall
+	python3 ../lib/tinyusb/test/otafix/nrf5x_dma_test.py --negative-quiet-masked
+	python3 ../lib/tinyusb/test/otafix/nrf5x_dma_test.py --iso 0 --negative-quiet-masked
 	python3 ../lib/tinyusb/test/otafix/ep0_setup_test.py
+	python3 ../lib/tinyusb/test/otafix/clear_halt_test.py
 	python3 ../lib/tinyusb/test/otafix/msc_status_test.py
 	python3 ../lib/tinyusb/test/otafix/msc_drain_test.py --negative-old --negative-reset-guard
 	python3 uf2_243_differential_test.py
