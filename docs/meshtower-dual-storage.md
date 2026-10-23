@@ -1,8 +1,11 @@
 # MeshTower V2 combined SD/internal bootloader
 
-Combined SD/internal implementation, merged into `feature/ota-delta-apply`
-for the MeshTower 2.4.11 asset refresh. The original hardware qualification
-and the subsequent merged-tree checks are distinguished below.
+Current release: [OTAFIX 2.4.12](release-2.4.12.md). [Download 2.4.12](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.12).
+
+OTAFIX 2.4.12 retains the combined SD/internal MeshTower implementation first
+published in the 2.4.11 asset refresh. Use the 2.4.12 downloads for new
+installations. The original hardware qualification and the subsequent
+2.4.11 merged-tree checks below retain their original artifact identities.
 
 ## Default and migration
 

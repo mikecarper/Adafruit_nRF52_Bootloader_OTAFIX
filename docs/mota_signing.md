@@ -1,5 +1,10 @@
 # Signing OTAFIX bootloader mOTA packages
 
+Use the signed `OTAFIX-2.4.12-bootloader-mota.zip` bundle from the
+[current 2.4.12 release](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.12).
+The [release notes](release-2.4.12.md) record the supported profiles and
+unperformed physical RAK15002/NOR interruption checks.
+
 Bootloader `.mota` files are privileged format-3 packages. They must contain a
 full, exact-board 40 KiB bootloader image and a valid Ed25519 signature from a
 key trusted by the running MeshCore application. Ordinary UF2, serial/BLE DFU,
@@ -32,13 +37,13 @@ installed bootloader unchanged. These installed identities require the
 [local recovery bridge](recovery-allow-all.md) to change to the new compatible
 identity.
 
-The **OTAFIX 2.4.10 normal compatible RAK images** support signed bootloader
+The **OTAFIX 2.4.12 normal compatible RAK images** support signed bootloader
 mOTA and retain `3401_DFU` / `4631_DFU`, ABI 3, and storage flags `0A`.
 Existing standard board devices can install them as ordinary signed bootloader
 updates, without a migration bridge. There is one normal `*_auto` image per
 physical RAK model. Updated unified applications detect optional external NOR
 through a separate capability record; bootloader packages always stage
-internally. See the [release notes](release-2.4.10.md) and
+internally. See the [current release notes](release-2.4.12.md) and
 [hardware qualification](hardware-qualification-2.4.10-rak-auto.md).
 The repaired adaptive `R_` recovery builds accept signed bootloader `.mota`
 packages for their exact historical `*_AUTO_DFU` identities after they have
@@ -50,7 +55,7 @@ images require external NOR or microSD; internal-only staging, including the
 adaptive RAK fallback, supports deltas only. The retained RAM arena increases
 delta capacity without enabling internal full application installs. See the
 [complete board feature audit](update-feature-audit.md) for the released matrix
-and other omitted features.
+and the storage and transport limits.
 
 MeshCore 1.17.1.5's lean LoRa
 target and 1.17.1.7's unified target have different mOTA target IDs. Use an
@@ -74,8 +79,10 @@ ota bootloader install <MID8> <HASH16>
 
 Copy `MID8` and `HASH16` from the device output. A bootloader package is never
 automatically installed. Verify the exact physical board and storage profile;
-`heltec_mesh_tower_v2` and `heltec_mesh_tower_v2_sdcard` are not
-interchangeable.
+the current combined `heltec_mesh_tower_v2_sdcard` image preserves the
+SD-primary contract. Historical internal-only `heltec_mesh_tower_v2` units
+need a one-time local migration; their shared target ID does not authorize a
+cross-profile LoRa update. See [MeshTower migration](meshtower-dual-storage.md).
 
 The official bundle includes the `gat562` selector for the GAT562 30S Kit,
 Mesh Tracker Pro, EVB Pro / 30S Pod, and Solar Relay carriers. It uses board ID
@@ -138,7 +145,7 @@ serial mode removes the `meshcli` dependency but still requires PySerial:
 ```bash
 python3 tools/otafix_mota_update.py \
   --direct-serial \
-  --release-bundle OTAFIX-2.4.6-bootloader-mota.zip \
+  --release-bundle OTAFIX-2.4.12-bootloader-mota.zip \
   --motatool /path/to/motatool
 ```
 
@@ -221,14 +228,14 @@ Build one exact-board package from the immutable release HEX:
 
 ```bash
 ./target/release/motatool build-bootloader \
-  --fw heltec_t114_bootloader-0.11.0-OTAFIX2.4.3_s140_6.1.1.hex \
+  --fw heltec_t114_bootloader-v0.11.0-OTAFIX2.4.12_s140_6.1.1.hex \
   --board heltec_t114 \
   --sign custom-otafix.key \
-  --fw-version 2.4.3.255 \
-  --out update-heltec_t114_bootloader-0.11.0-OTAFIX2.4.3.mota
+  --fw-version 2.4.12.255 \
+  --out update-heltec_t114_bootloader-v0.11.0-OTAFIX2.4.12.mota
 
 ./target/release/motatool verify \
-  update-heltec_t114_bootloader-0.11.0-OTAFIX2.4.3.mota \
+  update-heltec_t114_bootloader-v0.11.0-OTAFIX2.4.12.mota \
   --pub custom-otafix.key.pub
 ```
 
@@ -252,7 +259,7 @@ python3 tools/build_bootloader_mota_release.py \
   --motatool /path/to/motatool \
   --sign-key /secure/path/otafix-release.key \
   --public-key tools/otafix_mota_release.pub \
-  --tag 0.11.0-OTAFIX2.4.3
+  --tag v0.11.0-OTAFIX2.4.12
 ```
 
 The builder creates and verifies all qualified packages, requires the signer to

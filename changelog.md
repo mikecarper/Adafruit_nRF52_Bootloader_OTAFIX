@@ -1,6 +1,18 @@
 # Adafruit nRF52 Bootloader Changelog
 
-## Unreleased
+## OTAFIX 2.4.12 - 2026.10.22
+
+Release notes and current downloads: [OTAFIX 2.4.12](docs/release-2.4.12.md).
+
+- Fix concurrent USB control/MSC stall recovery, bounded rejected OUT draining,
+  signed unsupported-SCSI errors, reset/clear-halt state and CDC recovery.
+- Retain full RAK4631 internal/RAM/NOR/SD support within the unchanged flash
+  envelope and qualify Arm GNU 15.3.Rel1 across the current source profiles.
+- Include authenticated RAK15002 application apply with source/host validation;
+  physical SD/NOR interruption and power-cut qualification remains outstanding.
+- All 38 source profiles pass Make and CMake; nine connected nRF52840 devices
+  pass original-application and SoftDevice preservation checks. See the
+  [qualification report](docs/hardware-qualification-2.4.12.md) for exact scope.
 
 - Correct the T1000-E active-high button, ignore RESET as a second user button, and require a three-second hold for USB-first recovery. Releasing the qualified hold keeps the USB request; a short wake press starts the application.
 - Allow a qualified T1000-E wake hold to enter recovery after System OFF, and leave idle UF2 recovery after the host acknowledges eject. Pending application updates keep their existing validation and completion path.

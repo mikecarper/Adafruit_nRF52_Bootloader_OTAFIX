@@ -1,5 +1,7 @@
 # Secure BLE DFU all-board qualification
 
+Current release: [OTAFIX 2.4.12](release-2.4.12.md). [Download 2.4.12](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.12).
+
 `SECURE_DFU_TEST=ON` replaces the Legacy **BLE** DFU service with the resumable
 Nordic Secure DFU wire protocol on the curated nRF52840 board configurations.
 USB CDC serial DFU, UF2 recovery, the display and LoRa mOTA are retained. Normal

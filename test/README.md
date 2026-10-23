@@ -1,5 +1,7 @@
 # Bootloader `.mota` apply - host simulation test
 
+Current release: [OTAFIX 2.4.12](../docs/release-2.4.12.md). See the [2.4.12 qualification report](../docs/hardware-qualification-2.4.12.md) for current build and hardware results.
+
 Validates the nRF52 in-place delta apply (`src/ota_delta.c` + the vendored `detools` decoder + `sha256`)
 **on the host, without hardware**. It compiles the real `ota_delta_check_and_apply()` with the
 `OTA_DELTA_HOST_TEST` shims, lays out a RAM "flash" exactly like the device (running image at `APP_BASE`,

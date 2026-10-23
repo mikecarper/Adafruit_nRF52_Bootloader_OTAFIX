@@ -1,5 +1,7 @@
 # Seven-board pin provenance follow-up
 
+Current release: [OTAFIX 2.4.12](release-2.4.12.md). [Download 2.4.12](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.12). Historical versions and qualification evidence below are retained as recorded.
+
 Checked 2026-09-29 against MeshCore upstream **dev** at
 `33468c4f80aaeae64e8bef5692e66d8978c82434` and Meshtastic **develop** at
 `778184c7a1b91993c810558325570cdbec4cc457`, plus manufacturer documentation,

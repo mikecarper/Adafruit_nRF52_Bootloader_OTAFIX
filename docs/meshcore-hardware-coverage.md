@@ -1,11 +1,19 @@
 # MeshCore bootloader coverage audit
 
-Current mapping checked on 2026-10-02: **55 explicit nRF52 hardware names**,
+Current release: [OTAFIX 2.4.12](release-2.4.12.md). [Download 2.4.12](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.12).
+
+Current mapping checked on 2026-10-22: **55 explicit nRF52 hardware names**,
 including PCA10056 and XIAO Sense beyond the 53-name 1.17.1.7 picker audit.
-There are **40 names mapped to 23 normal OTAFIX 2.4.11 profiles**. Of the 15
+There are **40 names mapped to 23 normal OTAFIX 2.4.12 profiles**. Of the 15
 unavailable names, **12 map to nine pending source ports**, two still require
 hardware facts before implementation, and one is the retired internal-only Tower
 identity requiring local migration to the combined SD/internal image.
+
+The 2.4.12 source inventory contains 38 qualification build profiles, 29
+production build profiles, 23 normal downloads and 28 recovery profiles.
+For exact files and qualification status, use the
+[supported-board inventory](../supported_boards.md) and the release download
+manifest. Dated verification results below retain their historical versions.
 
 This audit verifies source compatibility and download identity. It does not
 claim that every carrier was physically tested. Sharing an nRF52840 or a
@@ -33,8 +41,8 @@ These nine source ports have `OTAFIX_BOARD_QUALIFICATION_PENDING ON`.
 Qualification CI builds them but production CI, normal release uploads, download
 manifests and signed release bundles exclude them. Recovery release archives
 also exclude pending profiles. Remove
-that marker only after the checks below pass. They do not
-add or replace binaries in the already published 2.4.11 release.
+that marker only after the checks below pass. They remain excluded from
+2.4.12 downloads until physically qualified.
 
 | New target | Confirmed difference from existing targets | Source contract |
 | --- | --- | --- |

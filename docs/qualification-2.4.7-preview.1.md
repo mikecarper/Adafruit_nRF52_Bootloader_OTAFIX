@@ -1,5 +1,7 @@
 # OTAFIX 2.4.7-preview.1 qualification checkpoint
 
+Current release: [OTAFIX 2.4.12](release-2.4.12.md). [Download 2.4.12](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.12). Historical versions and qualification evidence below are retained as recorded.
+
 **Build/host tests passed. Physical update qualification is on hold.**
 The connected RAK3401 exposed an application USB READY wait hang, and the Pi
 had earlier unattended hub resets. See the [USB investigation](mercer-usb-investigation-2026-09-10.md).

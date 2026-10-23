@@ -1,5 +1,7 @@
 # RAK3401 resumable BLE DFU laboratory profile
 
+Current release: [OTAFIX 2.4.12](release-2.4.12.md). [Download 2.4.12](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.12). Historical versions and qualification evidence below are retained as recorded.
+
 For the generalized `SECURE_DFU_TEST` profile and current all-board fit results,
 see [Secure BLE all-board qualification](secure-dfu-all-boards-test.md). The
 RAK-only flag below remains a compatibility alias; this document records the

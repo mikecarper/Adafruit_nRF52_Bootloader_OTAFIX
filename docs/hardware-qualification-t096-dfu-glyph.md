@@ -1,5 +1,7 @@
 # T096 block DFU glyph qualification
 
+Current release: [OTAFIX 2.4.12](release-2.4.12.md). [Download 2.4.12](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.12). Historical versions and qualification evidence below are retained as recorded.
+
 Test date: 2026-09-04. Target: `heltec_t096`, connected to a Raspberry Pi
 controller. Device and controller identifiers are omitted from this public report.
 

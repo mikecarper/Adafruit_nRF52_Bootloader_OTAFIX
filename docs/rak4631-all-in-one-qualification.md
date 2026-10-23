@@ -1,7 +1,28 @@
 # RAK4631 all-in-one OTAFIX qualification
 
-This is a test candidate, not a published or hardware-qualified release.
-The target is `wiscore_rak4631_auto`. Do not flash a failed or oversized build.
+Current release: [OTAFIX 2.4.12](release-2.4.12.md). [Download 2.4.12](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.12).
+
+OTAFIX 2.4.12 includes the all-in-one `wiscore_rak4631_auto` profile.
+Its internal, retained-RAM, NOR and RAK15002 SD paths are retained without
+feature cuts. RAK15002 wiring is source-verified; physical SD/NOR interruption
+qualification remains incomplete. The dated candidate results below are
+historical measurements, not measurements of the production 2.4.12 files.
+
+## Current 2.4.12 qualification
+
+The final `0x02040C8E` qualification candidate passed Make and CMake builds for
+all 38 board profiles with GCC 15.3.1. The combined RAK4631 executable load is
+40,728 / 40,784 bytes, leaving 56 bytes before CF2 with all features retained.
+All nine connected nRF52 devices received that candidate; exact readback
+verified that each original application and SoftDevice was preserved. Those
+installations validate the test candidate, rather than the separately built
+production release files. See the [2.4.12 qualification report](hardware-qualification-2.4.12.md).
+
+The RAK15002 pin tuple matches RAK's official example and RAK4631 variant
+mapping. The focused SPI, SD apply, authorization and storage-isolation mock
+tests passed (34 cases). No RAK15002 is available in this lab, so real card
+compatibility, removal, interrupted updates and power-cut recovery have not
+been physically validated for this path.
 
 ## Storage contract
 
@@ -37,6 +58,9 @@ MOSI P0.30 and MISO P0.29. These are physical pins, not a translated Arduino
 pin numbering scheme. The radio's separate SPI instance is not used.
 The module uses unswitched 3V3; no GPS sensor-slot power rail is toggled.
 See the [manufacturer's RAK15002 datasheet](https://docs.rakwireless.com/product-categories/wisblock/rak15002/datasheet/).
+The [official RAK15002 example](https://github.com/RAKWireless/WisBlock/blob/master/examples/RAK4630/IO/RAK15002_SD_Card/RAK15002_SD_Card.ino)
+and [RAK4631 variant definitions](https://github.com/RAKWireless/RAK-nRF52-Arduino/blob/master/variants/WisCore_RAK4631_Board/variant.h)
+provide the corresponding Arduino-to-physical pin mapping.
 
 RAK15001 and RAK15002 share a chip select and cannot be installed on the same
 bus simultaneously. Other supported NOR on CS P0.31 stays deselected before
@@ -59,12 +83,13 @@ Internal/RAM apply does not initialize the external bus.
   sleep, JEDEC rejection, bounded busy waits, failed transport and verified
   approval-word programming without modifying neighboring bytes.
 - Build and test the existing RAK3401, Heltec T096/T114 and Tower profiles.
-- Before production promotion, physically qualify RAK15002 and every supported
-  NOR wiring, including corrupt/removable media, reboot, interrupted erase,
-  deliberate power cuts during apply and USB/BLE recovery.
+- Outstanding physical qualification: RAK15002 and every supported NOR wiring,
+  including corrupt/removable media, reboot, interrupted erase, deliberate
+  power cuts during apply and USB/BLE recovery. The 2.4.12 release includes
+  these paths with this physical-test limitation recorded.
 
 No RAK15002 is available in the current lab. Host tests and ARM builds do not
-replace those physical checks. This change builds the bootloader first; it
+replace those physical checks. The bootloader provides the capability; it
 does not claim that current MeshCore application firmware already stages or
 installs SD updates using this new capability.
 

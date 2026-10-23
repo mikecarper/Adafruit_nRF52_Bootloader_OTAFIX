@@ -1,5 +1,7 @@
 # Adaptive RAK bootloader recovery hardware result (2026-09-27)
 
+Current release: [OTAFIX 2.4.12](release-2.4.12.md). [Download 2.4.12](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.12). Historical versions and qualification evidence below are retained as recorded.
+
 A RAK3401 on MercerWoodMesh was tested with its exact OTAFIX 2.4.8 adaptive
 bootloader (`3401_AUTO_DFU`, target `D04AB3AB`, ABI 2, flags `0x16`) and a
 temporary MeshCore repeater application. The original 1 MiB flash and UICR

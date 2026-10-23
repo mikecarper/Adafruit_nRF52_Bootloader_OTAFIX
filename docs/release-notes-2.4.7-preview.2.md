@@ -1,5 +1,7 @@
 # OTAFIX 2.4.7-preview.2
 
+Current release: [OTAFIX 2.4.12](release-2.4.12.md). [Download 2.4.12](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.12). Historical versions and qualification evidence below are retained as recorded.
+
 USB READY fix test candidate, not a stable release. Canonical tag:
 `0.11.0-OTAFIX2.4.7-preview.2`; packed version: `0x02040702`.
 GCC remains 14.2.Rel1. No bootloader region, board identity, signing policy,

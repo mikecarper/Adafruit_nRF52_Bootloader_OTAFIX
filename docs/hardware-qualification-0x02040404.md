@@ -1,5 +1,7 @@
 # OTAFIX 2.4.4 hardware qualification (`0x02040404`)
 
+Current release: [OTAFIX 2.4.12](release-2.4.12.md). [Download 2.4.12](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.12). Historical versions and qualification evidence below are retained as recorded.
+
 > **Disqualified:** this candidate changed the historical Device Information
 > attribute layout. The model value moved from cached handle `0x001A` to
 > `0x0018`, so a bonded Legacy DFU client could receive `Invalid Handle` before

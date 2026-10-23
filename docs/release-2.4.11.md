@@ -1,5 +1,7 @@
 # OTAFIX 2.4.11
 
+Current release: [OTAFIX 2.4.12](release-2.4.12.md). [Download 2.4.12](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.12). Historical versions and qualification evidence below are retained as recorded.
+
 Full normal bootloader release. Packed version: `0x02040BFF`.
 
 ## MeshTower SD/internal refresh

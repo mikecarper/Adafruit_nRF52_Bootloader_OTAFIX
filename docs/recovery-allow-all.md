@@ -5,24 +5,22 @@ These are temporary **recovery bridges**, not normal bootloader upgrades.
 over Legacy serial/BLE DFU and bootloader-family UF2. It is available for every
 board profile; each profile still supports only its normal transports.
 
-The [in-place 2.4.11 recovery correction](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/blob/feature/ota-delta-apply/docs/release-2.4.11-recovery-correction.md) adds a narrow
-Bluetooth handoff fault fallback for older MeshCore applications. Corrected
-assets replace files on the existing `R_0.11.0-OTAFIX2.4.11` prerelease after
-the required production checks. That original distribution tag remains unchanged;
-production builds use the clean source-only tag
-`R_v0.11.0-OTAFIX2.4.11`. All 110 existing asset names remain unchanged,
-with replacement checksums and source provenance recorded in the inventory.
-This correction creates no 2.4.12 release. The normal latest release remains 2.4.10.
-It includes the local recovery packages without an Open kit or signed
-bootloader mOTA bundle. Existing mOTA features remain enabled.
+Use `OTAFIX-2.4.12-R_recovery.zip` from the
+[current 2.4.12 release](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.12).
+It contains 28 recovery profiles with inventory and checksums. Nine pending
+source ports and the historical internal-only Tower profile remain excluded.
+It includes the narrow Bluetooth handoff fault fallback for older MeshCore
+applications and the current USB fixes. The separate signed bootloader mOTA
+bundle remains board-protected; no Open kit or automatic settings erase is
+included. See the [2.4.12 release notes](release-2.4.12.md) for hardware limits,
+including unperformed physical RAK15002/NOR power-cut qualification.
 
-The corrected 2.4.11 RAK4631 qualification image passed Bluetooth application
-updates through Nordic nRF Connect 4.24.3 and MeshCore Open 9.5.5, starting
-from the exact reported 1.17.1.7 application. The saved radio tuple and seven
-compared settings were preserved. The linked correction notes distinguish
-this qualification image from production assets and the earlier lab-only
-2.4.12 test. Production assets must pass the clean-tag build and package
-validation described below before upload.
+The [historical 2.4.11 correction](release-2.4.11-recovery-correction.md)
+records a RAK4631 Bluetooth application update through Nordic nRF Connect
+4.24.3 and MeshCore Open 9.5.5, starting from application 1.17.1.7. Its radio
+tuple and seven compared settings were preserved. That report describes
+qualification images and the historical source-only rebuild tags; use the
+2.4.12 archive for current recovery.
 
 New recovery builds ignore the incoming bootloader's board, name, version,
 BLMF/BLM2 manifest, manifest CRC and layout declarations. They accept older
@@ -35,10 +33,9 @@ and signatures when `SIGNED_FW=1` remain required. UF2 retains its framing,
 address and transfer-completion checks. Remote signed `.mota` updates still
 require their exact board identity, whole-image CRC and layout metadata.
 
-The previously published 2.4.10 recovery archive predates this policy change
-and rejects the original manifest-free 2.3 ZIP. Rebuild the bridge with this
-code before attempting the direct downgrade; repackaging old binaries does
-not add the new behavior.
+The original 2.4.10 recovery archive predates this policy change and rejects
+the manifest-free 2.3 ZIP. Use the current 2.4.12 bridge before a direct
+downgrade; repackaging old binaries does not add the new behavior.
 
 ## Two-step USB recovery
 
@@ -73,36 +70,27 @@ or Bluetooth DFU connection for that one-time bootstrap, then reinstall the
 application. If buttonless entry itself fails, use the board's supported
 hardware DFU entry. Verify the installed bootloader version after transfer;
 a successful copy alone does not prove activation. No automatic filesystem
-erase is added by the 2.4.11 correction. Because the original and corrected
-assets retain the same version, compare the installed manifest CRC against
-the corrected profile's inventory as well as checking the version.
+erase is added. Verify the 2.4.12 packed version (`0x02040CFF`) and installed
+manifest CRC against the selected recovery profile's inventory.
 
 Confirm the physical board manually. Allow-all means the bridge can accept the
 wrong board again. Do not leave it installed for normal use. Back up settings
 where possible and plan for application/settings loss during recovery.
 
-For standard `3401_DFU` / `4631_DFU` devices, the next compatible `*_auto`
-release preserves the installed identity. Use its ordinary signed bootloader
+For standard `3401_DFU` / `4631_DFU` devices, the normal 2.4.12 `*_auto`
+image preserves the installed identity. Use its ordinary signed bootloader
 `.mota` or matching local updater directly; no recovery bridge is needed.
 For historical `3401_AUTO_DFU` / `4631_AUTO_DFU` devices, the recovery `*_auto`
 images deliberately keep those old names. Install that temporary local bridge,
 then the normal compatible image. Dedicated external RAK identities also retain
 their matching bridges inside this archive.
 
-The two adaptive recovery images in the repaired 2.4.10 archive also accept
-signed bootloader `.mota` packages over LoRa. Their packages must target the
-exact historical `*_AUTO_DFU` identity and retain the internal bootloader
-staging and optional application-storage capabilities. The recovery packages
-in that repaired 2.4.10 archive update only a device already running the
-matching recovery bridge. They do not migrate to the normal `*_DFU` identity; complete that
-one-time transition with the local updater above.
-
-For the in-place 2.4.10 repair, the two adaptive images were rebuilt from the
-exact source-only tag `R_v0.11.0-OTAFIX2.4.10` at commit `ff7959c`.
-The other 27 board images are unchanged. The archive manifest records the
-source tag, both signed package identities, and every artifact checksum.
-Host tests and package verification passed; these repaired images have not
-been installed on physical boards as part of this repair.
+The adaptive recovery images accept signed bootloader `.mota` packages for
+their exact historical `*_AUTO_DFU` identities. Matching recovery packages
+update only an already installed recovery bridge. They do not migrate to the
+normal `*_DFU` identity; complete that transition with the local updater above.
+The historical [2.4.10 release notes](release-2.4.10.md) record the earlier
+in-place adaptive-archive repair and its separate source provenance.
 
 ## Linux build
 
@@ -115,7 +103,7 @@ their installation directories.
 From an untagged or dirty development checkout:
 
 ```sh
-python3 tools/build_all.py --recovery-allow-all-boards --test-version 0x02040601 --jobs 4
+python3 tools/build_all.py --recovery-allow-all-boards --test-version 0x02040C01 --jobs 4
 ```
 
 This builds **every board**, including future profiles added under `src/boards`,
@@ -125,7 +113,7 @@ names have a short `R_` prefix (UF2 updaters use `update-R_...`); board identity
 USB drive names intentionally remain unchanged. Do not upload leftover packages
 from older builds; use a fresh checkout/build folder for release packaging.
 On-device recovery text uses `R_` plus the packed version, for example
-`R_0x02040601`. Full Git descriptions, including dirty/test markers, remain in
+`R_0x02040C01`. Full Git descriptions, including dirty/test markers, remain in
 package names without consuming scarce bootloader flash. SoftDevice identity
 remains in the compatibility manifest and package metadata.
 
@@ -133,7 +121,7 @@ For one board:
 
 ```sh
 make BOARD=gat562 RECOVERY_ALLOW_ALL_BOARDS=1 \
-  MOTA_BOOTLOADER_TEST_BUILD=1 MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE=0x02040601 \
+  MOTA_BOOTLOADER_TEST_BUILD=1 MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE=0x02040C01 \
   all copy-artifact
 ```
 
@@ -143,66 +131,38 @@ Its image filenames use `R_<board>_bootloader`.
 
 ## Separate recovery ZIP or release
 
-Normal releases can attach `OTAFIX-<version>-R_recovery.zip` alongside the
-separate signed bootloader mOTA ZIP. The recovery archive contains all board
-profiles under `boards/<board>/`, this guide, the hardware qualification report,
-an inventory, and checksums. These remain temporary recovery-only images even
-when attached to a stable normal release. The repaired 2.4.10 archive carries
-two signed exact-identity RAK recovery `.mota` packages; neither belongs in the
-normal bootloader mOTA bundle. Build the images from a clean exact tag with the
-recovery flag; their filenames and on-device versions retain the `R_` prefix.
+The 2.4.12 release attaches `OTAFIX-2.4.12-R_recovery.zip` alongside the
+separate signed bootloader mOTA ZIP. The recovery archive contains the 28
+selected profiles under `boards/<board>/`, this guide, the hardware
+qualification report, an inventory, and checksums. These remain temporary recovery-only images even
+when attached to a stable normal release. Its two signed exact-identity RAK
+recovery `.mota` packages do not belong in the normal bootloader mOTA bundle.
+Build the images from a clean exact tag with the recovery flag; their filenames and on-device versions retain the `R_` prefix.
 
 The Build workflow's `release_build` manual input produces production artifacts
 from an exact tag without publishing, including both ZIPs. Verify those artifacts
 before publishing the release. Untagged manual runs retain the test-only path.
 
-For a standalone recovery prerelease instead:
+For a standalone recovery prerelease instead, use a new, clean, exact tag
+prefixed with `R_`, such as `R_v0.11.0-OTAFIX2.4.12`. Build it with the
+recovery flag and omit `--test-version`. The packed compatibility version
+comes from the base OTAFIX version; `R_` is a distribution/policy label.
+Normal builds reject these tags without a test-version override.
 
-Use a **new, clean, exact tag** prefixed with `R_`, for example
-`R_0.11.0-OTAFIX2.4.6`. Build that tag with the recovery flag and
-omit `--test-version`. The packed compatibility version derives from the base
-OTAFIX version; the `R_` prefix is a distribution/policy label, not a new ABI.
-Normal builds reject these tags unless an explicit test-version override is used.
+The dedicated **Recovery allow-all boards** workflow can build standalone
+recovery packages. A blank `release_tag` produces test artifacts only.
+Production builds use no test-version override. Their inventory records the
+source and distribution tag objects/commits, each installed manifest CRC and
+artifact checksums. Recovery-only publication remains a non-latest prerelease;
+the normal 2.4.12 release is the stable latest release.
 
-The dedicated **Recovery allow-all boards** workflow builds every board. A manual
-workflow run with a blank `release_tag` produces test artifacts only. A
-same-source rebuild requires a tag containing the workflow's required
-validation and packaging tools. The original 2.4.11 source predates those
-tools, so this repair requires an explicit `source_tag` override.
-The corrected-source 2.4.11 repair keeps
-`R_0.11.0-OTAFIX2.4.11` as the publication destination and uses the clean
-source-only tag `R_v0.11.0-OTAFIX2.4.11` as the build source. The source-only
-tag does not create another release. Set `release_tag` to
-`R_0.11.0-OTAFIX2.4.11` and the optional `source_tag` to
-`R_v0.11.0-OTAFIX2.4.11`. Do not omit `source_tag` for this correction.
-The build source must derive the same packed version as the destination.
-Production builds use no test-version overrides. The inventory records
-`source_tag`, `source_commit`, `distribution_tag`, `distribution_tag_object`,
-and `distribution_tag_commit`, preserving the original distribution tag's
-identity separately from the corrected source. Each board inventory entry
-also records the verified `bootloader_manifest_crc32`, so the installed
-manifest can distinguish corrected binaries from the original same-version
-images. Changed or missing assets
-are uploaded sequentially using the
-existing 110 filenames. The release remains a non-latest prerelease.
-A release event for a recovery tag
-uploads only recovery packages, these instructions, and checksums; it marks the
-release as a prerelease and does not make it latest. The normal release workflow
-skips recovery tags. The repaired 2.4.10 archive is an in-place asset update,
-not a separate recovery release.
-
-The standalone 2.4.11 recovery release and its in-place correction
-include all 35 releasable board profiles.
-Six included ports remain pending hardware qualification: `gat562_mesh_watch13`,
-`lilygo_t_impulse_plus`, `lilygo_techo_card`, `meshtiny`, `muzi_base`,
-and `nano_g2_ultra`. They are identified in the archive inventory
-as `qualification_pending_boards`; inclusion does not establish hardware support.
-The archive builder's explicit `--include-pending` option includes these ports.
-Normal release bundles continue to exclude them.
-The 36th source profile, `thinknode_m8`, remains compile-only because its factory
-USB identity is not verified; it is recorded under `excluded_boards` and has no
-published recovery image. For a local production build, explicitly supply
-`--exclude-board thinknode_m8` to `tools/build_all.py`.
+Historical standalone 2.4.11 recovery assets included pending ports using
+`--include-pending`. That is not the current normal-release archive policy.
+The nine current pending profiles are excluded from the 2.4.12 normal and
+recovery bundles. `thinknode_m8` also remains blocked because its factory USB
+identity is unverified. The historical internal-only Tower profile is retired
+from both bundles; use the normal combined profile and its documented local
+migration, not a cross-profile LoRa update.
 
 Creating a tag/release is a separate maintainer action. Building or committing
 these changes does not publish anything. Qualify the two-step process on actual

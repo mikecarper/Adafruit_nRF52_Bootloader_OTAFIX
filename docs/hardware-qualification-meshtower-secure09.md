@@ -1,5 +1,7 @@
 # MeshTower SD Secure09 hardware qualification
 
+Current release: [OTAFIX 2.4.12](release-2.4.12.md). [Download 2.4.12](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.12). Historical versions and qualification evidence below are retained as recorded.
+
 Date: 2026-09-12. Source: `a33076da538f8d15702385051cb8fbef085f660b`.
 Board: `heltec_mesh_tower_v2_sdcard`, connected to the MercerWoodMesh Pi.
 Device identifiers, private keys and controller logs are omitted.

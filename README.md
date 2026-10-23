@@ -1,12 +1,17 @@
 # Adafruit nRF52 Bootloader with Enhanced OTA DFU
 
-## OTAFIX 2.4.11
+## OTAFIX 2.4.12
 
-The [full 2.4.11 release](docs/release-2.4.11.md) carries the corrected legacy
-MeshCore Bluetooth handoff recovery into the normal bootloaders. It retains
-24 normal profiles with signed bootloader LoRa self-update and provides a
-separate 29-profile recovery archive. RAK models each have one compatible
-normal `*_auto` image. No Open kit or automatic settings erase is bundled.
+[OTAFIX 2.4.12](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.12)
+is the current stable release. It includes the USB control/MSC stall recovery
+fixes, the combined RAK4631 storage profile, and the existing legacy MeshCore
+Bluetooth handoff correction. It provides 23 normal profiles with signed
+bootloader LoRa self-update and a separate 28-profile recovery archive.
+RAK models each have one compatible normal `*_auto` image; MeshTower uses the
+combined `heltec_mesh_tower_v2_sdcard` profile. No Open kit or automatic
+settings erase is bundled. See the [2.4.12 release notes](docs/release-2.4.12.md)
+for installation, test evidence and the unperformed physical RAK15002/NOR
+power-cut checks.
 
 ## Update capabilities by board
 
@@ -18,12 +23,12 @@ includes verified XIAO/Ikoka/SolarXiao and Wio L1 carrier aliases. New Watch13,
 T-Echo Card, T-Impulse Plus and Muzi Base source ports build with Make and
 CMake but remain excluded from normal releases pending hardware tests.
 
-See the [complete update feature audit](docs/update-feature-audit.md) for every
-released profile and the compatible RAK images in OTAFIX 2.4.10. All curated profiles have
-application delta support. Full application `.mota` installs require external
-NOR or microSD. RAK `auto` images from 2.4.8/2.4.9 lack bootloader `.mota`;
-2.4.10 adds it. The USB information files and detailed Heltec recovery screens
-are also restored in 2.4.10. See [release notes](docs/release-2.4.10.md).
+See the [complete update feature audit](docs/update-feature-audit.md) for the
+2.4.12 profile matrix. All curated profiles have application delta support.
+Full application `.mota` installs require external NOR or microSD. RAK `auto`
+images from 2.4.8/2.4.9 lack bootloader `.mota` and need the local identity
+migration below. Current images retain populated USB information files and
+detailed Heltec recovery screens.
 
 ## Separate allow-all recovery builds
 
@@ -34,21 +39,13 @@ before using it: first install the bridge matching the **installed bootloader**,
 then the normal bootloader matching the **physical board**. Recovery packages are
 separately labelled and must not be left installed for normal operation.
 
-The [in-place 2.4.11 recovery correction](docs/release-2.4.11-recovery-correction.md) handles
-the legacy MeshCore Bluetooth DFU stack fault through a narrow reset fallback.
-It repairs the existing non-latest recovery prerelease. The original
-distribution tag `R_0.11.0-OTAFIX2.4.11` stays unchanged; corrected binaries
-use the clean source-only tag
-`R_v0.11.0-OTAFIX2.4.11`. The 110 existing asset names remain unchanged.
-The recovery correction creates no 2.4.12 release. The full normal 2.4.11
-release is published separately with its own production tag and packages.
-Its notes record successful corrected 2.4.11 qualification with Nordic nRF
-Connect and MeshCore Open, including unchanged settings. Clean production
-builds and artifact validation are required by the release workflow. The notes
-also preserve the earlier lab-only 2.4.12 Nordic result and explain the
-one-time DFU ZIP bootstrap
-for older applications without `EndF` and the hardware test limits.
-The release adds no automatic erase or Open kit.
+Use `OTAFIX-2.4.12-R_recovery.zip` from the
+[2.4.12 release](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.12)
+for current bridges. It includes the legacy MeshCore Bluetooth DFU reset
+fallback. The [historical 2.4.11 correction](docs/release-2.4.11-recovery-correction.md)
+records its original Nordic nRF Connect and MeshCore Open qualification,
+including unchanged settings and the one-time DFU ZIP bootstrap for older
+applications without `EndF`. The 2.4.12 release retains those protections.
 
 ## Development build qualification
 
@@ -486,7 +483,7 @@ candidates are not release artifacts.
   optional storage record and the 64 KiB arena. Older applications continue to
   see the standard internal bootloader contract.
 
-  Future normal releases publish `wiscore_rak3401_auto` and
+  Current 2.4.12 normal releases publish `wiscore_rak3401_auto` and
   `wiscore_rak4631_auto` only. The old `board` and dedicated external profiles
   remain buildable for maintenance. The separate recovery ZIP keeps bridges
   for installed historical identities, including `*_AUTO_DFU`; those older
@@ -659,7 +656,7 @@ minimum compiler guards; they do not change the qualified compiler table.
 To keep that combined RAK inside the fixed bootloader space, its production
 UF2 information and BLE firmware text use `BL_0xXXXXXXXX`: the complete packed
 OTAFIX major, minor, patch and release channel (for example,
-`BL_0x02040BFF` means 2.4.11 stable; `BL_0x02040B01` means 2.4.11 preview1).
+`BL_0x02040CFF` means 2.4.12 stable; `BL_0x02040C01` means 2.4.12 preview1).
 The authenticated manifest keeps the same packed version, and artifact
 filenames retain the full Git tag/provenance. Qualification builds still show
 the larger `TEST_` label, recovery builds keep `R_`, and other boards' labels
@@ -678,7 +675,7 @@ merge or modified development checkout, explicitly mark the build as a test:
 ```sh
 docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/src" -w /src \
   otafix-build make BOARD=wismesh_tag MOTA_BOOTLOADER_TEST_BUILD=1 \
-  MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE=0x02040601 all
+  MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE=0x02040C01 all
 ```
 
 That packed version is for qualification only; this command does not create
@@ -692,7 +689,7 @@ For CMake, use the same container and mounted checkout with
 `cmake -S . -B cmake-build-<board> -DBOARD=<board>`, then
 `cmake --build cmake-build-<board>`. Development CMake builds also need
 `-DMOTA_BOOTLOADER_TEST_BUILD=ON` and
-`-DMOTA_BOOTLOADER_VERSION_TEST_OVERRIDE=0x02040601` at configure time.
+`-DMOTA_BOOTLOADER_VERSION_TEST_OVERRIDE=0x02040C01` at configure time.
 
 Run the host regression suite inside the same image, without hardware or
 network access:
@@ -738,7 +735,9 @@ make BOARD=heltec_t096 SIGNED_FW=1 \
 The resulting DFU 0.8 ZIP is signed in the standard Nordic Legacy format. The
 private key is used only for package generation and must not be committed.
 
-See the [OTAFIX releases](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases) and use a release whose notes explicitly list your exact board and required internal, SD, or QSPI apply mode.
+Use the [OTAFIX 2.4.12 release](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.12)
+and its exact-board download manifest. Check the required internal, SD, or QSPI
+apply mode before installing.
 
 Self-update-capable MeshCore targets can use the signed full bootloader `.mota`
 bundle attached to current releases. Trust the official public key once, then
@@ -748,7 +747,11 @@ MeshCore's explicit bootloader installation commands. See
 menu and radio options, estimated transfer times, exact-board safety rules, and
 instructions for signing a custom OTAFIX variant.
 
-### Field recipe: update a GAT562 bootloader over LoRa
+### Historical 2.4.6 field recipe: update a GAT562 bootloader over LoRa
+
+For current bootloader packages, use the 2.4.12 signed bundle and the updater
+above. The following archived recipe describes the separate 2.4.6 field kit;
+2.4.12 does not bundle that kit.
 
 Download `GAT562-OTAFIX-2.4.6-LoRa-field-kit.zip` and its `.sha256` sidecar from
 the OTAFIX 2.4.6 release. This is a phone-driven update:
@@ -821,14 +824,15 @@ normally takes about 1m45s to 3m10s including verification and reboot. The
 included `README.txt` covers routed links, three-minute safety handoffs,
 pre-deployment provisioning, exact hashes, and recovery.
 
-### Example: ordinary RAK4631 from an older OTAFIX to 2.4.6
+### Example: ordinary RAK4631 from an older OTAFIX to 2.4.12
 
-This example is only for the ordinary RAK4631 target
-`wiscore_rak4631_board`, whose bootloader identity is `4631_DFU`. It is not for
-a RAK3401, WisMesh Tag, `wiscore_rak4631_w25q16`, or
-`wiscore_rak4631_board_rak15001_slot_c`. Those targets require their own exact
-artifacts. All filenames below are on the
-[OTAFIX 2.4.6 release](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/0.11.0-OTAFIX2.4.6).
+This example upgrades an ordinary RAK4631 with the `4631_DFU` bootloader
+identity to the normal compatible `wiscore_rak4631_auto` image. That image
+retains the identity and internal bootloader staging contract. It is not for
+a RAK3401, WisMesh Tag, historical `4631_AUTO_DFU`, or dedicated external
+RAK identities; those need the matching migration or recovery procedure.
+All filenames below are on the
+[OTAFIX 2.4.12 release](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.12).
 
 **Do not do this while OTAFIX 2.4.3 is installed:** do not drag any application
 `.uf2`, such as a MeshCore application UF2, onto the mounted `RAK4631` drive.
@@ -840,21 +844,21 @@ The available paths have different preservation guarantees:
 
 | Path | Release artifact | Application and node data |
 | --- | --- | --- |
-| Signed LoRa bootloader update | `OTAFIX-2.4.6-bootloader-mota.zip`, containing `update-wiscore_rak4631_board_bootloader-0.11.0-OTAFIX2.4.6.mota` | Preserved by design |
-| Dedicated USB bootloader-family UF2 (not an application UF2) | `update-wiscore_rak4631_board_bootloader-0.11.0-OTAFIX2.4.6_mbr.uf2` | Preserved when the guarded staging check accepts the running application |
-| Serial or BLE Legacy DFU | `wiscore_rak4631_board_bootloader-0.11.0-OTAFIX2.4.6_s140_6.1.1.zip` | Application must be reinstalled; application-owned data is not guaranteed |
-| SWD sector programming | `wiscore_rak4631_board_bootloader-0.11.0-OTAFIX2.4.6_s140_6.1.1.hex` | Normally preserved without a chip recover; a recover erases everything |
+| Signed LoRa bootloader update | `OTAFIX-2.4.12-bootloader-mota.zip`, containing `update-wiscore_rak4631_auto_bootloader-v0.11.0-OTAFIX2.4.12.mota` | Preserved by design |
+| Dedicated USB bootloader-family UF2 (not an application UF2) | `update-wiscore_rak4631_auto_bootloader-v0.11.0-OTAFIX2.4.12_mbr.uf2` | Preserved when the guarded staging check accepts the running application |
+| Serial or BLE Legacy DFU | `wiscore_rak4631_auto_bootloader-v0.11.0-OTAFIX2.4.12_s140_6.1.1.zip` | Application must be reinstalled; application-owned data is not guaranteed |
+| SWD sector programming | `wiscore_rak4631_auto_bootloader-v0.11.0-OTAFIX2.4.12_s140_6.1.1.hex` | Normally preserved without a chip recover; a recover erases everything |
 
 Back up the node before using a path that does not guarantee preservation. A
 MeshCore application ZIP only replaces MeshCore and does not upgrade OTAFIX.
-Conversely, `OTAFIX-2.4.6-bootloader-mota.zip` is an archive of signed `.mota`
+Conversely, `OTAFIX-2.4.12-bootloader-mota.zip` is an archive of signed `.mota`
 packages and metadata; it is not a Nordic Legacy DFU ZIP and must not be given
 to a Serial/BLE DFU client.
 
 #### Option 1: signed LoRa `.mota` (recommended preservation path)
 
 Use this when the existing MeshCore application is running and supports the
-bootloader OTA commands. The ordinary RAK4631 uses guarded internal-flash
+bootloader OTA commands. The compatible RAK4631 uses guarded internal-flash
 staging for this package. It replaces only the 40 KiB bootloader; it does not
 replace S140 6.1.1, MeshCore, the node identity, settings, messages, or ExtraFS.
 
@@ -875,8 +879,8 @@ replace S140 6.1.1, MeshCore, the node identity, settings, messages, or ExtraFS.
    `4631_DFU`, stages it, displays the staged MID and image hash, and asks once
    more before installation.
 6. After the RAK4631 reboots, run the updater again with `--check-only`, or run
-   `get bootloader.ver` in the MeshCore CLI. It should report OTAFIX 2.4.6
-   (`0x020406FF`).
+   `get bootloader.ver` in the MeshCore CLI. It should report OTAFIX 2.4.12
+   (`0x02040CFF`).
 
 The equivalent manual MeshCore sequence, after a compatible source is serving
 the exact package, is:
@@ -897,11 +901,11 @@ from another board or release.
 Use this for a local USB upgrade when the RAK4631 exposes its UF2 volume.
 
 1. Download
-   `update-wiscore_rak4631_board_bootloader-0.11.0-OTAFIX2.4.6_mbr.uf2`.
+   `update-wiscore_rak4631_auto_bootloader-v0.11.0-OTAFIX2.4.12_mbr.uf2`.
 2. Enter UF2 mode with MeshCore's `uf2reset` command or a double reset.
 3. Confirm that the mounted volume belongs to the ordinary RAK4631, then copy
    the UF2 to it and wait for the device to reboot.
-4. Confirm `get bootloader.ver` reports OTAFIX 2.4.6.
+4. Confirm `get bootloader.ver` reports OTAFIX 2.4.12.
 
 This is a bootloader-family UF2 and uses the guarded bootloader staging path;
 it is not the application-UF2 partial-page path that regressed in OTAFIX 2.4.3.
@@ -912,12 +916,12 @@ path or one of the recovery paths below instead of trying to force it.
 #### Option 3: Legacy serial DFU with `meshfirmware` or `adafruit-nrfutil`
 
 This is a recovery-capable path, not an application-preserving bootloader-only
-update. The release ZIP contains S140 6.1.1 plus OTAFIX 2.4.6, and Legacy DFU
+update. The release ZIP contains S140 6.1.1 plus OTAFIX 2.4.12, and Legacy DFU
 uses application flash while replacing the bootloader.
 
 With [meshfirmware](https://github.com/mikecarper/meshfirmware), select
 **Custom**, select **nrf52**, and choose
-`wiscore_rak4631_board_bootloader-0.11.0-OTAFIX2.4.6_s140_6.1.1.zip`. Use
+`wiscore_rak4631_auto_bootloader-v0.11.0-OTAFIX2.4.12_s140_6.1.1.zip`. Use
 **flash-update (write only)**. Do not choose **flash-wipe + flash** unless a
 factory reset is intentional. Linux automatically classifies a custom nRF52
 ZIP as `flash-update`; Windows may ask when the filename is ambiguous.
@@ -926,7 +930,7 @@ The direct command, after putting the exact RAK4631 serial port into DFU, is:
 
 ```bash
 adafruit-nrfutil dfu serial \
-  -pkg wiscore_rak4631_board_bootloader-0.11.0-OTAFIX2.4.6_s140_6.1.1.zip \
+  -pkg wiscore_rak4631_auto_bootloader-v0.11.0-OTAFIX2.4.12_s140_6.1.1.zip \
   -p <RAK4631-DFU-serial-port> -b 115200 -sb
 ```
 
@@ -940,7 +944,7 @@ Finally verify `get bootloader.ver` after MeshCore is running again.
 Issue `start ota` while the current MeshCore application is still running, or
 use the bootloader's automatic BLE recovery when no valid application remains.
 Then send
-`wiscore_rak4631_board_bootloader-0.11.0-OTAFIX2.4.6_s140_6.1.1.zip` with one
+`wiscore_rak4631_auto_bootloader-v0.11.0-OTAFIX2.4.12_s140_6.1.1.zip` with one
 of these Legacy DFU senders:
 
 - Nordic's [nRF Device Firmware Update](https://www.nordicsemi.com/Products/Development-tools/nRF-Device-Firmware-Update)
@@ -967,7 +971,7 @@ the combined release HEX normally leaves application sectors untouched:
 
 ```bash
 nrfjprog --family NRF52 \
-  --program wiscore_rak4631_board_bootloader-0.11.0-OTAFIX2.4.6_s140_6.1.1.hex \
+  --program wiscore_rak4631_auto_bootloader-v0.11.0-OTAFIX2.4.12_s140_6.1.1.hex \
   --verify --sectorerase
 nrfjprog --family NRF52 --reset
 ```
@@ -977,37 +981,27 @@ or corruption requires `nrfjprog --recover`, the recover erases MeshCore,
 identity, settings, messages, and ExtraFS. Program the same exact combined HEX,
 reset, and perform a clean ordinary-RAK4631 MeshCore installation afterward.
 
-When migrating a RAK4631 from the ordinary `wiscore_rak4631_board` bootloader to
-`wiscore_rak4631_board_rak15001_slot_c` or `wiscore_rak4631_w25q16`, do **not** use
-the new target's canonical bootloader-update UF2 for the first migration. A current
-board-bound ordinary RAK4631 bootloader expects the DFU device name `4631_DFU`, while
-the RAK15001 and W25Q16 targets use `4631_15001C_DFU` and `4631_W25Q16_DFU`,
-respectively, so it rejects either cross-target UF2. Use the exact target's OTAFIX
-combined bootloader + SoftDevice package ending in `_s140_<version>.zip` through serial
-DFU or a compatible BLE DFU client, or flash the exact image with SWD. A MeshCore
-application Serial DFU ZIP updates only the application and is not a substitute.
-Reinstall the matching MeshCore application after this one-time bootloader migration;
-subsequent canonical exact-target bootloader-update UF2 files can then be used normally.
+For new RAK installations, select the normal `wiscore_rak4631_auto` or
+`wiscore_rak3401_auto` profile. These retain the ordinary `4631_DFU` and
+`3401_DFU` identities. Historical dedicated external and `*_AUTO_DFU`
+identities remain represented by matching local recovery bridges in
+`OTAFIX-2.4.12-R_recovery.zip`. Use the
+[recovery instructions](docs/recovery-allow-all.md) for the one-time identity
+transition, then install the normal image for the physical board. Do not
+cross-flash a signed `.mota` package to change identity.
 
-The RAK3401 W25Q16 target has the same one-time identity boundary. The ordinary
-`wiscore_rak3401` bootloader uses `3401_DFU`, while
-`wiscore_rak3401_rak13302_w25q16` uses `3401_W25Q16_DFU`; neither accepts the other's
-board-bound bootloader-update UF2. Install the exact combined bootloader + SoftDevice
-package through serial/BLE DFU or SWD first, then reinstall the matching MeshCore
-application. Do not substitute the ordinary RAK3401 or RAK4631 image.
+Current exact-board bootloader UF2 downloads:
 
-The direct preview.7 links below are retained for their original board targets, but preview.7 has only a
-brief USB recovery probe and predates raw-QSPI apply support. Use preview.8 or newer for the 30-second USB
-recovery grace. Raw-QSPI apply requires preview.9 or newer; verify the release notes explicitly list the
-exact board and QSPI mode. XIAO QSPI bootloader `.mota` updates require preview.10 or newer; generic
-internal-flash bootloader updates require preview.11 or newer. Both require a matching MeshCore build
-with the exact storage/identity profile.
+- [Heltec T1 UF2](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/v0.11.0-OTAFIX2.4.12/update-heltec_t1_bootloader-v0.11.0-OTAFIX2.4.12_mbr.uf2)
+- [Heltec T096 UF2](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/v0.11.0-OTAFIX2.4.12/update-heltec_t096_bootloader-v0.11.0-OTAFIX2.4.12_mbr.uf2)
+- [Heltec T114 UF2](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/v0.11.0-OTAFIX2.4.12/update-heltec_t114_bootloader-v0.11.0-OTAFIX2.4.12_mbr.uf2)
+- [Heltec MeshTower V2 combined UF2](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/v0.11.0-OTAFIX2.4.12/update-heltec_mesh_tower_v2_sdcard_bootloader-v0.11.0-OTAFIX2.4.12_mbr.uf2)
+- [WisBlock RAK3401 compatible UF2](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/v0.11.0-OTAFIX2.4.12/update-wiscore_rak3401_auto_bootloader-v0.11.0-OTAFIX2.4.12_mbr.uf2)
 
-- [Heltec T1 UF2](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/0.9.2-OTAFIX2.4.1-preview.7/update-heltec_t1_bootloader-0.9.2-OTAFIX2.4.1-preview.7_mbr.uf2)
-- [Heltec T096 UF2](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/0.9.2-OTAFIX2.4.1-preview.7/update-heltec_t096_bootloader-0.9.2-OTAFIX2.4.1-preview.7_mbr.uf2)
-- [Heltec T114 UF2](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/0.9.2-OTAFIX2.4.1-preview.7/update-heltec_t114_bootloader-0.9.2-OTAFIX2.4.1-preview.7_mbr.uf2)
-- [Heltec MeshTower V2 UF2](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/0.9.2-OTAFIX2.4.1-preview.7/update-heltec_mesh_tower_v2_bootloader-0.9.2-OTAFIX2.4.1-preview.7_mbr.uf2)
-- [WisBlock RAK3401 UF2](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/0.9.2-OTAFIX2.4.1-preview.7/update-wiscore_rak3401_bootloader-0.9.2-OTAFIX2.4.1-preview.7_mbr.uf2)
+An internal-only Tower requires the one-time local profile migration described
+in [combined MeshTower migration](docs/meshtower-dual-storage.md), even though
+its target ID matches the current combined profile. Use the manifest for
+all other boards and verify file checksums before installation.
 
 If you have somehow managed to accidentally flash an incorrect bootloader to your device you will likely require flashing a full bootloader and SoftDevice zip package using ``adafruit-nrfutil``
 

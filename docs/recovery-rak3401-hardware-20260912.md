@@ -1,5 +1,7 @@
 # R_ recovery: RAK3401 hardware qualification
 
+Current release: [OTAFIX 2.4.12](release-2.4.12.md). [Download 2.4.12](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.12). Historical versions and qualification evidence below are retained as recorded.
+
 **Result: PASS, 2026-09-12.** Ten bootloader-family UF2 transfers on the
 MercerWoodMesh Pi's physical, SWD-wired RAK3401 qualified the two-step
 wrong-board recovery procedure and both `R_gat562` and

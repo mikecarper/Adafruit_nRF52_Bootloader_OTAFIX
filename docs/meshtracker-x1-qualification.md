@@ -1,5 +1,7 @@
 # MeshTracker X1 internal-staging qualification candidate
 
+Current release: [OTAFIX 2.4.12](release-2.4.12.md). [Download 2.4.12](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.12).
+
 This is a new source port, **not a hardware-qualified download**. Its release
 qualification marker remains set. Make, CMake and the board header require an
 explicit test build, and Make/CMake additionally require an explicit packed test

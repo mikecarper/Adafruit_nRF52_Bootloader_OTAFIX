@@ -1,5 +1,7 @@
 # RAK adaptive bootloader update qualification
 
+Current release: [OTAFIX 2.4.12](release-2.4.12.md). [Download 2.4.12](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.12). Historical versions and qualification evidence below are retained as recorded.
+
 Qualification performed on 2026-09-29. The production-tag checks are listed
 first; the later preview sections describe separate development images.
 

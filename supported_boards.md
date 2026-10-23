@@ -1,5 +1,12 @@
 # Supported Boards
 
+The current [OTAFIX 2.4.12 release](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.12)
+provides the 23 normal profiles below. Use its
+[exact-board download manifest](docs/bootloader-download-manifest.md) for
+files and checksums. The separate recovery archive contains 28 profiles;
+nine source ports remain pending and excluded from the normal and recovery bundles.
+See the [release notes](docs/release-2.4.12.md) for hardware-test limits.
+
 ## Adafruit Boards
 
 | Board | Name | VID PID | URL |
@@ -12,7 +19,6 @@
 | gat562 | MTools Tec GAT562 | 0x239A:0x0029 | https://github.com/gat-iot/GAT562-family |
 | heltec_mesh_pocket | Heltec Mesh Pocket | 0x239A:0x0071 | https://heltec.org/project/mesh-pocket/ |
 | heltec_mesh_tower_v2_sdcard | Heltec MeshTower V2, default combined SD/internal profile | 0x239A:0x0071 | https://heltec.org/project/meshtower/ |
-| heltec_mesh_tower_v2 | Heltec MeshTower V2, legacy internal-only profile | 0x239A:0x0071 | https://heltec.org/project/meshtower/ |
 | heltec_t096 | HT-n5262G | 0x239A:0x0071 | https://heltec.org/project/t096/ |
 | heltec_t1 | Heltec Mesh Node T1 | 0x239A:0x0071 | https://heltec.org/project/mesh-node-t1/ |
 | heltec_t114 | HT-n5262 | 0x239A:0x0071 | https://heltec.org/project/mesh-node-t114/ |
@@ -28,22 +34,27 @@
 | thinknode_m3 | ELECROW ThinkNode-M3 | 0x239A:0x00DA | https://www.elecrow.com |
 | thinknode_m6 | ELECROW ThinkNodeM6 | 0x239A:0x00DA | https://www.elecrow.com |
 | wio_tracker_l1 | Seeed TRACKER L1 | 0x2886:0x1667 | https://www.seeedstudio.com/ |
-| wiscore_rak3401 | WisBlock RAK3401 | 0x239A:0x0029 | https://docs.rakwireless.com/product-categories/wisblock/rak3401/overview/ |
-| wiscore_rak3401_rak13302_w25q16 | WisBlock RAK3401 + RAK13302 + W25Q16 | 0x239A:0x0029 | https://docs.rakwireless.com/product-categories/wisblock/rak3401/overview/ |
-| wiscore_rak4631_board | WisBlock RAK4631 Board | 0x239A:0x0029 | https://store.rakwireless.com/collections/wisblock-core |
-| wiscore_rak4631_board_rak15001_slot_c | WisBlock RAK4631 + RAK15001 (Sensor Slot C) | 0x239A:0x0029 | https://docs.rakwireless.com/product-categories/wisblock/rak15001/overview/ |
-| wiscore_rak4631_w25q16 | WisBlock RAK4631 + W25Q16 | 0x239A:0x0029 | https://docs.rakwireless.com/product-categories/wisblock/rak4631/overview/ |
+| wiscore_rak3401_auto | WisBlock RAK3401, compatible adaptive internal/NOR | 0x239A:0x0029 | https://docs.rakwireless.com/product-categories/wisblock/rak3401/overview/ |
+| wiscore_rak4631_auto | WisBlock RAK4631, compatible internal/NOR/RAK15002 application storage | 0x239A:0x0029 | https://docs.rakwireless.com/product-categories/wisblock/rak4631/overview/ |
 | wismesh_tag | WisMesh Tag | 0x239A:0x0029 | https://store.rakwireless.com/products/wismesh-tag-meshtastic-gps-lora-tracker-ip66 |
 | xiao_nrf52840_ble | Seeed XIAO nRF52840 | 0x2886:0x0044 | https://www.seeedstudio.com/ |
 | xiao_nrf52840_ble_sense | Seeed XIAO nRF52840 | 0x2886:0x0045 | https://www.seeedstudio.com/ |
 
 See [combined MeshTower migration and qualification](docs/meshtower-dual-storage.md)
-before changing a Tower's storage profile. The shared identity does not make
-internal-only and SD bootloader packages interchangeable over OTA.
+before changing a Tower's storage profile. The historical internal-only target
+is source-only; current downloads use the combined SD-primary profile. Its
+shared identity does not authorize cross-profile LoRa installation.
+
+The five historical dedicated RAK profiles remain in the 2.4.12 recovery
+archive for installed-identity migration. They are not competing normal
+downloads. The historical internal-only Tower is excluded from that archive.
+See [recovery instructions](docs/recovery-allow-all.md).
 
 ## Internal app-preserving bootloader-update identities
 
-These nRF52840 targets have no enabled SD/QSPI OTA store and use the internal `0x0A`
+This source-level inventory includes historical targets; it is not the normal
+download list above. These nRF52840 targets have no enabled SD/QSPI OTA store
+and use the internal `0x0A`
 (`STAGE_CEILING|BOOT_UPDATE`) storage profile with the shared `0xED000` staging ceiling.
 The target ID is the little-endian first 32 bits of SHA-256 over the complete 32-byte NUL-padded
 `NRF_BL_%08X_<DEVICE_NAME>` field. `tools/check_internal_bootloader_targets.py` regenerates this inventory

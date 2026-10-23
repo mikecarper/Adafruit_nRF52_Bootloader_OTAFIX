@@ -1,5 +1,7 @@
 # OTAFIX 2.4.4 hardware qualification (`0x02040405`)
 
+Current release: [OTAFIX 2.4.12](release-2.4.12.md). [Download 2.4.12](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.12). Historical versions and qualification evidence below are retained as recorded.
+
 This is the reproducibility record for the 4 September 2026 lab candidate. It
 is not a release artifact. The build came from the intentionally dirty
 `92e5c17` qualification tree, used the explicit packed test version

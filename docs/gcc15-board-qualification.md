@@ -1,5 +1,7 @@
 # GCC 15.3 compiler qualification by board
 
+Current release: [OTAFIX 2.4.12](release-2.4.12.md). [Download 2.4.12](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.12). Historical versions and qualification evidence below are retained as recorded.
+
 Date: 2026-10-16. Firmware source: `26940db65469b786e95886f89dc8cf399ed1b5a3`.
 
 ## Decision

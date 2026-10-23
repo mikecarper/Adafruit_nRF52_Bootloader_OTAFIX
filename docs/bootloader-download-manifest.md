@@ -1,5 +1,10 @@
 # Bootloader download manifest
 
+The current stable release is [OTAFIX 2.4.12](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.12).
+Download its [manifest](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/v0.11.0-OTAFIX2.4.12/bootloader-manifest.json)
+and [SHA-256 sidecar](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/v0.11.0-OTAFIX2.4.12/bootloader-manifest.json.sha256)
+for the 23 normal profiles.
+
 Every normal release publishes `bootloader-manifest.json` and its SHA-256
 sidecar. This is download metadata, not the Nordic DFU manifest inside each
 DFU ZIP. It does not change or rebuild the bootloader binaries.
@@ -31,9 +36,12 @@ and checks the latest stable GitHub release at runtime. It resolves exact
 assets for the same explicitly mapped profiles, so a new stable version can
 provide current individual file links immediately. Offline pickers embed the
 manifest and identify the included bootloader version. RAK3401 and RAK4631
-map to their normal adaptive `*_auto` profiles; MeshTower internal and microSD
-map to separate profiles. Old RAK identities still need the documented
-recovery bridge before installing a normal compatible image.
+map to their normal adaptive `*_auto` profiles. MeshTower has one normal
+combined SD/internal profile, `heltec_mesh_tower_v2_sdcard`. Its historical
+internal-only profile has no normal download and needs a one-time local
+migration. Old RAK identities still need the documented recovery bridge
+before installing a normal compatible image. See the
+[2.4.12 release notes](release-2.4.12.md) for capability and qualification limits.
 
 To add metadata to an existing release without rebuilding its binaries:
 
@@ -43,6 +51,6 @@ python3 tools/build_bootloader_download_manifest.py --release-json release.json 
 gh release upload TAG --repo mikecarper/Adafruit_nRF52_Bootloader_OTAFIX --clobber bootloader-manifest.json bootloader-manifest.json.sha256
 ```
 
-Future release builds generate and upload this metadata after the normal
+Release builds generate and upload this metadata after the normal
 assets have been published. Consumers should verify the manifest checksum,
 display its exact version, and follow the release's migration instructions.

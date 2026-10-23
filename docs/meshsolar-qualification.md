@@ -1,5 +1,7 @@
 # Mesh Solar internal-staging qualification candidate
 
+Current release: [OTAFIX 2.4.12](release-2.4.12.md). [Download 2.4.12](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.12).
+
 This is a source/build candidate, **not a physically qualified download**.
 `OTAFIX_BOARD_QUALIFICATION_PENDING` remains set, and both build systems require
 test mode and an explicit packed test version. The header additionally requires
