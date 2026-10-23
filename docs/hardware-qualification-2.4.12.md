@@ -19,8 +19,8 @@ hardware results below used separately identified test builds.
 - Host, sanitizer and USB regression tests passed. Stable-tag production
   builds and official signed bundles are generated and validated separately.
 
-The documentation-only release preparation retains these compiled source
-bytes. Qualification sizes and hashes are not relabelled as production output.
+The release preparation retains these compiled firmware source bytes.
+Qualification sizes and hashes are not relabelled as production output.
 
 ## USB stress on RAK4631
 

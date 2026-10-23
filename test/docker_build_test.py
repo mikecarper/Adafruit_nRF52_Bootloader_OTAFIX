@@ -166,7 +166,7 @@ class DockerBuildTest(unittest.TestCase):
         section = section.split("## Installation", 1)[0]
         self.assertIn("clean, exact OTAFIX release tag", section)
         self.assertIn("MOTA_BOOTLOADER_TEST_BUILD=1", section)
-        self.assertIn("MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE=0x02040601", section)
+        self.assertIn("MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE=0x02040C01", section)
         self.assertIn("_mbr.uf2", section)
         self.assertNotIn("_nosd.uf2", section)
 
