@@ -56,8 +56,9 @@ IDENTITY_RE = re.compile(
 )
 STAGED_RE = re.compile(
     r"staged:ready mid=(?P<mid>[0-9A-Fa-f]{8}) "
-    r"hash=(?P<hash>[0-9A-Fa-f]{16})"
+    r"hash=(?P<hash>[0-9A-Fa-f]{16})(?=\s|$)"
 )
+MAX_UNCONFIRMED_PROGRESS_POLLS = 3
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 MOTA_SIZE = 41330
 MOTA_HEADER_SIZE = 8
@@ -165,6 +166,73 @@ def parse_staged(text: str) -> tuple[str, str]:
     if match is None:
         raise UpdateError("node did not report a complete staged bootloader package")
     return match.group("mid").upper(), match.group("hash").upper()
+
+
+def progress_mid_confirmed(text: str, section: str, expected_mid: str) -> bool:
+    """Check only a download/fetch section, never another firmware's ID."""
+    match = re.search(section, clean_output(text), re.IGNORECASE)
+    if match is None:
+        return False
+    token = re.search(r"\bid=([^\s|]*)", match.group(), re.IGNORECASE)
+    if token is None:
+        return False
+    mid = token.group(1).upper()
+    if mid == expected_mid:
+        return True
+    # The 160-byte CLI buffer can end in the middle of id=, including before
+    # its first digit. A matching prefix is unconfirmed, not authorization.
+    if (len(mid) < 8 and all(char in "0123456789ABCDEF" for char in mid)
+            and expected_mid.startswith(mid) and token.end() == len(match.group())):
+        return False
+    raise UpdateError(f"target progress names MID {mid}, not requested MID {expected_mid}")
+
+
+def check_download_progress(meshcli: str | None, port: str, status: str,
+                            expected_mid: str, expected_hash: str) -> bool | None:
+    """Return ready, confirmed-in-progress, or unconfirmed (None)."""
+    if progress_mid_confirmed(status, r"\bdownload:[^|\r\n]*", expected_mid):
+        return re.search(r"\bdownload:\s*ready to install\b", status, re.IGNORECASE) is not None
+
+    # ota status puts the variable download text last and may truncate its MID
+    # even when all blocks are complete. The shorter staged reply binds both
+    # identifiers and is authoritative for readiness.
+    try:
+        staged = mesh_command(meshcli, port, "ota bootloader")
+    except UpdateError:
+        staged = ""
+    if "staged:ready" in staged:
+        if parse_staged(staged) != (expected_mid, expected_hash):
+            raise UpdateError("device confirmation does not match the independently verified package")
+        return True
+
+    try:
+        stats = mesh_command(meshcli, port, "ota stats")
+    except UpdateError:
+        return None
+    if progress_mid_confirmed(stats, r"(?:^|\|)\s*fetch\b[^|\r\n]*", expected_mid):
+        return False
+    return None
+
+
+def wait_for_bootloader_download(meshcli: str | None, port: str,
+                                 expected_mid: str, expected_hash: str,
+                                 process: subprocess.Popen[str], log_path: Path,
+                                 timeout: float) -> None:
+    deadline = time.monotonic() + timeout
+    unconfirmed = 0
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            raise UpdateError(f"motatool seeder exited; see {log_path}")
+        status = mesh_command(meshcli, port, "ota status")
+        print(next((line for line in status.splitlines() if "bootloader download:" in line), status))
+        progress = check_download_progress(meshcli, port, status, expected_mid, expected_hash)
+        if progress is True:
+            return
+        unconfirmed = unconfirmed + 1 if progress is None else 0
+        if unconfirmed >= MAX_UNCONFIRMED_PROGRESS_POLLS:
+            raise UpdateError("cannot confirm requested MID from target download progress")
+        time.sleep(10)
+    raise UpdateError("LoRa transfer timed out")
 
 
 def sha256(path: Path) -> str:
@@ -816,23 +884,10 @@ def install_update(args: argparse.Namespace, meshcli: str | None, motatool: str,
             if "OK pulling" not in pull and expected_mid not in pull:
                 raise UpdateError(f"target rejected pull: {pull}")
 
-            deadline = time.monotonic() + args.transfer_timeout * 60
-            while time.monotonic() < deadline:
-                if serve_process.poll() is not None:
-                    raise UpdateError(f"motatool seeder exited; see {log_path}")
-                status = mesh_command(meshcli, target_port, "ota status")
-                status_line = next(
-                    (line for line in status.splitlines() if "bootloader download:" in line),
-                    status,
-                )
-                print(status_line)
-                if expected_mid not in status:
-                    raise UpdateError("target status no longer names the requested MID")
-                if "ready to install" in status:
-                    break
-                time.sleep(10)
-            else:
-                raise UpdateError("LoRa transfer timed out")
+            wait_for_bootloader_download(
+                meshcli, target_port, expected_mid, expected_hash,
+                serve_process, log_path, args.transfer_timeout * 60,
+            )
 
             confirmation = mesh_command(meshcli, target_port, "ota bootloader")
             device_mid, device_hash = parse_staged(confirmation)
