@@ -342,6 +342,12 @@ static void dfu_cb_handler(uint32_t packet, uint32_t result, uint8_t * p_data)
             // Signed INIT success is emitted here only after authenticated
             // flash preparation reaches its completion callback.
             restore_ble_connection_policy();
+            if (!IS_CONNECTED())
+            {
+                // Preparation can complete after the central has gone away.
+                // Its flash buffers still belong to this session until reset.
+                break;
+            }
             resp_val = nrf_err_code_translate(result, procedure);
             err_code = ble_dfu_response_send(&m_dfu, procedure, resp_val);
             APP_ERROR_CHECK(err_code);
@@ -1001,21 +1007,31 @@ static void on_ble_evt(ble_evt_t * p_ble_evt)
             m_ble_data_policy_active = false;
             m_service_change_pending = false;
             m_service_attrs_initialized = false;
-            // Only word-aligned bytes submitted to the DFU core are resumable.
-            // Never carry an uncommitted suffix into a new connection.
+            // Never carry an uncommitted suffix into a new connection. Queued
+            // complete words retain their RX buffers until callback or reset.
             m_accum_len = 0;
             m_accum_active = false;
             mp_final_packet = NULL;
+            m_conn_handle = BLE_CONN_HANDLE_INVALID;
             if (!m_tear_down_in_progress)
             {
+#ifndef SECURE_DFU_TEST
+                if (m_reported_image_size != 0)
+                {
+                    // Legacy has no resume. Re-enter BLE through a clean chip
+                    // reset instead of resetting core/pool bookkeeping while
+                    // queued flash operations still own the old RX buffers.
+                    m_tear_down_in_progress = true;
+                    bootloader_dfu_restart();
+                    break;
+                }
+#endif
                 // The Disconnected event is because of an external event. (Link loss or
                 // disconnect triggered by the DFU Controller before the firmware update was
                 // complete).
                 // Restart advertising so that the DFU Controller can reconnect if possible.
                 advertising_start();
             }
-
-            m_conn_handle = BLE_CONN_HANDLE_INVALID;
 
             break;
 
@@ -1076,7 +1092,7 @@ static void on_ble_evt(ble_evt_t * p_ble_evt)
                 if (m_direct_adv_cnt == 0)
                 {
                     dfu_update_status_t update_status = {.status_code = DFU_TIMEOUT};
-                    bootloader_dfu_update_process(update_status);
+                    bootloader_dfu_update_process(&update_status);
                 }
                 else
                 {

@@ -39,6 +39,9 @@ uint32_t bootloader_init(void);
  */
 bool bootloader_must_reset_to_self(void);
 
+/** Request terminal bootloader re-entry without reinitializing flash owners. */
+void bootloader_dfu_restart(void);
+
 /**@brief Function for checking whether an application update completed successfully.
  * @details This function can only be called after bootloader_dfu_start returns.
  * @retval true  If application activation and bootloader settings persistence completed.
@@ -77,9 +80,9 @@ void bootloader_settings_get(bootloader_settings_t * const p_settings);
 
 /**@brief Function for processing DFU status update.
  *
- * @param[in]  update_status DFU update status.
+ * @param[in]  update_status DFU update status, consumed synchronously; the pointer is not retained.
  */
-void bootloader_dfu_update_process(dfu_update_status_t update_status);
+void bootloader_dfu_update_process(dfu_update_status_t const* update_status);
 
 /**@brief Mark that startup DFU has received valid update activity.
  *

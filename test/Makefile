@@ -290,6 +290,8 @@ check: apply_sim readback_test readback_test_v7 readback_internal_test bootloade
 	python3 startup_vector_test.py
 	python3 bootloader_write_policy_test.py
 	python3 dfu_session_start_test.py
+	python3 ble_recovery_test.py
+	python3 legacy_ble_recovery_test.py
 	python3 dfu_hardfault_test.py
 	python3 build_profile_test.py
 	python3 docker_build_test.py

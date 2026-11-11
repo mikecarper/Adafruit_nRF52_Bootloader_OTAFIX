@@ -241,7 +241,7 @@ int main(void) {
   // MeshCore OTA: if a verified+approved .mota was staged for this firmware, apply it in place now
   // (SoftDevice is off here; safe to rewrite the single app slot). On success, reset to boot the new
   // image; on any failure the app region is left for the validity check below to route to DFU.
-  if ( ota_delta_check_and_apply() ) {
+  if (!bootloader_must_be_reentered && ota_delta_check_and_apply()) {
     otafix_system_reset();
   }
   board_watchdog_teardown();
@@ -267,6 +267,11 @@ int main(void) {
 
     // clear in case we kept DFU_DBL_RESET_APP there
     (*dbl_reset_mem) = 0;
+
+    // A finished recovery must not request DFU again after the app starts.
+    if (NRF_POWER->GPREGRET == DFU_MAGIC_OTA_RESET) {
+      NRF_POWER->GPREGRET = 0;
+    }
 
     // start application
     PRINTF("Starting app...\r\n");
@@ -476,6 +481,10 @@ static void check_dfu_mode(void) {
         screen_draw_ble();
       #endif
       led_state(STATE_BLE_DISCONNECTED);
+      // Preserve BLE recovery through pin/watchdog resets while no app exists.
+      if (!valid_app && NRF_POWER->GPREGRET == 0) {
+        NRF_POWER->GPREGRET = DFU_MAGIC_OTA_RESET;
+      }
       if (!_sd_inited) mbr_init_sd();
       _sd_inited = true;
       ble_stack_init();

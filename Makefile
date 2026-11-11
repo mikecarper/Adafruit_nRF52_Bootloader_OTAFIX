@@ -642,7 +642,7 @@ ifneq ($(call mota_feature_flag,MOTA_RAK_SD_STORE),)
 CFLAGS += -fno-schedule-insns -fno-schedule-insns2 -fno-code-hoisting \
   -fno-tree-ter -fno-tree-dominator-opts -fno-tree-tail-merge \
   -fno-optimize-sibling-calls -fno-if-conversion -mbranch-cost=3 \
-  -fno-tree-loop-im -fno-early-inlining
+  -fno-tree-loop-im -fno-early-inlining -fno-move-loop-invariants
 endif
 
 LDFLAGS += \

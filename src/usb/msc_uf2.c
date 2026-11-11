@@ -88,7 +88,7 @@ static void complete_app_update(void)
   update_status.app_size = _wr_state.appSize;
 
   PRINTF("Application update complete\r\n");
-  bootloader_dfu_update_process(update_status);
+  bootloader_dfu_update_process(&update_status);
   led_state(STATE_WRITING_FINISHED);
 }
 
@@ -374,7 +374,7 @@ void tud_msc_write10_complete_cb(uint8_t lun)
     update_status.status_code = DFU_RESET;
     update_status.restart_into_bootloader = false;
 
-    bootloader_dfu_update_process(update_status);
+    bootloader_dfu_update_process(&update_status);
 
     led_state(STATE_WRITING_FINISHED);
   }
@@ -432,7 +432,7 @@ void tud_msc_write10_complete_cb(uint8_t lun)
         return;
       }
 
-      bootloader_dfu_update_process(update_status);
+      bootloader_dfu_update_process(&update_status);
 
       led_state(STATE_WRITING_FINISHED);
     }
@@ -466,7 +466,7 @@ void tud_msc_scsi_complete_cb(uint8_t lun, uint8_t const scsi_cmd[16])
     uf2_write_session_reset();
     dfu_update_status_t update_status = {0};
     update_status.status_code         = DFU_RESET;
-    bootloader_dfu_update_process(update_status);
+    bootloader_dfu_update_process(&update_status);
   }
   #endif
 }

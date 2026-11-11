@@ -87,8 +87,8 @@ static unsigned exits, completions, discards;
 static void flash_nrf5x_discard(void) { discards++; }
 static uint32_t app_timer_cnt_get(void) { return 1234; }
 #ifdef UF2_EXIT_ON_EJECT
-static void bootloader_dfu_update_process(dfu_update_status_t status) {
-  assert(status.status_code == DFU_RESET && !status.restart_into_bootloader);
+static void bootloader_dfu_update_process(dfu_update_status_t const *status) {
+  assert(status->status_code == DFU_RESET && !status->restart_into_bootloader);
   exits++;
 }
 #endif

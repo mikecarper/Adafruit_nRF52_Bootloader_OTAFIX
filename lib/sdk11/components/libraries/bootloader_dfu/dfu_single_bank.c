@@ -126,7 +126,7 @@ static void dfu_timeout_handler(void * p_context)
     m_dfu_timed_out           = true;
     update_status.status_code = DFU_TIMEOUT;
 
-    bootloader_dfu_update_process(update_status);
+    bootloader_dfu_update_process(&update_status);
 }
 
 
@@ -200,7 +200,7 @@ static void dfu_cleared_func_app(void)
 {
     dfu_update_status_t update_status = { 0 };
     update_status.status_code = DFU_BANK_0_ERASED;
-    bootloader_dfu_update_process(update_status);
+    bootloader_dfu_update_process(&update_status);
 }
 
 
@@ -252,7 +252,7 @@ static uint32_t dfu_activate_sd(void)
     update_status.bl_size        = m_start_packet.bl_image_size;
     update_status.app_size       = m_start_packet.app_image_size;
 
-    bootloader_dfu_update_process(update_status);
+    bootloader_dfu_update_process(&update_status);
 
     return NRF_SUCCESS;
 }
@@ -274,7 +274,7 @@ static uint32_t dfu_activate_app(void)
     update_status.app_crc     = m_image_crc;
     update_status.app_size    = m_start_packet.app_image_size;
 
-    bootloader_dfu_update_process(update_status);
+    bootloader_dfu_update_process(&update_status);
 
     return NRF_SUCCESS;
 }
@@ -298,7 +298,7 @@ static uint32_t dfu_activate_bl(void)
     update_status.bl_size     = m_start_packet.bl_image_size;
     update_status.app_size    = m_start_packet.app_image_size;
 
-    bootloader_dfu_update_process(update_status);
+    bootloader_dfu_update_process(&update_status);
 
     return NRF_SUCCESS;
 }
@@ -701,7 +701,7 @@ void dfu_reset(void)
     //  bootloaders
     update_status.restart_into_bootloader = (m_dfu_state == DFU_STATE_RX_DATA_PKT && m_data_received != m_image_size);
 
-    bootloader_dfu_update_process(update_status);
+    bootloader_dfu_update_process(&update_status);
 }
 
 

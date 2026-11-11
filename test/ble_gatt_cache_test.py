@@ -183,6 +183,11 @@ static bool m_ble_peer_data_valid, m_is_advertising, m_ble_data_policy_active;
 static bool m_tear_down_in_progress, m_accum_active;
 static uint16_t m_conn_handle, m_accum_len;
 static unsigned m_direct_adv_cnt;
+static uint32_t m_reported_image_size;
+static unsigned recovery_restarts;
+static __attribute__((unused)) void bootloader_dfu_restart(void) {
+    ++recovery_restarts;
+}
 static void *mp_final_packet;
 static struct { uint8_t sys_serv_attr[8]; } m_ble_peer_data;
 static struct { uint16_t service_handle; struct { uint16_t value_handle; } dfu_rev_handles; } m_dfu;
@@ -214,6 +219,7 @@ static void link_event(unsigned type) {
 '''
 main = r'''
 int main(void) {
+    m_reported_image_size = 0;
     m_ble_peer_data_valid = true;
     indication_result = NRF_ERROR_BUSY;
     link_event(BLE_GAP_EVT_CONNECTED);
@@ -259,6 +265,7 @@ int main(void) {
     m_ble_peer_data_valid = false;
     link_event(BLE_GAP_EVT_CONNECTED);
     assert(!m_service_change_pending && !m_service_attrs_initialized && indication_calls == saved_calls);
+    assert(recovery_restarts == 0);
     return 0;
 }
 '''

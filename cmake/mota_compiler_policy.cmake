@@ -43,7 +43,8 @@ if (MOTA_RAK_SD_STORE AND BOARD STREQUAL "wiscore_rak4631_auto")
     -fno-if-conversion
     -mbranch-cost=3
     -fno-tree-loop-im
-    -fno-early-inlining)
+    -fno-early-inlining
+    -fno-move-loop-invariants)
 endif ()
 
 function(mota_require_arm_gcc compiler_id compiler_version)

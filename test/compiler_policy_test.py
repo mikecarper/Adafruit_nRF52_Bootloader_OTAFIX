@@ -16,7 +16,7 @@ import compiler_policy
 FLAGS = ("-fno-schedule-insns", "-fno-schedule-insns2", "-fno-code-hoisting",
          "-fno-tree-ter", "-fno-tree-dominator-opts", "-fno-tree-tail-merge",
          "-fno-optimize-sibling-calls", "-fno-if-conversion", "-mbranch-cost=3",
-         "-fno-tree-loop-im", "-fno-early-inlining")
+         "-fno-tree-loop-im", "-fno-early-inlining", "-fno-move-loop-invariants")
 RAK = "wiscore_rak4631_auto"
 
 
