@@ -50,6 +50,10 @@ class SecureDfuBleTest(unittest.TestCase):
             getattr(cls.lib, name).argtypes = [ctypes.c_bool]
         for name in ('test_ble_failed', 'test_ble_completed'):
             getattr(cls.lib, name).restype = ctypes.c_bool
+        cls.lib.test_ble_flash_pending.restype = ctypes.c_bool
+        cls.lib.test_ble_monotonic.restype = ctypes.c_uint32
+        cls.lib.test_ble_set_monotonic.argtypes = [ctypes.c_uint32]
+        cls.lib.test_ble_flash_timing.argtypes = [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool]
 
     def setUp(self):
         self.lib.test_ble_reset()
@@ -359,20 +363,58 @@ class SecureDfuBleTest(unittest.TestCase):
         self.assertTrue(self.lib.test_ble_failed())
         self.assertEqual(self.lib.test_ble_activations(), 0)
 
-    def test_flash_timeout_keeps_buffer_owned_until_reset(self):
+    def test_flash_stall_resets_without_releasing_the_owned_buffer(self):
         self.begin()
         self.stage(0, 4096)
+        feeds_before = self.lib.test_ble_watchdog_feeds()
+        started = self.lib.test_ble_monotonic()
         self.lib.test_ble_stall_flash(True)
-        self.control(b'\x04', 10)
-        self.assertGreaterEqual(self.lib.test_ble_watchdog_feeds(), 10000)
-        self.create(1, len(self.dat), 8)
-        self.create(2, 4096, 8)
-        self.assertEqual(self.write(4, b'X' * 20), b'\x60\x08\x08')
-        self.lib.test_ble_stall_flash(False)
-        self.lib.test_ble_finish_pending()
+        # The harness catches the production non-returning reset with setjmp.
+        # No protocol error reply may return control while the write owns data.
+        self.lib.test_ble_write(2, b'\x04', 1)
+        self.assertEqual(self.lib.test_ble_resets(), 1)
+        self.assertEqual(self.lib.test_ble_fault(), 0)
+        self.assertTrue(self.lib.test_ble_flash_pending())
+        self.assertEqual(self.lib.test_ble_writes(), 0)
+        self.assertEqual(self.lib.test_ble_monotonic() - started, 10000)
+        self.assertEqual(self.lib.test_ble_watchdog_feeds(), feeds_before)
+        out = ctypes.create_string_buffer(15)
+        self.assertEqual(self.lib.test_ble_receipt(out), 0)
+        self.assertEqual(self.lib.test_ble_activations(), 0)
+
+    def test_progress_allows_one_hundred_retry_delays_beyond_ten_seconds(self):
+        self.image = self.image[:240]
+        self.dat = init_packet(self.image)
+        self.begin()
+        self.stage(0, 240)
+        started = self.lib.test_ble_monotonic()
+        # Model 100 genuine retry progress events spanning 15 seconds. Idle
+        # foreground polls do not advance the backend's progress epoch.
+        self.lib.test_ble_flash_timing(15000, 150, False)
+        self.control(b'\x04')
+        self.assertGreaterEqual(self.lib.test_ble_monotonic() - started, 15000)
+        self.assertEqual(self.lib.test_ble_resets(), 0)
+        self.assertEqual(self.lib.test_ble_writes(), 1)
+        self.assertFalse(self.lib.test_ble_flash_pending())
+        self.assertFalse(self.lib.test_ble_failed())
+        self.assertEqual(self.select(2)[1], 240)
         self.assertEqual(ctypes.string_at(self.lib.test_ble_flash(), 240), self.image[:240])
-        self.control(b'\x04', 10)
-        self.assertTrue(self.lib.test_ble_failed())
+
+    def test_flash_stall_timeout_survives_monotonic_wrap_and_rtc_resets(self):
+        self.image = self.image[:240]
+        self.dat = init_packet(self.image)
+        self.begin()
+        self.stage(0, 240)
+        started = 0xFFFFFFD0
+        self.lib.test_ble_set_monotonic(started)
+        self.lib.test_ble_set_clock(0xFFFFE0)
+        self.lib.test_ble_flash_timing(20000, 0, True)
+        self.lib.test_ble_write(2, b'\x04', 1)
+        self.assertEqual(self.lib.test_ble_resets(), 1)
+        self.assertEqual(self.lib.test_ble_fault(), 0)
+        self.assertTrue(self.lib.test_ble_flash_pending())
+        self.assertEqual((self.lib.test_ble_monotonic() - started) & 0xFFFFFFFF, 10000)
+        self.assertEqual(self.lib.test_ble_writes(), 0)
         self.assertEqual(self.lib.test_ble_activations(), 0)
 
     def test_unexpected_softdevice_error_still_faults(self):

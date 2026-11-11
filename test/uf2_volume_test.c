@@ -1,6 +1,7 @@
 // Exercise the production GhostFAT reader and writer with T-Echo Lite's
 // identity/layout. Only hardware flash accesses are redirected to a host array.
 #include <assert.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -10,7 +11,8 @@
 #define MOTA_SOFTDEVICE_FWID   0x00B6
 
 static uint8_t flash_image[1024u * 1024u];
-static unsigned erases, programs, invalidations;
+static unsigned erases, programs, invalidations, bootloader_writes, bootloader_validations;
+static bool live_app_fits = true;
 
 static const void *flash_pointer(const void *ptr, size_t len) {
   uintptr_t address = (uintptr_t)ptr;
@@ -57,17 +59,27 @@ void flash_nrf5x_write_erased(uint32_t dst, const void *src, uint32_t len) {
   programs++;
 }
 void flash_nrf5x_write(uint32_t dst, const void *src, uint32_t len, bool need_erase) {
-  (void)dst; (void)src; (void)len; (void)need_erase;
-  assert(!"unexpected bootloader write");
+  assert(!need_erase && dst >= BOOTLOADER_ADDR_NEW_RECEIVED &&
+         dst + len <= BOOTLOADER_ADDR_NEW_RECEIVED + DFU_BL_IMAGE_MAX_SIZE);
+  memcpy(flash_image + dst, src, len);
+  bootloader_writes++;
+}
+bool flash_nrf5x_matches(uint32_t dst, const void *src, uint32_t len) {
+  assert(dst >= BOOTLOADER_ADDR_NEW_RECEIVED &&
+         dst + len <= BOOTLOADER_ADDR_NEW_RECEIVED + DFU_BL_IMAGE_MAX_SIZE);
+  return memcmp(flash_image + dst, src, len) == 0;
 }
 void flash_nrf5x_flush(bool need_erase) { (void)need_erase; }
 bool bootloader_app_is_valid(void) { return true; }
-bool ota_delta_live_app_fits_below(uint32_t ceiling) { (void)ceiling; return true; }
+bool ota_delta_live_app_fits_below(uint32_t ceiling) { (void)ceiling; return live_app_fits; }
 uint32_t dfu_image_policy_validate(const uint8_t *image, uint32_t size,
                                    const dfu_start_packet_t *packet) {
-  (void)image; (void)size; (void)packet;
-  assert(!"unexpected bootloader validation");
-  return 1;
+  assert((uintptr_t)image == BOOTLOADER_ADDR_NEW_RECEIVED);
+  assert(size == DFU_BL_IMAGE_MAX_SIZE && packet->dfu_update_mode == DFU_UPDATE_BL &&
+         packet->bl_image_size == size && packet->sd_image_size == 0 &&
+         packet->app_image_size == 0);
+  bootloader_validations++;
+  return NRF_SUCCESS;
 }
 
 static uint16_t le16(const uint8_t *p) { return (uint16_t)(p[0] | p[1] << 8); }
@@ -179,6 +191,82 @@ static void test_volume(uint32_t app_size, uint32_t expected_flash_size) {
   assert(memcmp(flash_image + app.targetAddr, app.data, 256) == 0);
 }
 
+static UF2_Block bootloader_block(uint32_t number, uint32_t count) {
+  UF2_Block block = {
+    .magicStart0 = UF2_MAGIC_START0, .magicStart1 = UF2_MAGIC_START1,
+    .magicEnd = UF2_MAGIC_END, .flags = UF2_FLAG_FAMILYID,
+    .targetAddr = BOOTLOADER_ADDR_START + number * 256u, .payloadSize = 256,
+    .blockNo = number, .numBlocks = count, .familyID = CFG_UF2_FAMILY_BOOT_ID
+  };
+  memset(block.data, (int)(number + 1), block.payloadSize);
+  return block;
+}
+
+static void send_bootloader_block(UF2_Block *block, WriteState *state) {
+  unsigned retries = 0;
+  int result;
+  while ((result = write_block(BPB_TOTAL_SECTORS - 1u, (uint8_t *)block, state)) == 0) {
+    assert(++retries <= DFU_BL_IMAGE_MAX_SIZE / CODE_PAGE_SIZE);
+  }
+  assert(result == 512 && !state->aborted);
+}
+
+static void test_bootloader_writes(void) {
+  WriteState state = {0};
+  UF2_Block first = bootloader_block(0, 2);
+  UF2_Block last = bootloader_block(1, 2);
+  bootloader_writes = bootloader_validations = 0;
+  send_bootloader_block(&first, &state);
+  assert(bootloader_writes == 1 && state.numWritten == 1);
+  send_bootloader_block(&first, &state);
+  assert(bootloader_writes == 1 && state.numWritten == 1);
+  send_bootloader_block(&last, &state);
+  assert(bootloader_validations == 1 && state.numWritten == 2 && !state.has_uicr);
+
+  // A different payload cannot reuse a block number, even without a BLMF CRC.
+  state = (WriteState){0};
+  send_bootloader_block(&first, &state);
+  first.data[32] ^= 1;
+  assert(write_block(BPB_TOTAL_SECTORS - 1u, (uint8_t *)&first, &state) == -1);
+  assert(state.aborted);
+  first.data[32] ^= 1;
+
+  // A different block number cannot overwrite the same staging destination.
+  state = (WriteState){0};
+  send_bootloader_block(&first, &state);
+  last.targetAddr = first.targetAddr;
+  assert(write_block(BPB_TOTAL_SECTORS - 1u, (uint8_t *)&last, &state) == -1);
+  assert(state.aborted);
+
+  // UICR is optional, but supplied address declarations remain mandatory.
+  UF2_Block uicr = bootloader_block(0, 3);
+  uicr.targetAddr = 0x10001000u;
+  state = (WriteState){0};
+  assert(write_block(BPB_TOTAL_SECTORS - 1u, (uint8_t *)&uicr, &state) == -1);
+  assert(state.aborted && state.numWritten == 0);
+  uint32_t boot_address = BOOTLOADER_ADDR_START;
+  uint32_t param_address = BOOTLOADER_MBR_PARAMS_PAGE_ADDRESS;
+  memcpy(uicr.data + 0x14, &boot_address, sizeof(boot_address));
+  memcpy(uicr.data + 0x18, &param_address, sizeof(param_address));
+  state = (WriteState){0};
+  send_bootloader_block(&uicr, &state);
+  assert(state.has_uicr && state.numWritten == 1);
+  send_bootloader_block(&uicr, &state);
+  assert(state.numWritten == 1);
+  uicr.data[0x14] ^= 1;
+  assert(write_block(BPB_TOTAL_SECTORS - 1u, (uint8_t *)&uicr, &state) == -1);
+  assert(state.aborted);
+
+#if defined(MOTA_QSPI_BOOTLOADER_UPDATE)
+  state = (WriteState){0};
+  live_app_fits = false;
+  unsigned const previous_erases = erases;
+  assert(write_block(BPB_TOTAL_SECTORS - 1u, (uint8_t *)&first, &state) == 0);
+  assert(state.aborted && erases == previous_erases);
+  live_app_fits = true;
+#endif
+}
+
 int main(void) {
   const uint32_t sd_span       = DFU_BANK_0_REGION_START - USER_FLASH_START;
   const uint32_t max_app_size  = USER_FLASH_END - DFU_BANK_0_REGION_START;
@@ -190,6 +278,7 @@ int main(void) {
   for (unsigned i = 0; i < ARRAY_SIZE(invalid_sizes); i++) {
     test_volume(invalid_sizes[i], TRUE_USER_FLASH_SIZE);
   }
+  test_bootloader_writes();
   puts("T-Echo Lite UF2: bounded CURRENT size, mount snapshot, FAT, readback and drag-and-drop PASS");
   return 0;
 }

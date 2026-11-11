@@ -10,11 +10,11 @@
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
-static uint32_t          erase_results[32];
-static uint32_t          write_results[32];
-static uint32_t          erase_pages[64];
-static uintptr_t         write_destinations[64];
-static uint32_t          write_values[64];
+static uint32_t          erase_results[256];
+static uint32_t          write_results[256];
+static uint32_t          erase_pages[256];
+static uintptr_t         write_destinations[256];
+static uint32_t          write_values[256];
 static unsigned          erase_result_count;
 static unsigned          write_result_count;
 static unsigned          erase_calls;
@@ -37,6 +37,30 @@ static uint8_t          *nested_store_trigger_data;
 static uint32_t          nested_store_size;
 static uint32_t          nested_store_offset;
 static uint32_t          nested_store_result;
+static uint32_t          timer_now;
+static uint32_t          rtc_now;
+
+void     pstorage_process(void);
+uint32_t pstorage_progress_get(void);
+
+uint32_t board_millis(void) {
+  return timer_now;
+}
+
+static void advance_retry_time(uint32_t ms) {
+  timer_now += ms;
+  rtc_now = (rtc_now + ms) & 0xFFFFFFu;
+  pstorage_process();
+}
+
+static void exhaust_owned_timeouts(void) {
+  for (unsigned retry = 0; retry <= 100u; ++retry) {
+    pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_ERROR);
+    if (retry < 100u) {
+      advance_retry_time(100u);
+    }
+  }
+}
 
 static uint32_t next_result(const uint32_t *results, unsigned count, unsigned call_index) {
   return call_index < count ? results[call_index] : NRF_SUCCESS;
@@ -90,6 +114,8 @@ static void callback(pstorage_handle_t *handle, uint8_t op, uint32_t result, uin
 static pstorage_handle_t reset_and_register(uint32_t address) {
   pstorage_handle_t       handle = {0};
   pstorage_module_param_t params = {.cb = callback};
+  timer_now                      = 0;
+  rtc_now                        = 0;
   if (pstorage_init() != NRF_SUCCESS || pstorage_register(&params, &handle) != NRF_SUCCESS) {
     fputs("setup failed\n", stderr);
     exit(2);
@@ -381,12 +407,13 @@ static int owned_event_error_recovery_test(void) {
   if (pstorage_clear(&first, 4096u) != NRF_SUCCESS || erase_calls != 1u) {
     return 90;
   }
-  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_ERROR);
+  exhaust_owned_timeouts();
   if (callback_calls != 1u || callback_blocks[0] != first.block_id || callback_results[0] != NRF_ERROR_TIMEOUT) {
     return 91;
   }
 
-  if (pstorage_clear(&second, 4096u) != NRF_SUCCESS || erase_calls != 2u || erase_pages[1] != second.block_id / 4096u) {
+  if (pstorage_clear(&second, 4096u) != NRF_SUCCESS || erase_calls != 102u ||
+      erase_pages[101] != second.block_id / 4096u) {
     return 92;
   }
   pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_SUCCESS);
@@ -506,7 +533,7 @@ static int pending_store_event_error_test(void) {
     return 131;
   }
 
-  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_ERROR);
+  exhaust_owned_timeouts();
   if (callback_calls != 2u || callback_results[0] != NRF_ERROR_TIMEOUT || callback_ops[0] != PSTORAGE_STORE_OP_CODE ||
       callback_data[0] != (uint8_t *)&words[0] || callback_sizes[0] != 4u || callback_results[1] != NRF_ERROR_TIMEOUT ||
       callback_ops[1] != PSTORAGE_STORE_OP_CODE || callback_data[1] != (uint8_t *)&words[1] ||
@@ -690,19 +717,18 @@ static int pending_clear_backpressure_fifo_test(void) {
   }
 
   pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_SUCCESS);
-  if (callback_calls != 1u || callback_ops[0] != PSTORAGE_STORE_OP_CODE ||
-      callback_data[0] != (uint8_t *)&word || callback_results[0] != NRF_SUCCESS) {
+  if (callback_calls != 1u || callback_ops[0] != PSTORAGE_STORE_OP_CODE || callback_data[0] != (uint8_t *)&word ||
+      callback_results[0] != NRF_SUCCESS) {
     return 183;
   }
 
-  if (pstorage_clear(&clear, 4096u) != NRF_SUCCESS || erase_calls != 2u ||
-      erase_pages[1] != clear.block_id / 4096u) {
+  if (pstorage_clear(&clear, 4096u) != NRF_SUCCESS || erase_calls != 2u || erase_pages[1] != clear.block_id / 4096u) {
     return 184;
   }
 
   pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_SUCCESS);
-  return callback_calls == 2u && callback_ops[1] == PSTORAGE_CLEAR_OP_CODE &&
-             callback_blocks[1] == clear.block_id && callback_results[1] == NRF_SUCCESS
+  return callback_calls == 2u && callback_ops[1] == PSTORAGE_CLEAR_OP_CODE && callback_blocks[1] == clear.block_id &&
+             callback_results[1] == NRF_SUCCESS
            ? 0
            : 185;
 }
@@ -739,21 +765,361 @@ static int pending_abort_reentry_kick_test(void) {
   pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_SUCCESS);
 
   if (!nested_store_done || nested_store_result != NRF_SUCCESS || erase_calls != 2u || write_calls != 2u ||
-      callback_calls != 3u || callback_data[0] != (uint8_t *)&words[0] ||
-      callback_results[0] != NRF_SUCCESS || callback_data[1] != (uint8_t *)&words[1] ||
-      callback_results[1] != NRF_ERROR_FORBIDDEN || callback_data[2] != (uint8_t *)&words[2] ||
-      callback_results[2] != NRF_ERROR_FORBIDDEN) {
+      callback_calls != 3u || callback_data[0] != (uint8_t *)&words[0] || callback_results[0] != NRF_SUCCESS ||
+      callback_data[1] != (uint8_t *)&words[1] || callback_results[1] != NRF_ERROR_FORBIDDEN ||
+      callback_data[2] != (uint8_t *)&words[2] || callback_results[2] != NRF_ERROR_FORBIDDEN) {
     return 192;
   }
 
   pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_SUCCESS);
-  if (callback_calls != 4u || callback_data[3] != (uint8_t *)&words[3] ||
-      callback_results[3] != NRF_SUCCESS || write_values[1] != words[3]) {
+  if (callback_calls != 4u || callback_data[3] != (uint8_t *)&words[3] || callback_results[3] != NRF_SUCCESS ||
+      write_values[1] != words[3]) {
     return 193;
   }
 
   pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_SUCCESS);
   return callback_calls == 4u ? 0 : 194;
+}
+
+static int timeout_delayed_retry_test(void) {
+  pstorage_handle_t handle = reset_and_register(0x00070000u);
+  if (pstorage_clear(&handle, 4096u) != NRF_SUCCESS) {
+    return 200;
+  }
+  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_ERROR);
+  if (erase_calls != 1u || callback_calls) {
+    return 201;
+  }
+  // Neither queued/spurious events nor an early foreground poll may finish it.
+  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_SUCCESS);
+  pstorage_process();
+  advance_retry_time(99u);
+  if (erase_calls != 1u || callback_calls) {
+    return 202;
+  }
+  advance_retry_time(1u);
+  if (erase_calls != 2u || callback_calls) {
+    return 203;
+  }
+  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_SUCCESS);
+  if (callback_calls != 1u || callback_results[0] != NRF_SUCCESS) {
+    return 204;
+  }
+  pstorage_process();
+  advance_retry_time(1000u);
+  return callback_calls == 1u && erase_calls == 2u ? 0 : 205;
+}
+
+static int timeout_chunk_budget_reset_test(void) {
+  pstorage_handle_t handle = reset_and_register(0x00070000u);
+  if (pstorage_clear(&handle, 8192u) != NRF_SUCCESS) {
+    return 210;
+  }
+  for (unsigned page = 0; page < 2u; ++page) {
+    for (unsigned retry = 0; retry < 100u; ++retry) {
+      pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_ERROR);
+      if (callback_calls) {
+        return 211;
+      }
+      advance_retry_time(100u);
+    }
+    pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_SUCCESS);
+  }
+  return erase_calls == 202u && callback_calls == 1u && callback_results[0] == NRF_SUCCESS &&
+             erase_pages[100] == handle.block_id / 4096u && erase_pages[101] == handle.block_id / 4096u + 1u
+           ? 0
+           : 212;
+}
+
+static int timeout_settings_poll_progress_test(void) {
+  alignas(4) uint32_t geometry = 0x12345678u, marker = 0x87654321u;
+  pstorage_handle_t   handle = reset_and_register(0x000FF000u);
+  if (pstorage_clear(&handle, 4096u) != NRF_SUCCESS ||
+      pstorage_store(&handle, (uint8_t *)&geometry, 4u, 8u) != NRF_SUCCESS ||
+      pstorage_store(&handle, (uint8_t *)&marker, 4u, 0u) != NRF_SUCCESS) {
+    return 220;
+  }
+  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_ERROR);
+  // No timer callback or scheduler dispatch: emulate the settings SOC-only poll.
+  advance_retry_time(100u);
+  if (erase_calls != 2u || write_calls || callback_calls) {
+    return 221;
+  }
+  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_SUCCESS);
+  if (write_calls != 1u || write_values[0] != geometry || callback_calls != 1u) {
+    return 222;
+  }
+  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_SUCCESS);
+  if (write_calls != 2u || write_values[1] != marker || callback_calls != 2u) {
+    return 223;
+  }
+  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_SUCCESS);
+  return callback_calls == 3u && callback_results[2] == NRF_SUCCESS ? 0 : 224;
+}
+
+static int timeout_exhaustion_advances_queue_test(void) {
+  pstorage_handle_t first = reset_and_register(0x00071000u), second = first;
+  second.block_id += 4096u;
+  if (pstorage_clear(&first, 4096u) != NRF_SUCCESS || pstorage_clear(&second, 4096u) != NRF_SUCCESS) {
+    return 230;
+  }
+  exhaust_owned_timeouts();
+  if (callback_calls != 1u || callback_blocks[0] != first.block_id || callback_results[0] != NRF_ERROR_TIMEOUT ||
+      erase_calls != 102u) {
+    return 231;
+  }
+  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_SUCCESS);
+  return callback_calls == 2u && callback_blocks[1] == second.block_id && callback_results[1] == NRF_SUCCESS ? 0 : 232;
+}
+
+static int timeout_reissue_fatal_test(void) {
+  pstorage_handle_t handle = reset_and_register(0x00072000u);
+  erase_results[0]         = NRF_SUCCESS;
+  erase_results[1]         = NRF_ERROR_FORBIDDEN;
+  erase_result_count       = 2u;
+  if (pstorage_clear(&handle, 4096u) != NRF_SUCCESS) {
+    return 240;
+  }
+  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_ERROR);
+  advance_retry_time(100u);
+  if (callback_calls != 1u || callback_results[0] != NRF_ERROR_FORBIDDEN) {
+    return 241;
+  }
+  advance_retry_time(1000u);
+  return erase_calls == 2u && callback_calls == 1u ? 0 : 242;
+}
+
+static int timeout_retry_busy_ownership_test(void) {
+  pstorage_handle_t handle = reset_and_register(0x00073000u);
+  erase_results[0]         = NRF_SUCCESS;
+  erase_results[1]         = NRF_ERROR_BUSY;
+  erase_results[2]         = NRF_SUCCESS;
+  erase_result_count       = 3u;
+  if (pstorage_clear(&handle, 4096u) != NRF_SUCCESS) {
+    return 250;
+  }
+  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_ERROR);
+  advance_retry_time(100u);
+  if (erase_calls != 2u || callback_calls) {
+    return 251;
+  }
+  advance_retry_time(9999u);
+  if (erase_calls != 2u || callback_calls) {
+    return 252;
+  }
+  // Foreign error unblocks a retry; it does not fail our queue head.
+  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_ERROR);
+  if (erase_calls != 3u || callback_calls) {
+    return 253;
+  }
+  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_SUCCESS);
+  advance_retry_time(10000u);
+  return callback_calls == 1u && callback_results[0] == NRF_SUCCESS && erase_calls == 3u ? 0 : 254;
+}
+
+static int timeout_retry_busy_bound_test(void) {
+  pstorage_handle_t first = reset_and_register(0x00074000u), second = first;
+  second.block_id += 4096u;
+  erase_results[0]   = NRF_SUCCESS;
+  erase_results[1]   = NRF_ERROR_BUSY;
+  erase_results[2]   = NRF_SUCCESS;
+  erase_result_count = 3u;
+  if (pstorage_clear(&first, 4096u) != NRF_SUCCESS || pstorage_clear(&second, 4096u) != NRF_SUCCESS) {
+    return 260;
+  }
+  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_ERROR);
+  advance_retry_time(100u);
+  advance_retry_time(10000u);
+  if (callback_calls != 1u || callback_results[0] != NRF_ERROR_BUSY || callback_blocks[0] != first.block_id ||
+      erase_calls != 2u) {
+    return 261;
+  }
+  // Even after timeout, an outstanding foreign event cannot complete second.
+  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_SUCCESS);
+  if (callback_calls != 1u || erase_calls != 3u) {
+    return 262;
+  }
+  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_SUCCESS);
+  return callback_calls == 2u && callback_blocks[1] == second.block_id && callback_results[1] == NRF_SUCCESS ? 0 : 263;
+}
+
+static int timeout_clock_wrap_and_reinit_test(void) {
+  pstorage_handle_t handle = reset_and_register(0x00075000u);
+  timer_now                = 0xFFFFFFD0u;
+  if (pstorage_clear(&handle, 4096u) != NRF_SUCCESS) {
+    return 270;
+  }
+  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_ERROR);
+  advance_retry_time(99u);
+  pstorage_process();
+  if (erase_calls != 1u || callback_calls) {
+    return 271;
+  }
+  advance_retry_time(1u);
+  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_SUCCESS);
+  handle = reset_and_register(0x00076000u);
+  if (pstorage_clear(&handle, 4096u) != NRF_SUCCESS) {
+    return 272;
+  }
+  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_ERROR);
+  // Additional polls after reinitialization cannot skip the new delay.
+  pstorage_process();
+  advance_retry_time(99u);
+  if (erase_calls != 1u || callback_calls) {
+    return 273;
+  }
+  advance_retry_time(1u);
+  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_SUCCESS);
+  return erase_calls == 2u && callback_calls == 1u && callback_results[0] == NRF_SUCCESS ? 0 : 274;
+}
+
+static int sixteen_packet_retry_burst_test(void) {
+  alignas(4) uint32_t words[17];
+  uint8_t             erased[1] = {0};
+  pstorage_handle_t   handle    = reset_and_register(0x00026000u);
+  dfu_base_address              = handle.block_id;
+  dfu_image_page_count          = 1u;
+  dfu_page_erased               = erased;
+  for (unsigned i = 0; i < 17u; ++i) {
+    words[i] = 0xC0FFEE00u + i;
+  }
+  for (unsigned i = 0; i < 16u; ++i) {
+    if (pstorage_store(&handle, (uint8_t *)&words[i], 4u, i * 4u) != NRF_SUCCESS) {
+      return 280;
+    }
+  }
+  if (pstorage_store(&handle, (uint8_t *)&words[16], 4u, 64u) != NRF_ERROR_NO_MEM) {
+    return 281;
+  }
+  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_ERROR);
+  advance_retry_time(100u);
+  if (erased[0] || write_calls || callback_calls || erase_calls != 2u) {
+    return 282;
+  }
+  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_SUCCESS);
+  for (unsigned i = 0; i < 16u; ++i) {
+    pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_SUCCESS);
+    if (callback_calls != i + 1u || callback_data[i] != (uint8_t *)&words[i] || callback_results[i] != NRF_SUCCESS ||
+        write_values[i] != words[i]) {
+      return 283;
+    }
+  }
+  return erased[0] && write_calls == 16u && callback_calls == 16u ? 0 : 284;
+}
+
+static int timeout_rtc_reset_does_not_shorten_backoff_test(void) {
+  pstorage_handle_t handle = reset_and_register(0x00077000u);
+  timer_now                = 5000u;
+  rtc_now                  = 5000u;
+  if (pstorage_clear(&handle, 4096u) != NRF_SUCCESS) {
+    return 290;
+  }
+  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_ERROR);
+  rtc_now = 0; // Model an unrelated SDK timer resetting its own timebase.
+  // A reset RTC has wrapped relative to the old RTC reading, not elapsed 100ms.
+  pstorage_process();
+  if (erase_calls != 1u || callback_calls) {
+    return 292;
+  }
+  advance_retry_time(99u);
+  rtc_now = 123456u; // Changing the timer timebase cannot manufacture progress.
+  pstorage_process();
+  pstorage_process();
+  if (erase_calls != 1u || callback_calls) {
+    return 293;
+  }
+  advance_retry_time(1u);
+  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_SUCCESS);
+  return erase_calls == 2u && callback_calls == 1u && callback_results[0] == NRF_SUCCESS ? 0 : 294;
+}
+
+static int flash_progress_epoch_test(void) {
+  pstorage_handle_t handle = reset_and_register(0x00078000u);
+  if (pstorage_progress_get() != 0u) {
+    return 300;
+  }
+  pstorage_process();
+  if (pstorage_progress_get() != 0u) {
+    return 301;
+  }
+  if (pstorage_clear(&handle, 4096u) != NRF_SUCCESS || pstorage_progress_get() != 1u) {
+    return 302;
+  }
+  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_ERROR);
+  if (pstorage_progress_get() != 2u) {
+    return 303;
+  }
+  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_SUCCESS);
+  pstorage_process();
+  advance_retry_time(99u);
+  if (pstorage_progress_get() != 2u) {
+    return 304;
+  }
+  advance_retry_time(1u);
+  if (pstorage_progress_get() != 3u) {
+    return 305;
+  }
+  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_SUCCESS);
+  if (pstorage_progress_get() != 4u || callback_calls != 1u) {
+    return 306;
+  }
+  advance_retry_time(1000u);
+  pstorage_process();
+  return pstorage_progress_get() == 4u ? 0 : 307;
+}
+
+static int foreign_events_are_not_flash_progress_test(void) {
+  pstorage_handle_t handle = reset_and_register(0x00079000u);
+  erase_results[0]         = NRF_ERROR_BUSY;
+  erase_results[1]         = NRF_ERROR_BUSY;
+  erase_results[2]         = NRF_SUCCESS;
+  erase_result_count       = 3u;
+  if (pstorage_clear(&handle, 4096u) != NRF_SUCCESS || pstorage_progress_get() != 0u) {
+    return 310;
+  }
+  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_ERROR);
+  if (pstorage_progress_get() != 0u || callback_calls) {
+    return 311;
+  }
+  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_SUCCESS);
+  if (pstorage_progress_get() != 1u || callback_calls) {
+    return 312;
+  }
+  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_SUCCESS);
+  return pstorage_progress_get() == 2u && callback_calls == 1u ? 0 : 313;
+}
+
+static int stale_command_slot_reuse_test(void) {
+  alignas(4) uint32_t word   = 0x12345678u;
+  pstorage_handle_t   handle = reset_and_register(0x0007A000u);
+  // Reuse every command slot twice, rejecting a different operation just
+  // before each enqueue. Count, not stale slot bytes, must define ownership.
+  for (unsigned i = 0; i < 36u; ++i) {
+    write_results[write_calls] = NRF_ERROR_FORBIDDEN;
+    write_result_count         = write_calls + 1u;
+    if (pstorage_store(&handle, (uint8_t *)&word, 4u, 128u) != NRF_ERROR_FORBIDDEN) {
+      return 320;
+    }
+    pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_SUCCESS);
+    if (callback_calls != i) {
+      return 321;
+    }
+    uint8_t  op     = i & 1u ? PSTORAGE_CLEAR_OP_CODE : PSTORAGE_STORE_OP_CODE;
+    uint32_t result = op == PSTORAGE_CLEAR_OP_CODE ? pstorage_clear(&handle, 4096u)
+                                                   : pstorage_store(&handle, (uint8_t *)&word, 4u, i * 4u);
+    if (result != NRF_SUCCESS) {
+      return 322;
+    }
+    pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_SUCCESS);
+    if (callback_calls != i + 1u || callback_results[i] != NRF_SUCCESS || callback_blocks[i] != handle.block_id ||
+        callback_ops[i] != op || callback_data[i] != (op == PSTORAGE_CLEAR_OP_CODE ? NULL : (uint8_t *)&word) ||
+        callback_sizes[i] != (op == PSTORAGE_CLEAR_OP_CODE ? 4096u : 4u)) {
+      return 323;
+    }
+  }
+  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_SUCCESS);
+  pstorage_process();
+  return callback_calls == 36u ? 0 : 324;
 }
 
 int main(void) {
@@ -812,10 +1178,49 @@ int main(void) {
   if (rc == 0) {
     rc = pending_abort_reentry_kick_test();
   }
+  if (rc == 0) {
+    rc = timeout_delayed_retry_test();
+  }
+  if (rc == 0) {
+    rc = timeout_chunk_budget_reset_test();
+  }
+  if (rc == 0) {
+    rc = timeout_settings_poll_progress_test();
+  }
+  if (rc == 0) {
+    rc = timeout_exhaustion_advances_queue_test();
+  }
+  if (rc == 0) {
+    rc = timeout_reissue_fatal_test();
+  }
+  if (rc == 0) {
+    rc = timeout_retry_busy_ownership_test();
+  }
+  if (rc == 0) {
+    rc = timeout_retry_busy_bound_test();
+  }
+  if (rc == 0) {
+    rc = timeout_clock_wrap_and_reinit_test();
+  }
+  if (rc == 0) {
+    rc = sixteen_packet_retry_burst_test();
+  }
+  if (rc == 0) {
+    rc = timeout_rtc_reset_does_not_shorten_backoff_test();
+  }
+  if (rc == 0) {
+    rc = flash_progress_epoch_test();
+  }
+  if (rc == 0) {
+    rc = foreign_events_are_not_flash_progress_test();
+  }
+  if (rc == 0) {
+    rc = stale_command_slot_reuse_test();
+  }
   if (rc != 0) {
     fprintf(stderr, "pstorage busy regression failed: %d\n", rc);
     return rc;
   }
-  puts("pstorage BUSY retry, rollback, and FIFO tests passed");
+  puts("pstorage BUSY/100-timeout retry, rollback, 16-packet burst, and FIFO tests passed");
   return 0;
 }

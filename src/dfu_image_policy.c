@@ -2,31 +2,23 @@
 
 #include <stdbool.h>
 #include <stddef.h>
-#include <string.h>
 
 #include "board.h"
 #include "nrf_error.h"
 #include "nrf_sdm.h"
 #include "usb/uf2/bootloader_image.h"
 
-#ifndef DEVICE_NAME
-  #error "DEVICE_NAME is required to bind privileged Legacy DFU images"
-#endif
 #ifndef USB_DESC_VID
-  #error "USB_DESC_VID is required to bind privileged Legacy DFU images"
+  #error "USB_DESC_VID is required to identify manual bootloader images"
 #endif
 #ifndef USB_DESC_UF2_PID
-  #error "USB_DESC_UF2_PID is required to bind privileged Legacy DFU images"
+  #error "USB_DESC_UF2_PID is required to identify manual bootloader images"
 #endif
 #ifndef MOTA_SOFTDEVICE_FAMILY
   #error "MOTA_SOFTDEVICE_FAMILY is required"
 #endif
 
-typedef char dfu_policy_device_name_must_fit
-  [(sizeof(DEVICE_NAME) <= BOOTLOADER_UPDATE_DEVICE_NAME_SIZE) ? 1 : -1];
-
 typedef struct {
-  uint32_t family;
   uint16_t fwid;
   uint32_t app_base;
 } softdevice_image_info_t;
@@ -57,13 +49,13 @@ uint32_t dfu_start_packet_validate(dfu_start_packet_t const* start_packet,
   uint32_t image_size;
   if (start_packet->bl_image_size > DFU_BL_IMAGE_MAX_SIZE ||
       __builtin_add_overflow(start_packet->sd_image_size,
-                             start_packet->bl_image_size, &image_size) ||
-      __builtin_add_overflow(image_size, start_packet->app_image_size,
-                             &image_size)) {
+                             start_packet->bl_image_size, &image_size)) {
     return NRF_ERROR_DATA_SIZE;
   }
 
-  *image_size_out = image_size;
+  // APP is standalone under the mode checks above, so these sizes cannot
+  // both be nonzero and require no second overflow check.
+  *image_size_out = image_size | start_packet->app_image_size;
   return NRF_SUCCESS;
 }
 
@@ -91,11 +83,11 @@ static bool softdevice_info(uint8_t const* image, uint32_t image_size,
     return false;
   }
 
-  info->family   = read_le32(image + SD_ID_OFFSET);
+  uint32_t const family = read_le32(image + SD_ID_OFFSET);
   info->fwid     = read_le16(image + SD_FWID_OFFSET);
   info->app_base = read_le32(image + SD_SIZE_OFFSET);
 
-  if (info->family != MOTA_SOFTDEVICE_FAMILY || info->fwid == 0U ||
+  if (family != MOTA_SOFTDEVICE_FAMILY || info->fwid == 0U ||
       info->fwid == UINT16_MAX || info->app_base <= MBR_SIZE ||
       info->app_base >= BOOTLOADER_REGION_START ||
       (info->app_base & (CODE_PAGE_SIZE - 1U)) != 0U ||
@@ -108,34 +100,17 @@ static bool softdevice_info(uint8_t const* image, uint32_t image_size,
 
 static bool bootloader_info(uint8_t const* image, uint32_t image_size,
                             softdevice_image_info_t const* incoming_sd) {
-#if RECOVERY_ALLOW_ALL_BOARDS
-  // A local recovery bridge accepts any bootloader, including pre-manifest
-  // releases with shorter images. Transport integrity is checked separately;
-  // require only a bounded image with usable vectors for this chip/region.
-  (void)incoming_sd;
-  return image_size <= DFU_BL_IMAGE_MAX_SIZE &&
-         bootloader_image_vectors_valid(image, image_size, BOOTLOADER_REGION_START, image_size);
-#else
-  #ifdef DFU_IMAGE_POLICY_HOST_TEST
-  static char const expected_name[BOOTLOADER_UPDATE_DEVICE_NAME_SIZE] = DEVICE_NAME;
-  #else
-  extern const bootloader_update_envelope_t bootloaderUpdateManifest;
-  char const* expected_name = bootloaderUpdateManifest.manifest.device_name;
-  #endif
   uint32_t const expected_board = ((uint32_t)USB_DESC_VID << 16) | USB_DESC_UF2_PID;
-
-  if (image_size != DFU_BL_IMAGE_MAX_SIZE) {
-    return false;
-  }
-
   bootloader_image_info_t candidate;
-  bootloader_image_format_t const format = bootloader_image_classify_manual(
-    image, BOOTLOADER_REGION_START, image_size, expected_board, expected_name,
-    &candidate);
-  if (format == BOOTLOADER_IMAGE_INVALID) {
+  if (!bootloader_image_manual_compatible(image, BOOTLOADER_REGION_START,
+                                          image_size, expected_board, &candidate)) {
     return false;
   }
-  if (format == BOOTLOADER_IMAGE_V2) {
+
+  // Older/manual images need no project-specific envelope or full-region
+  // padding. When compatibility metadata is supplied, keep its SD/layout
+  // assertions authoritative rather than silently ignoring a known mismatch.
+  if (candidate.softdevice_family != 0U) {
     uint16_t const expected_fwid = incoming_sd ? incoming_sd->fwid :
                                                dfu_policy_runtime_softdevice_fwid();
     uint32_t const expected_app_base = incoming_sd ? incoming_sd->app_base :
@@ -146,14 +121,7 @@ static bool bootloader_info(uint8_t const* image, uint32_t image_size,
            candidate.layout_abi == BOOTLOADER_UPDATE_LAYOUT_ABI;
   }
 
-  // Relocated BLMF-only preview images predate machine-readable layout metadata. They
-  // remain useful for deliberate rollback only when an accompanying SD is
-  // exactly the runtime layout they were built around. A BL-only update does
-  // not alter that already-working layout.
-  return incoming_sd == NULL ||
-         (incoming_sd->fwid == dfu_policy_runtime_softdevice_fwid() &&
-          incoming_sd->app_base == dfu_policy_runtime_app_base());
-#endif
+  return true;
 }
 
 uint32_t dfu_image_policy_validate(uint8_t const* image, uint32_t image_len,
@@ -187,7 +155,7 @@ uint32_t dfu_image_policy_validate(uint8_t const* image, uint32_t image_len,
     // An SD-only replacement must be an exact reinstall.  Sharing a family
     // and application boundary does not prove that the running bootloader's
     // SVC ABI matches a different SoftDevice FWID.  Migrations travel with
-    // their matching, board-bound bootloader.
+    // their matching bootloader selected by the operator.
     if ((populated_mode == DFU_UPDATE_SD) &&
         (incoming_sd.fwid != dfu_policy_runtime_softdevice_fwid() ||
          incoming_sd.app_base != dfu_policy_runtime_app_base())) {

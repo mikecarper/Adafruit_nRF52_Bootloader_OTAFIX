@@ -147,3 +147,17 @@ void flash_nrf5x_write_erased(uint32_t dst, void const *src, uint32_t len)
     nrfx_nvmc_words_write(dst, src, len / sizeof(uint32_t));
     inherited_watchdog_feed();
 }
+
+bool flash_nrf5x_matches(uint32_t dst, void const *src, uint32_t len)
+{
+    uint32_t const page_addr = dst & ~(CODE_PAGE_SIZE - 1);
+    uint32_t const offset = dst & (CODE_PAGE_SIZE - 1);
+    if (len > CODE_PAGE_SIZE - offset || len > UINT32_MAX - dst) {
+        return false;
+    }
+
+    // Bootloader UF2 retries can arrive before the current staging page has
+    // reached flash. Compare its pending bytes without forcing a page write.
+    void const *stored = page_addr == _fl_addr ? _fl_buf + offset : (void const *)(uintptr_t)dst;
+    return memcmp(stored, src, len) == 0;
+}

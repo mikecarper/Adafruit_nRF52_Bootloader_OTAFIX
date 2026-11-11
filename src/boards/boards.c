@@ -45,7 +45,11 @@ void neopixel_teardown(void);
 // IMPLEMENTATION
 //--------------------------------------------------------------------+
 
-static uint32_t _systick_count = 0;
+static volatile uint32_t _systick_count = 0;
+
+uint32_t board_millis(void) {
+  return _systick_count;
+}
 
 #ifdef EXTERNAL_WATCHDOG_DONE_PIN
 static void external_watchdog_tick(void) {

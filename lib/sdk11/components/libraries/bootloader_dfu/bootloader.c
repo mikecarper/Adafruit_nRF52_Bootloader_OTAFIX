@@ -189,6 +189,9 @@ static void wait_for_events(void)
       // When update has completed or a timeout/reset occurred we will return.
       return;
     }
+    // Retry from foreground only; the RTC timer must never invoke flash or
+    // owner callbacks from interrupt context.
+    pstorage_process();
 #ifdef SECURE_DFU_TEST
     // Retry blocked receipts only after scheduler/transport work, and never
     // after the DFU timeout or completion exit above.
@@ -492,6 +495,8 @@ uint32_t bootloader_dfu_start(bool ota, uint32_t timeout_ms, bool cancel_timeout
 {
   uint32_t err_code;
 
+  // A settings save in this boot may have left COMPLETE from an earlier phase.
+  m_update_status = BOOTLOADER_UPDATING;
   m_cancel_timeout_on_usb = cancel_timeout_on_usb && !ota;
   m_usb_was_mounted = false;
   m_startup_dfu_has_activity = false;

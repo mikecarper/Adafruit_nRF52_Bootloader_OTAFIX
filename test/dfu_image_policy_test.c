@@ -6,15 +6,23 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "board.h"
 #include "nrf_error.h"
 #include "usb/uf2/bootloader_image.h"
 
 #define APP_BASE       0x00026000UL
 #define SD_IMAGE_SIZE  0x00002100UL
 #define BL_IMAGE_SIZE  DFU_BL_IMAGE_MAX_SIZE
-#define BOARD_ID       0x239A0071UL
+#define BOARD_ID       (((uint32_t)USB_DESC_VID << 16) | USB_DESC_UF2_PID)
 #define BOOT_VERSION   0x02040404UL
 #define LEGACY_MANIFEST_OFFSET 0x00000200UL
+#if defined(NRF52832_XXAA)
+  #define RAM_END 0x20010000UL
+#elif defined(NRF52833_XXAA)
+  #define RAM_END 0x20020000UL
+#else
+  #define RAM_END 0x20040000UL
+#endif
 
 static uint32_t runtime_app_base = APP_BASE;
 static uint16_t runtime_fwid = 0x00B6U;
@@ -43,13 +51,13 @@ static void write_u32(uint8_t* image, size_t offset, uint32_t value) {
 
 static void make_app(void) {
   memset(app_image, 0xA5, sizeof(app_image));
-  write_u32(app_image, 0, 0x20040000UL);
+  write_u32(app_image, 0, RAM_END);
   write_u32(app_image, 4, APP_BASE + 0x101UL);
 }
 
 static void make_softdevice(uint16_t fwid, uint32_t app_base) {
   memset(sd_bl_image, 0xFF, SD_IMAGE_SIZE);
-  write_u32(sd_bl_image, 0, 0x20040000UL);
+  write_u32(sd_bl_image, 0, RAM_END);
   write_u32(sd_bl_image, 4, MBR_SIZE + 0x101UL);
   sd_bl_image[SD_INFO_STRUCT_SIZE_OFFSET] =
     SD_UNIQUE_STR_OFFSET + SD_UNIQUE_STR_SIZE - SOFTDEVICE_INFO_STRUCT_OFFSET;
@@ -72,7 +80,7 @@ static void make_bootloader(uint32_t boot_version, uint16_t fwid,
                             uint32_t app_base) {
   uint8_t* image = sd_bl_image + SD_IMAGE_SIZE;
   memset(image, 0xFF, BL_IMAGE_SIZE);
-  write_u32(image, 0, 0x20040000UL);
+  write_u32(image, 0, RAM_END);
   write_u32(image, 4, BOOTLOADER_REGION_START + 0x101UL);
 
   size_t const manifest_offset =
@@ -123,7 +131,6 @@ static dfu_start_packet_t start_packet(uint8_t mode, uint32_t sd_size,
 }
 
 int main(void) {
-  const uint32_t recovery_result = RECOVERY_ALLOW_ALL_BOARDS ? NRF_SUCCESS : NRF_ERROR_INVALID_DATA;
   make_app();
   dfu_start_packet_t packet =
     start_packet(DFU_UPDATE_APP, 0, 0, sizeof(app_image));
@@ -170,7 +177,7 @@ int main(void) {
   make_softdevice(runtime_fwid, runtime_app_base);
   make_bootloader(BOOT_VERSION, runtime_fwid, runtime_app_base);
 
-  // Authenticity and compatibility, not monotonic ordering, govern updates.
+  // Compatibility, not monotonic ordering, governs manual updates.
   // Compatible older, equal, and newer bootloaders are all intentional.
   make_bootloader(0x01000001UL, runtime_fwid, runtime_app_base);
   assert(dfu_image_policy_validate(sd_bl_image, sizeof(sd_bl_image), &packet) ==
@@ -182,8 +189,8 @@ int main(void) {
   assert(dfu_image_policy_validate(sd_bl_image, sizeof(sd_bl_image), &packet) ==
          NRF_SUCCESS);
 
-  // Normal builds require canonical BLM2 or valid relocated BLMF metadata.
-  // Manual recovery permits bootloaders whose metadata is absent or damaged.
+  // Metadata is optional, but recognizable malformed metadata is rejected in
+  // both normal and historical recovery builds.
   make_legacy_bootloader();
   assert(dfu_image_policy_validate(sd_bl_image, sizeof(sd_bl_image), &packet) ==
          NRF_SUCCESS);
@@ -197,7 +204,7 @@ int main(void) {
             0U);
   seal_bootloader_manifest(bootloader, manifest_offset);
   packet = start_packet(DFU_UPDATE_BL, 0, BL_IMAGE_SIZE, 0);
-  assert(dfu_image_policy_validate(bootloader, BL_IMAGE_SIZE, &packet) == recovery_result);
+  assert(dfu_image_policy_validate(bootloader, BL_IMAGE_SIZE, &packet) == NRF_ERROR_INVALID_DATA);
 
   make_legacy_bootloader();
   assert(dfu_image_policy_validate(bootloader, BL_IMAGE_SIZE, &packet) ==
@@ -206,7 +213,7 @@ int main(void) {
                         BL_IMAGE_SIZE, 0);
 
   make_bootloader(BOOT_VERSION, runtime_fwid + 1U, runtime_app_base);
-  assert(dfu_image_policy_validate(sd_bl_image, sizeof(sd_bl_image), &packet) == recovery_result);
+  assert(dfu_image_policy_validate(sd_bl_image, sizeof(sd_bl_image), &packet) == NRF_ERROR_INVALID_DATA);
 
   make_bootloader(BOOT_VERSION, runtime_fwid, runtime_app_base);
   sd_bl_image[SD_ID_OFFSET] ^= 1U;
@@ -224,6 +231,8 @@ int main(void) {
   assert(dfu_image_policy_validate(sd_bl_image, SD_IMAGE_SIZE, &packet) ==
          NRF_ERROR_INVALID_DATA);
 
+  // Even an otherwise valid same-family SD-only image must keep the exact
+  // runtime FWID: manual bootloader replacement does not relax this ABI check.
   make_softdevice(runtime_fwid + 1U, runtime_app_base);
   assert(dfu_image_policy_validate(sd_bl_image, SD_IMAGE_SIZE, &packet) ==
          NRF_ERROR_INVALID_DATA);
@@ -242,38 +251,49 @@ int main(void) {
   size_t const board_offset =
     BL_IMAGE_SIZE - sizeof(bootloader_update_envelope_t) +
     offsetof(bootloader_update_manifest_t, board_id);
-  write_u32(bootloader, board_offset, 0x239A0029UL);
+  uint32_t const foreign_board = BOARD_ID == 0x239A0029UL ? 0x239A0071UL : 0x239A0029UL;
+  write_u32(bootloader, board_offset, foreign_board);
   packet = start_packet(DFU_UPDATE_SD | DFU_UPDATE_BL, SD_IMAGE_SIZE,
                         BL_IMAGE_SIZE, 0);
-  assert(dfu_image_policy_validate(sd_bl_image, sizeof(sd_bl_image), &packet) == recovery_result);
+  assert(dfu_image_policy_validate(sd_bl_image, sizeof(sd_bl_image), &packet) == NRF_ERROR_INVALID_DATA);
 
-  // A valid cross-board image is accepted only by the opt-in bridge. Test
-  // both shared VID/PID but different name (GAT562/RAK4631) and different IDs.
+  // Product names may change, but a recognized incompatible VID/PID still
+  // rejects the image. Shared VID/PID alone remains a compatibility identity.
   for (unsigned int shared_id = 0; shared_id < 2; shared_id++) {
     make_bootloader(BOOT_VERSION, runtime_fwid, runtime_app_base);
-    write_u32(bootloader, board_offset, shared_id ? BOARD_ID : 0x239A0029UL);
+    write_u32(bootloader, board_offset, shared_id ? BOARD_ID : foreign_board);
     char const foreign_name[BOOTLOADER_UPDATE_DEVICE_NAME_SIZE] = "4631_DFU";
     memcpy(bootloader + manifest_offset + offsetof(bootloader_update_manifest_t, device_name),
            foreign_name, sizeof(foreign_name));
     seal_bootloader_manifest(bootloader, manifest_offset);
-    uint32_t const expected_result = RECOVERY_ALLOW_ALL_BOARDS ? NRF_SUCCESS : NRF_ERROR_INVALID_DATA;
+    uint32_t const expected_result = shared_id ? NRF_SUCCESS : NRF_ERROR_INVALID_DATA;
     packet = start_packet(DFU_UPDATE_SD | DFU_UPDATE_BL, SD_IMAGE_SIZE, BL_IMAGE_SIZE, 0);
     assert(dfu_image_policy_validate(sd_bl_image, sizeof(sd_bl_image), &packet) == expected_result);
     packet = start_packet(DFU_UPDATE_BL, 0, BL_IMAGE_SIZE, 0);
     assert(dfu_image_policy_validate(bootloader, BL_IMAGE_SIZE, &packet) == expected_result);
 
-    // Manual recovery also ignores bootloader SoftDevice/layout declarations.
+    // Supplied SoftDevice/layout declarations remain authoritative.
     size_t const extension_offset = manifest_offset + sizeof(bootloader_update_manifest_t);
     write_u16(bootloader, extension_offset + offsetof(bootloader_update_extension_t, softdevice_fwid),
               runtime_fwid + 1U);
     seal_bootloader_manifest(bootloader, manifest_offset);
-    assert(dfu_image_policy_validate(bootloader, BL_IMAGE_SIZE, &packet) == recovery_result);
+    assert(dfu_image_policy_validate(bootloader, BL_IMAGE_SIZE, &packet) == NRF_ERROR_INVALID_DATA);
     write_u16(bootloader, extension_offset + offsetof(bootloader_update_extension_t, softdevice_fwid),
               runtime_fwid);
     write_u16(bootloader, extension_offset + offsetof(bootloader_update_extension_t, layout_abi),
               BOOTLOADER_UPDATE_LAYOUT_ABI + 1U);
     seal_bootloader_manifest(bootloader, manifest_offset);
-    assert(dfu_image_policy_validate(bootloader, BL_IMAGE_SIZE, &packet) == recovery_result);
+    assert(dfu_image_policy_validate(bootloader, BL_IMAGE_SIZE, &packet) == NRF_ERROR_INVALID_DATA);
+  }
+
+  // Sense and non-Sense share the bootloader pins, storage and SD layout.
+  // Their two USB identities are intentionally compatible with each other.
+  if (BOARD_ID == 0x28860044UL || BOARD_ID == 0x28860045UL) {
+    make_bootloader(BOOT_VERSION, runtime_fwid, runtime_app_base);
+    write_u32(bootloader, board_offset, BOARD_ID ^ 1U);
+    seal_bootloader_manifest(bootloader, manifest_offset);
+    packet = start_packet(DFU_UPDATE_BL, 0, BL_IMAGE_SIZE, 0);
+    assert(dfu_image_policy_validate(bootloader, BL_IMAGE_SIZE, &packet) == NRF_SUCCESS);
   }
 
   // Pre-manifest releases need no wrapper, CF2 record or full 40 KiB padding.
@@ -283,15 +303,27 @@ int main(void) {
   for (size_t i = 0; i < sizeof(raw_sizes) / sizeof(raw_sizes[0]); i++) {
     const uint32_t size = raw_sizes[i];
     memset(bootloader, 0xA5, BL_IMAGE_SIZE);
-    write_u32(bootloader, 0, 0x20040000UL);
+    write_u32(bootloader, 0, RAM_END);
     write_u32(bootloader, 4, BOOTLOADER_REGION_START + 9U);
     packet = start_packet(DFU_UPDATE_BL, 0, size, 0);
-    assert(dfu_image_policy_validate(bootloader, size, &packet) == recovery_result);
+    assert(dfu_image_policy_validate(bootloader, size, &packet) == NRF_SUCCESS);
     packet = start_packet(DFU_UPDATE_SD | DFU_UPDATE_BL, SD_IMAGE_SIZE, size, 0);
-    assert(dfu_image_policy_validate(sd_bl_image, SD_IMAGE_SIZE + size, &packet) == recovery_result);
+    assert(dfu_image_policy_validate(sd_bl_image, SD_IMAGE_SIZE + size, &packet) == NRF_SUCCESS);
   }
 
-  // Flash bounds, word alignment and startup vectors still apply in recovery.
+  // A manifest-free bootloader does not waive SD family validation.
+  sd_bl_image[SD_ID_OFFSET] ^= 1U;
+  assert(dfu_image_policy_validate(sd_bl_image, sizeof(sd_bl_image), &packet) == NRF_ERROR_INVALID_DATA);
+  make_softdevice(runtime_fwid, runtime_app_base);
+
+  // A matching bootloader may accompany a deliberate same-family SD migration.
+  // The SD-only exact FWID rule remains independent of this path.
+  make_softdevice(runtime_fwid + 1U, runtime_app_base + CODE_PAGE_SIZE);
+  assert(dfu_image_policy_validate(sd_bl_image, sizeof(sd_bl_image), &packet) == NRF_SUCCESS);
+  packet = start_packet(DFU_UPDATE_SD, SD_IMAGE_SIZE, 0, 0);
+  assert(dfu_image_policy_validate(sd_bl_image, SD_IMAGE_SIZE, &packet) == NRF_ERROR_INVALID_DATA);
+
+  // Flash bounds, word alignment and startup vectors apply to every build.
   packet = start_packet(DFU_UPDATE_BL, 0, BL_IMAGE_SIZE + 4U, 0);
   assert(dfu_image_policy_validate(bootloader, BL_IMAGE_SIZE, &packet) == NRF_ERROR_INVALID_DATA);
   packet = start_packet(DFU_UPDATE_BL, 0, 38999U, 0);
@@ -299,12 +331,14 @@ int main(void) {
   packet = start_packet(DFU_UPDATE_BL, 0, 4U, 0);
   assert(dfu_image_policy_validate(bootloader, 4U, &packet) == NRF_ERROR_INVALID_DATA);
   packet = start_packet(DFU_UPDATE_BL, 0, 39000U, 0);
-  write_u32(bootloader, 0, 0x20040008UL);
+  write_u32(bootloader, 0, RAM_END + 8U);
   assert(dfu_image_policy_validate(bootloader, 39000U, &packet) == NRF_ERROR_INVALID_DATA);
-  write_u32(bootloader, 0, 0x20040000UL);
+  write_u32(bootloader, 0, RAM_END);
   write_u32(bootloader, 4, BOOTLOADER_REGION_START + 39001U);
   assert(dfu_image_policy_validate(bootloader, 39000U, &packet) == NRF_ERROR_INVALID_DATA);
   write_u32(bootloader, 4, BOOTLOADER_REGION_START + 8U);
+  assert(dfu_image_policy_validate(bootloader, 39000U, &packet) == NRF_ERROR_INVALID_DATA);
+  write_u32(bootloader, 4, BOOTLOADER_REGION_START - 1U);
   assert(dfu_image_policy_validate(bootloader, 39000U, &packet) == NRF_ERROR_INVALID_DATA);
 
   puts("Legacy DFU image policy: PASS");

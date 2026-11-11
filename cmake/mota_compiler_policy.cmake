@@ -17,6 +17,17 @@ endif ()
 # The combined RAK4631 minimum also applies to explicit qualification overrides.
 set(MOTA_ARM_GCC_MINIMUM "14.2")
 set(MOTA_RAK_SD_SIZE_OPTIONS)
+set(MOTA_MANUAL_DFU_SIZE_OPTIONS)
+if (BOARD STREQUAL "heltec_t096" OR BOARD STREQUAL "heltec_t114" OR
+    BOARD STREQUAL "heltec_mesh_tower_v2_sdcard")
+  # Qualified with Arm GNU 15.3: keep manual-update compatibility checks and
+  # every transport/display path within the unchanged executable envelope.
+  set(MOTA_MANUAL_DFU_SIZE_OPTIONS
+    -fno-schedule-insns2
+    -fno-optimize-sibling-calls
+    -fno-tree-loop-im
+    -fno-tree-ter)
+endif ()
 if (MOTA_RAK_SD_STORE AND BOARD STREQUAL "wiscore_rak4631_auto")
   set(MOTA_ARM_GCC_MINIMUM "15.3")
   # Apply to compilation AND the LTO link. These pass choices preserve C

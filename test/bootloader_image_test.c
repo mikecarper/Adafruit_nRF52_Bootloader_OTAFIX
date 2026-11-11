@@ -85,6 +85,186 @@ static void make_valid_image(void) {
   seal_manifest(MANIFEST_OFFSET);
 }
 
+static void make_raw_image(void) {
+  memset(image, 0xFF, sizeof(image));
+  write_u32(0, 0x20040000UL);
+  write_u32(4, IMAGE_START + 0x101UL);
+}
+
+static void make_cf2(size_t offset, uint32_t board_id) {
+  write_u32(offset, 0x1E9E10F1UL);
+  write_u32(offset + 4U, 0x20227A79UL);
+  write_u32(offset + 8U, 1U);
+  write_u32(offset + 12U, 100U); // Historical CF2 capacity field.
+  write_u32(offset + 16U, 208U);
+  write_u32(offset + 20U, board_id);
+}
+
+static void test_manual_compatibility(void) {
+  bootloader_image_info_t info;
+  const uint32_t xiao_boards[] = {0x28860044UL, 0x28860045UL};
+
+  // Pre-manifest bootloaders can be shorter than our padded release images.
+  make_raw_image();
+  memset(&info, 0xA5, sizeof(info));
+  assert(bootloader_image_manual_compatible(image, IMAGE_START, 4096U,
+                                             EXPECTED_BOARD_ID, &info));
+  assert(info.softdevice_family == 0U);
+  assert(!bootloader_image_manual_compatible(NULL, IMAGE_START, IMAGE_SIZE,
+                                              EXPECTED_BOARD_ID, NULL));
+  assert(!bootloader_image_manual_compatible(image, IMAGE_START, 7U,
+                                              EXPECTED_BOARD_ID, NULL));
+  uint8_t short_image[11];
+  memcpy(short_image, image, sizeof(short_image));
+  short_image[4] = (uint8_t)(IMAGE_START + 1U);
+  short_image[5] = (uint8_t)((IMAGE_START + 1U) >> 8);
+  short_image[6] = (uint8_t)((IMAGE_START + 1U) >> 16);
+  short_image[7] = (uint8_t)((IMAGE_START + 1U) >> 24);
+  for (size_t length = 0; length < 8U; ++length) {
+    assert(!bootloader_image_manual_compatible(short_image, IMAGE_START, length,
+                                                EXPECTED_BOARD_ID, NULL));
+  }
+  for (size_t length = 8U; length <= sizeof(short_image); ++length) {
+    assert(bootloader_image_manual_compatible(short_image, IMAGE_START, length,
+                                               EXPECTED_BOARD_ID, NULL));
+    assert(!bootloader_image_validate(short_image, IMAGE_START, length,
+                                       EXPECTED_BOARD_ID, expected_device_name));
+  }
+  assert(!bootloader_image_manual_compatible(short_image, UINT32_MAX - 3U, 8U,
+                                              EXPECTED_BOARD_ID, NULL));
+  write_u32(0, 0x20040008UL);
+  assert(!bootloader_image_manual_compatible(image, IMAGE_START, IMAGE_SIZE,
+                                              EXPECTED_BOARD_ID, NULL));
+  make_raw_image();
+  write_u32(4, IMAGE_START + 0x100UL); // Cortex-M reset vectors must be Thumb.
+  assert(!bootloader_image_manual_compatible(image, IMAGE_START, IMAGE_SIZE,
+                                              EXPECTED_BOARD_ID, NULL));
+  make_raw_image();
+  write_u32(4, IMAGE_START + 4096U + 1U);
+  assert(!bootloader_image_manual_compatible(image, IMAGE_START, 4096U,
+                                              EXPECTED_BOARD_ID, NULL));
+
+  // Match both compatible XIAO directions without changing strict remote identity.
+  for (size_t source = 0; source < 2U; ++source) {
+    make_valid_image();
+    write_u32(MANIFEST_OFFSET + offsetof(bootloader_update_manifest_t, board_id),
+              xiao_boards[source]);
+    seal_manifest(MANIFEST_OFFSET);
+    for (size_t target = 0; target < 2U; ++target) {
+      assert(bootloader_image_manual_compatible(image, IMAGE_START, IMAGE_SIZE,
+                                                 xiao_boards[target], &info));
+      assert(info.boot_version == TEST_BOOT_VERSION && info.softdevice_family == 140U &&
+             info.softdevice_fwid == 0x00B6U && info.app_base == 0x00026000UL &&
+             info.layout_abi == BOOTLOADER_UPDATE_LAYOUT_ABI);
+      assert(bootloader_image_validate(image, IMAGE_START, IMAGE_SIZE,
+                                        xiao_boards[target], expected_device_name) ==
+             (source == target));
+    }
+    assert(!bootloader_image_manual_compatible(image, IMAGE_START, IMAGE_SIZE,
+                                                EXPECTED_BOARD_ID, NULL));
+
+    make_raw_image();
+    make_cf2(FALSE_MANIFEST_OFFSET, xiao_boards[source]);
+    for (size_t target = 0; target < 2U; ++target) {
+      memset(&info, 0xA5, sizeof(info));
+      assert(bootloader_image_manual_compatible(image, IMAGE_START, 4096U,
+                                                 xiao_boards[target], &info));
+      assert(info.softdevice_family == 0U);
+    }
+    assert(!bootloader_image_manual_compatible(image, IMAGE_START, IMAGE_SIZE,
+                                                EXPECTED_BOARD_ID, NULL));
+  }
+
+  make_valid_image();
+  assert(bootloader_image_manual_compatible(image, IMAGE_START, IMAGE_SIZE,
+                                             EXPECTED_BOARD_ID, NULL));
+  static uint8_t unaligned_manual_image[IMAGE_SIZE + 1U];
+  memcpy(unaligned_manual_image + 1U, image, sizeof(image));
+  assert(bootloader_image_manual_compatible(unaligned_manual_image + 1U,
+                                             IMAGE_START, IMAGE_SIZE, EXPECTED_BOARD_ID, &info));
+  assert(info.softdevice_family == 140U && info.app_base == 0x00026000UL);
+  image[1000] ^= 1U;
+  assert(!bootloader_image_manual_compatible(image, IMAGE_START, IMAGE_SIZE,
+                                              EXPECTED_BOARD_ID, NULL));
+  make_valid_image();
+  write_u32(MANIFEST_OFFSET + offsetof(bootloader_update_manifest_t, image_start),
+            IMAGE_START - 4096U);
+  seal_manifest(MANIFEST_OFFSET);
+  assert(!bootloader_image_manual_compatible(image, IMAGE_START, IMAGE_SIZE,
+                                              EXPECTED_BOARD_ID, NULL));
+  make_valid_image();
+  write_u32(MANIFEST_OFFSET + sizeof(bootloader_update_manifest_t) +
+              offsetof(bootloader_update_extension_t, magic1), 0U);
+  seal_manifest(MANIFEST_OFFSET);
+  assert(!bootloader_image_manual_compatible(image, IMAGE_START, IMAGE_SIZE,
+                                              EXPECTED_BOARD_ID, NULL));
+
+  // A damaged canonical header cannot evade checks by becoming a raw image.
+  const size_t header_fields[] = {
+    offsetof(bootloader_update_manifest_t, version),
+    offsetof(bootloader_update_manifest_t, header_size),
+  };
+  for (size_t field = 0; field < sizeof(header_fields) / sizeof(header_fields[0]); ++field) {
+    make_valid_image();
+    write_u16(MANIFEST_OFFSET + header_fields[field], 0U);
+    seal_manifest(MANIFEST_OFFSET);
+    assert(!bootloader_image_manual_compatible(image, IMAGE_START, IMAGE_SIZE,
+                                                EXPECTED_BOARD_ID, NULL));
+
+    make_raw_image();
+    const size_t tail_manifest = 4096U - sizeof(bootloader_update_manifest_t);
+    write_u32(tail_manifest, BOOTLOADER_UPDATE_MANIFEST_MAGIC0);
+    write_u32(tail_manifest + 4U, BOOTLOADER_UPDATE_MANIFEST_MAGIC1);
+    write_u16(tail_manifest + offsetof(bootloader_update_manifest_t, version),
+              BOOTLOADER_UPDATE_MANIFEST_VERSION);
+    write_u16(tail_manifest + offsetof(bootloader_update_manifest_t, header_size),
+              sizeof(bootloader_update_manifest_t));
+    write_u16(tail_manifest + header_fields[field], 0U);
+    assert(!bootloader_image_manual_compatible(image, IMAGE_START, 4096U,
+                                                EXPECTED_BOARD_ID, NULL));
+  }
+  for (size_t tail = 8U; tail < sizeof(bootloader_update_manifest_t); tail += sizeof(uint32_t)) {
+    make_raw_image();
+    write_u32(4096U - tail, BOOTLOADER_UPDATE_MANIFEST_MAGIC0);
+    write_u32(4096U - tail + 4U, BOOTLOADER_UPDATE_MANIFEST_MAGIC1);
+    assert(!bootloader_image_manual_compatible(image, IMAGE_START, 4096U,
+                                                EXPECTED_BOARD_ID, NULL));
+  }
+
+  // Every recognizable identity must agree; a matching BLMF cannot hide foreign CF2.
+  make_valid_image();
+  make_cf2(FALSE_MANIFEST_OFFSET, 0x28860044UL);
+  seal_manifest(MANIFEST_OFFSET);
+  assert(!bootloader_image_manual_compatible(image, IMAGE_START, IMAGE_SIZE,
+                                              EXPECTED_BOARD_ID, NULL));
+  for (size_t invalid = 0; invalid < 2U; ++invalid) {
+    make_raw_image();
+    make_cf2(FALSE_MANIFEST_OFFSET, invalid ? UINT32_MAX : 0U);
+    assert(!bootloader_image_manual_compatible(image, IMAGE_START, IMAGE_SIZE,
+                                                EXPECTED_BOARD_ID, NULL));
+  }
+
+  make_raw_image();
+  make_cf2(4096U - 24U, EXPECTED_BOARD_ID);
+  write_u32(4096U - 16U, 2U); // Claims two pairs, but only one fits.
+  assert(!bootloader_image_manual_compatible(image, IMAGE_START, 4096U,
+                                              EXPECTED_BOARD_ID, NULL));
+  make_raw_image();
+  write_u32(4096U - 8U, 0x1E9E10F1UL);
+  write_u32(4096U - 4U, 0x20227A79UL);
+  assert(!bootloader_image_manual_compatible(image, IMAGE_START, 4096U,
+                                              EXPECTED_BOARD_ID, NULL));
+
+  // Compared magic constants with erased/implausible headers are literal pools.
+  make_raw_image();
+  write_u32(FALSE_MANIFEST_OFFSET, 0x1E9E10F1UL);
+  write_u32(FALSE_MANIFEST_OFFSET + 4U, 0x20227A79UL);
+  write_u32(FALSE_MANIFEST_OFFSET + 16U, BOOTLOADER_UPDATE_MANIFEST_MAGIC0);
+  write_u32(FALSE_MANIFEST_OFFSET + 20U, BOOTLOADER_UPDATE_MANIFEST_MAGIC1);
+  assert(bootloader_image_manual_compatible(image, IMAGE_START, 4096U,
+                                             EXPECTED_BOARD_ID, NULL));
+}
+
 int main(void) {
   // A compile-only board draft has an unknown (zero) USB/CF2 identity.
   // It must not match a qualified target, even through the manual bridge.
@@ -383,6 +563,7 @@ int main(void) {
   assert(bootloader_image_classify_manual(image, IMAGE_START, IMAGE_SIZE,
                                           EXPECTED_BOARD_ID, expected_device_name, NULL) == BOOTLOADER_IMAGE_V2);
 
+  test_manual_compatibility();
   puts("bootloader image validation: PASS");
   return 0;
 }

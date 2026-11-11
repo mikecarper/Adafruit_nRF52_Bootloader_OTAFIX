@@ -6,6 +6,8 @@
 #include "dfu.h"
 #include "dfu_transport.h"
 #include "nrf_sdm.h"
+#include "pstorage.h"
+#include "system_reset.h"
 #include <string.h>
 
 static secure_dfu_t      session;
@@ -27,12 +29,22 @@ static void flash_callback(uint32_t packet, uint32_t result, uint8_t *data) {
 }
 
 static bool flash_wait(void) {
-  uint32_t start = app_timer_cnt_get();
+  uint32_t progress      = pstorage_progress_get();
+  uint32_t last_progress = board_millis();
   while (!flash_done) {
     (void)proc_soc(); // Do not recursively dispatch incoming BLE writes.
-    board_watchdog_feed();
-    if (app_timer_cnt_diff_compute(app_timer_cnt_get(), start) > APP_TIMER_TICKS(10000)) {
-      return false;
+    const uint32_t current_progress = pstorage_progress_get();
+    const uint32_t now              = board_millis();
+    if (current_progress != progress) {
+      progress      = current_progress;
+      last_progress = now;
+      board_watchdog_feed();
+    }
+    if (!flash_done && (uint32_t)(now - last_progress) >= 10000u) {
+      // The accepted flash request still owns the caller's data buffer. A
+      // protocol error return would let later commands reuse that buffer while
+      // a delayed completion could still program it. Recover through reset.
+      otafix_system_reset();
     }
   }
   return flash_result == NRF_SUCCESS;
@@ -90,7 +102,8 @@ static void clear_receipts(void) {
 }
 
 static void flush_notifications(ble_dfu_t *service) {
-  while (!connection_blocked && queue_count && notifications_enabled && service->conn_handle != BLE_CONN_HANDLE_INVALID) {
+  while (!connection_blocked && queue_count && notifications_enabled &&
+         service->conn_handle != BLE_CONN_HANDLE_INVALID) {
     uint16_t               len    = lengths[queue_head];
     ble_gatts_hvx_params_t params = {0};
     params.handle                 = service->dfu_ctrl_pt_handles.value_handle;
@@ -239,7 +252,7 @@ __attribute__((noinline)) void secure_dfu_ble_event(ble_dfu_t *service, ble_evt_
         // notifications remain in the SoftDevice would let re-subscription
         // mistake an old TX completion for a new final EXECUTE receipt.
         connection_blocked = true;
-        uint32_t err = sd_ble_gap_disconnect(service->conn_handle, BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
+        uint32_t err       = sd_ble_gap_disconnect(service->conn_handle, BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
         if (err != BLE_ERROR_INVALID_CONN_HANDLE && err != NRF_ERROR_INVALID_STATE) {
           APP_ERROR_CHECK(err);
         }

@@ -20,6 +20,10 @@
 #include "nrf_soc.h"
 #include "app_util.h"
 
+// Independent SysTick timebase: app_timer may clear RTC1 when its last timer
+// is stopped, so its raw counter cannot be used for a persistent retry deadline.
+extern uint32_t board_millis(void);
+
 /** @file
  *
  * @defgroup persistent_storage_raw Persistent Storage Interface - Raw Mode Implementation
@@ -37,8 +41,6 @@
  * This implementation does not support the @ref pstorage_update function.
  */
 
-#define INVALID_OPCODE              0x00    /**< Invalid op code identifier. */
-
 #ifdef NRF51
   #define SOC_MAX_WRITE_SIZE          1024    /**< Maximum write size allowed for a single call to \ref sd_flash_write as specified in the SoC API on the nRF51. */
 #elif defined(NRF52_SERIES)
@@ -48,11 +50,15 @@
 #endif
 
 #define PENDING_PACKET_SIZE         256     /**<  Maximum size of a single pending packet data buffer. */
-#define PENDING_PACKET_COUNT        8       /**<  Maximum number of packets that can be buffered during lazy erase. */
+#define PENDING_PACKET_COUNT        16      /**< Holds a complete Android PRN burst while an erase/retry is pending. */
+#define FLASH_RETRY_LIMIT           100     /**< Additional attempts for one failed flash chunk. */
+#define FLASH_RETRY_DELAY_MS        100     /**< Let radio scheduling clear between timed-out attempts. */
+#define FLASH_BUSY_WAIT_MS          10000   /**< Bound a retry blocked on a foreign flash completion. */
 
 #define FLASH_ACCESS_IDLE           0       /**< No flash request is active or waiting to be retried. */
 #define FLASH_ACCESS_IN_FLIGHT      1       /**< A request issued by this module is in progress. */
 #define FLASH_ACCESS_WAIT_BUSY      2       /**< A foreign request is in progress; retry ours after its event. */
+#define FLASH_ACCESS_WAIT_RETRY     3       /**< Owned request failed; preserve its head until backoff expires. */
 
 #define CMD_FLAG_NONE               0x00    /**< Ordinary pstorage command. */
 #define CMD_FLAG_LAZY_ERASE         0x01    /**< Erase owned by a buffered lazy store. */
@@ -89,7 +95,7 @@ typedef struct
  */
 typedef struct
 {
-    uint8_t              op_code;       /**< Identifies flash access operation being queued. Element is free is op-code is INVALID_OPCODE */
+    uint8_t              op_code;       /**< Identifies the requested operation; queue count owns occupied slots. */
     uint8_t              flags;         /**< Internal ownership flags for lazy erase and buffered store commands. */
     pstorage_size_t      size;          /**< Identifies size in bytes requested for the operation. */
     pstorage_size_t      offset;        /**< Offset requested by the application for access operation. */
@@ -99,7 +105,7 @@ typedef struct
 
 
 /**
- * @brief Defines command queue, an element is free is op_code field is not invalid.
+ * @brief Defines the occupied command slots using count and the read pointer.
  *
  * @details Defines commands enqueued for flash access. At any point of time, this queue has one or
  *          more flash access operation pending if the count field is not zero. When the queue is
@@ -112,13 +118,11 @@ typedef struct
     uint8_t              rp;                              /**< Read pointer, pointing to flash access that is ongoing or to be requested next. */
     uint8_t              count;                           /**< Number of elements in the queue.  */
     uint8_t              flash_access;                    /**< Tracks whether an event is ours or only unblocks a retry. */
-    cmd_queue_element_t  cmd[PSTORAGE_CMD_QUEUE_SIZE];    /**< Array to maintain flash access operation details */
 }cmd_queue_t;
 
 /**@brief Structure for buffering packets during lazy page erase. */
 typedef struct
 {
-    bool                 valid;                                       /**< Whether this slot contains valid data. */
     pstorage_handle_t    handle;                                      /**< Storage handle for destination. */
     uint32_t             offset;                                      /**< Offset within the storage block. */
     uint32_t             size;                                        /**< Size of data in bytes. */
@@ -126,18 +130,57 @@ typedef struct
     uint8_t              data[PENDING_PACKET_SIZE] __attribute__((aligned(4))); /**< Buffered packet data. */
 } pending_packet_t;
 
-static cmd_queue_t             m_cmd_queue;                           /**< Flash operation request queue. */
-static pstorage_module_table_t m_app_table[PSTORAGE_NUM_OF_PAGES];    /**< Registered application information table. */
-static pstorage_size_t         m_next_app_instance;                   /**< Points to the application module instance that can be allocated next */
-static pstorage_size_t         m_round_val;                           /**< Round value for multiple round operations. For erase operations, the round value will contain current round counter which is identical to number of pages erased. For store operations, the round value contains current round of operation * SOC_MAX_WRITE_SIZE to ensure each store to the SoC Flash API is within the SoC limit. */
+// Keep private state together so size-constrained targets can share a base
+// address for hot fields instead of loading a separate literal for each one.
+// This is not a persisted record or a wire structure.
+_Static_assert(PSTORAGE_NUM_OF_PAGES <= UINT8_MAX, "Registered module count must fit its index");
+static struct
+{
+    pstorage_module_table_t app_table[PSTORAGE_NUM_OF_PAGES];
+    cmd_queue_t cmd_queue;
+    uint8_t pending_read_idx;
+    uint8_t pending_write_idx;
+    uint8_t pending_count;
+    uint8_t flash_retries;
+    bool lazy_erase_active;
+    bool processing_pending;
+    uint8_t next_app_instance;
+    pstorage_size_t round_val;
+    uint32_t lazy_erase_page;
+    uint32_t flash_progress;
+    uint32_t retry_started;
+    uint32_t retry_delay_ms;
+    cmd_queue_element_t commands[PSTORAGE_CMD_QUEUE_SIZE];
+    pending_packet_t pending_packets[PENDING_PACKET_COUNT];
+} m_storage_state;
 
-static pending_packet_t m_pending_packets[PENDING_PACKET_COUNT];      /**< Ring buffer for pending packets. */
-static uint8_t          m_pending_read_idx;                           /**< Read index for pending packet ring buffer. */
-static uint8_t          m_pending_write_idx;                          /**< Write index for pending packet ring buffer. */
-static uint8_t          m_pending_count;                              /**< Number of pending packets in buffer. */
-static bool             m_lazy_erase_active;                          /**< True if a lazy erase is in progress. */
-static uint32_t         m_lazy_erase_page;                            /**< Page index currently being erased. */
-static bool             m_processing_pending;                         /**< True if processing a pending packet store. */
+#define m_cmd_queue           m_storage_state.cmd_queue
+#define m_cmd_slots           m_storage_state.commands
+#define m_app_table           m_storage_state.app_table
+#define m_next_app_instance   m_storage_state.next_app_instance
+#define m_round_val           m_storage_state.round_val
+#define m_pending_packets     m_storage_state.pending_packets
+#define m_pending_read_idx    m_storage_state.pending_read_idx
+#define m_pending_write_idx   m_storage_state.pending_write_idx
+#define m_pending_count       m_storage_state.pending_count
+#define m_lazy_erase_active   m_storage_state.lazy_erase_active
+#define m_lazy_erase_page     m_storage_state.lazy_erase_page
+#define m_processing_pending  m_storage_state.processing_pending
+#define m_flash_retries       m_storage_state.flash_retries
+#define m_flash_progress      m_storage_state.flash_progress
+#define m_retry_started       m_storage_state.retry_started
+#define m_retry_delay_ms      m_storage_state.retry_delay_ms
+
+static void flash_retry_cancel(void);
+static void flash_retry_schedule(uint32_t delay_ms);
+void pstorage_process(void);
+
+// Changes only for an accepted flash request or an owned completion. Callers
+// may extend a no-progress deadline without treating wakes/polls as progress.
+uint32_t pstorage_progress_get(void)
+{
+    return m_flash_progress;
+}
 
 /**
  * @brief Function for processing of commands and issuing flash access request to the SoftDevice.
@@ -167,39 +210,19 @@ static void app_notify(uint32_t result, cmd_queue_element_t * p_elem);
  */
 
 /**
- * @brief Function for initializing a command queue element.
- *
- * @param[in] index Index identifying element to be initialized.
- */
-static void cmd_queue_element_init(uint32_t index)
-{
-    // Internal function and checks on range of index can be avoided
-    m_cmd_queue.cmd[index].op_code                = INVALID_OPCODE;
-    m_cmd_queue.cmd[index].flags                  = CMD_FLAG_NONE;
-    m_cmd_queue.cmd[index].size                   = 0;
-    m_cmd_queue.cmd[index].storage_addr.module_id = PSTORAGE_NUM_OF_PAGES;
-    m_cmd_queue.cmd[index].storage_addr.block_id  = 0;
-    m_cmd_queue.cmd[index].p_data_addr            = NULL;
-    m_cmd_queue.cmd[index].offset                 = 0;
-}
-
-
-/**
  * @brief Function for initializing the command queue.
  */
 static void cmd_queue_init(void)
 {
-    uint32_t cmd_index;
-
+    flash_retry_cancel();
+    m_flash_retries          = 0;
     m_round_val              = 0;
     m_cmd_queue.rp           = 0;
     m_cmd_queue.count        = 0;
     m_cmd_queue.flash_access = FLASH_ACCESS_IDLE;
 
-    for(cmd_index = 0; cmd_index < PSTORAGE_CMD_QUEUE_SIZE; cmd_index++)
-    {
-        cmd_queue_element_init(cmd_index);
-    }
+    // Enqueue overwrites every field before publishing count. Unoccupied
+    // slots are never read, so clearing them here/on pop would only add code.
 }
 
 /**
@@ -207,10 +230,7 @@ static void cmd_queue_init(void)
  */
 static void pending_packets_init(void)
 {
-    for (int i = 0; i < PENDING_PACKET_COUNT; i++)
-    {
-        m_pending_packets[i].valid = false;
-    }
+    // Count is the sole ownership marker; unused slots need no initialization.
     m_pending_read_idx = 0;
     m_pending_write_idx = 0;
     m_pending_count = 0;
@@ -244,7 +264,6 @@ static bool pending_packet_add(pstorage_handle_t * p_handle, uint8_t * p_data,
     p->size = size;
     p->p_data_orig = p_data;
     memcpy(p->data, p_data, size);
-    p->valid = true;
 
     m_pending_write_idx = (m_pending_write_idx + 1) % PENDING_PACKET_COUNT;
     m_pending_count++;
@@ -273,7 +292,6 @@ static void pending_packet_pop(void)
 {
     if (m_pending_count > 0)
     {
-        m_pending_packets[m_pending_read_idx].valid = false;
         m_pending_read_idx = (m_pending_read_idx + 1) % PENDING_PACKET_COUNT;
         m_pending_count--;
     }
@@ -284,8 +302,9 @@ static void cmd_queue_head_pop(cmd_queue_element_t * p_cmd)
 {
     uint8_t queue_rp = m_cmd_queue.rp;
 
-    *p_cmd = m_cmd_queue.cmd[queue_rp];
-    cmd_queue_element_init(queue_rp);
+    flash_retry_cancel();
+    m_flash_retries = 0;
+    *p_cmd = m_cmd_slots[queue_rp];
     m_cmd_queue.count--;
     m_cmd_queue.rp++;
     if (m_cmd_queue.rp >= PSTORAGE_CMD_QUEUE_SIZE)
@@ -328,12 +347,12 @@ static uint32_t cmd_queue_enqueue(uint8_t             opcode,
             write_index -= PSTORAGE_CMD_QUEUE_SIZE;
         }
 
-        m_cmd_queue.cmd[write_index].op_code      = opcode;
-        m_cmd_queue.cmd[write_index].flags        = flags;
-        m_cmd_queue.cmd[write_index].p_data_addr  = p_data_addr;
-        m_cmd_queue.cmd[write_index].storage_addr = (*p_storage_addr);
-        m_cmd_queue.cmd[write_index].size         = size;
-        m_cmd_queue.cmd[write_index].offset       = offset;
+        m_cmd_slots[write_index].op_code      = opcode;
+        m_cmd_slots[write_index].flags        = flags;
+        m_cmd_slots[write_index].p_data_addr  = p_data_addr;
+        m_cmd_slots[write_index].storage_addr = (*p_storage_addr);
+        m_cmd_slots[write_index].size         = size;
+        m_cmd_slots[write_index].offset       = offset;
         m_cmd_queue.count++;
         retval                                    = NRF_SUCCESS;
         if (queue_was_empty && m_cmd_queue.flash_access == FLASH_ACCESS_IDLE)
@@ -348,7 +367,6 @@ static uint32_t cmd_queue_enqueue(uint8_t             opcode,
             {
                 // The caller has rejected this command synchronously. Do not leave it queued.
                 m_cmd_queue.count--;
-                cmd_queue_element_init(write_index);
                 m_round_val = 0;
             }
         }
@@ -398,23 +416,24 @@ static uint32_t cmd_queue_dequeue(void)
  * @param[in] result Result of event being notified.
  * @param[in] p_elem Pointer to the element for which a notification should be given.
  */
-static void app_notify(uint32_t result, cmd_queue_element_t * p_elem)
+__attribute__((noinline, noclone)) static void app_notify_owner(uint32_t result, pstorage_handle_t *p_handle,
+                                                      uint8_t op_code, uint8_t *p_data, uint32_t size)
 {
     pstorage_ntf_cb_t ntf_cb;
-    uint8_t           op_code = p_elem->op_code;
 
-    if (p_elem->storage_addr.module_id < PSTORAGE_NUM_OF_PAGES)
+    if (p_handle->module_id < PSTORAGE_NUM_OF_PAGES)
     {
-        ntf_cb = m_app_table[p_elem->storage_addr.module_id].cb;
+        ntf_cb = m_app_table[p_handle->module_id].cb;
         if (ntf_cb != NULL)
         {
-            ntf_cb(&p_elem->storage_addr,
-                   op_code,
-                   result,
-                   p_elem->p_data_addr,
-                   p_elem->size);
+            ntf_cb(p_handle, op_code, result, p_data, size);
         }
     }
+}
+
+static void app_notify(uint32_t result, cmd_queue_element_t *p_elem)
+{
+    app_notify_owner(result, &p_elem->storage_addr, p_elem->op_code, p_elem->p_data_addr, p_elem->size);
 }
 
 /**
@@ -428,14 +447,7 @@ static void app_notify(uint32_t result, cmd_queue_element_t * p_elem)
 static void app_notify_buffered(uint32_t result, pstorage_handle_t * p_handle,
                                 uint8_t * p_data, uint32_t size)
 {
-    if (p_handle->module_id < PSTORAGE_NUM_OF_PAGES)
-    {
-        pstorage_ntf_cb_t ntf_cb = m_app_table[p_handle->module_id].cb;
-        if (ntf_cb != NULL)
-        {
-            ntf_cb(p_handle, PSTORAGE_STORE_OP_CODE, result, p_data, size);
-        }
-    }
+    app_notify_owner(result, p_handle, PSTORAGE_STORE_OP_CODE, p_data, size);
 }
 
 /**@brief Fail every packet that was already accepted into the pending buffer. */
@@ -588,6 +600,62 @@ static uint32_t lazy_erase_check_and_trigger(pstorage_handle_t * p_handle,
     return NRF_SUCCESS;
 }
 
+static void flash_retry_cancel(void) {
+  m_retry_delay_ms = 0;
+}
+
+static void flash_retry_schedule(uint32_t delay_ms) {
+  flash_retry_cancel();
+  m_retry_started  = board_millis();
+  m_retry_delay_ms = delay_ms;
+}
+
+static void flash_retry_watch_busy(void) {
+  if (m_cmd_queue.flash_access == FLASH_ACCESS_WAIT_BUSY && m_flash_retries != 0) {
+    flash_retry_schedule(FLASH_BUSY_WAIT_MS);
+  }
+}
+
+// Also polled by proc_soc(): settings-save backpressure drains SOC events
+// without reentering the scheduler/BLE command handlers. SysTick polling keeps a
+// delayed retry progressing there without queuing timer or BLE callbacks.
+void pstorage_process(void) {
+  if (m_retry_delay_ms == 0 || (uint32_t)(board_millis() - m_retry_started) < m_retry_delay_ms) {
+    return;
+  }
+  flash_retry_cancel();
+  if (m_cmd_queue.count == 0) {
+    return;
+  }
+
+  if (m_cmd_queue.flash_access == FLASH_ACCESS_WAIT_BUSY) {
+    // Do not blindly re-issue after BUSY: a foreign completion may still
+    // be queued, and must never be mistaken for our own successful write.
+    // Fail our accepted head, but retain WAIT_BUSY until that event arrives.
+    cmd_queue_fail_head(NRF_ERROR_BUSY);
+    return;
+  }
+  if (m_cmd_queue.flash_access != FLASH_ACCESS_WAIT_RETRY) {
+    return;
+  }
+
+  m_cmd_queue.flash_access = FLASH_ACCESS_IDLE;
+  cmd_queue_dequeue();
+  flash_retry_watch_busy();
+}
+
+static void flash_retry(void) {
+  if (m_flash_retries < FLASH_RETRY_LIMIT) {
+    ++m_flash_retries;
+    m_cmd_queue.flash_access = FLASH_ACCESS_WAIT_RETRY;
+    flash_retry_schedule(FLASH_RETRY_DELAY_MS);
+    return;
+  }
+  m_cmd_queue.flash_access = FLASH_ACCESS_IDLE;
+  cmd_queue_fail_head(NRF_ERROR_TIMEOUT);
+  cmd_queue_dequeue();
+}
+
 
 /**
  * @brief Function for handling of system events from SoftDevice.
@@ -606,8 +674,10 @@ void pstorage_sys_event_handler(uint32_t sys_evt)
     // It only makes the queue retryable; it must not complete our queue head.
     if (m_cmd_queue.flash_access == FLASH_ACCESS_WAIT_BUSY)
     {
+        flash_retry_cancel();
         m_cmd_queue.flash_access = FLASH_ACCESS_IDLE;
         cmd_queue_dequeue();
+        flash_retry_watch_busy();
         return;
     }
 
@@ -615,12 +685,14 @@ void pstorage_sys_event_handler(uint32_t sys_evt)
     if (m_cmd_queue.flash_access == FLASH_ACCESS_IN_FLIGHT)
     {
         cmd_queue_element_t * p_cmd;
+        ++m_flash_progress;
         m_cmd_queue.flash_access = FLASH_ACCESS_IDLE;
-        switch (sys_evt)
+        if (sys_evt == NRF_EVT_FLASH_OPERATION_SUCCESS)
         {
-            case NRF_EVT_FLASH_OPERATION_SUCCESS:
             {
-                p_cmd = &m_cmd_queue.cmd[m_cmd_queue.rp];
+                flash_retry_cancel();
+                m_flash_retries = 0;
+                p_cmd = &m_cmd_slots[m_cmd_queue.rp];
                 m_round_val++;
 
                 bool command_finished = ((m_round_val * SOC_MAX_WRITE_SIZE) >= p_cmd->size);
@@ -682,16 +754,10 @@ void pstorage_sys_event_handler(uint32_t sys_evt)
                     process_pending_packets();
                 }
             }
-            break;
-
-            case NRF_EVT_FLASH_OPERATION_ERROR:
-                cmd_queue_fail_head(NRF_ERROR_TIMEOUT);
-                cmd_queue_dequeue();
-                break;
-
-            default:
-                // No implementation needed.
-                break;
+        }
+        else
+        {
+            flash_retry();
         }
     }
 }
@@ -716,7 +782,7 @@ static uint32_t cmd_process(void)
         return NRF_SUCCESS;
     }
 
-    p_cmd = &m_cmd_queue.cmd[m_cmd_queue.rp];
+    p_cmd = &m_cmd_slots[m_cmd_queue.rp];
 
     storage_addr = p_cmd->storage_addr.block_id;
 
@@ -768,7 +834,11 @@ static uint32_t cmd_process(void)
     }
 
     // An error means we will not do it
-    if (retval == NRF_ERROR_BUSY)
+    if (retval == NRF_SUCCESS)
+    {
+       ++m_flash_progress;
+    }
+    else if (retval == NRF_ERROR_BUSY)
     {
        m_cmd_queue.flash_access = FLASH_ACCESS_WAIT_BUSY;
     }
@@ -789,6 +859,7 @@ uint32_t pstorage_init(void)
 
     m_next_app_instance = 0;
     m_round_val         = 0;
+    m_flash_progress    = 0;
 
     for(unsigned int index = 0; index < PSTORAGE_NUM_OF_PAGES; index++)
     {
@@ -837,37 +908,22 @@ uint32_t pstorage_store(pstorage_handle_t * p_dest,
     // the same pending FIFO until it drains. Otherwise a store received while
     // the head packet is in flight can enter the command queue directly and
     // overtake older buffered packets.
-    if (m_lazy_erase_active || m_processing_pending || m_pending_count > 0)
-    {
-        if (!pending_packet_add(p_dest, p_src, size, offset))
-        {
-            return NRF_ERROR_NO_MEM;
-        }
-        return NRF_SUCCESS;
-    }
-
-    if (!m_lazy_erase_active)
+    if (!m_lazy_erase_active && !m_processing_pending && m_pending_count == 0)
     {
         uint32_t ret = lazy_erase_check_and_trigger(p_dest, size, offset);
         if (ret != NRF_SUCCESS)
         {
             return ret;
         }
-    }
-
-    if (m_lazy_erase_active)
-    {
-        // Buffer this packet - erase in progress or just triggered
-        if (!pending_packet_add(p_dest, p_src, size, offset))
+        if (!m_lazy_erase_active)
         {
-            return NRF_ERROR_NO_MEM;
+            // Page already erased and no older packet owns the pending FIFO.
+            return cmd_queue_enqueue(PSTORAGE_STORE_OP_CODE, p_dest, p_src, size,
+                                     offset, CMD_FLAG_NONE);
         }
-        return NRF_SUCCESS;
     }
 
-    // Page already erased, proceed with store
-    return cmd_queue_enqueue(PSTORAGE_STORE_OP_CODE, p_dest, p_src, size,
-                             offset, CMD_FLAG_NONE);
+    return pending_packet_add(p_dest, p_src, size, offset) ? NRF_SUCCESS : NRF_ERROR_NO_MEM;
 }
 
 

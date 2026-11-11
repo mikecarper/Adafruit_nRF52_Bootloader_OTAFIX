@@ -59,6 +59,7 @@
 #include "nrf_error.h"
 
 #include "boards.h"
+#include "watchdog.h"
 #include "usb_wait.h"
 
 #include "pstorage_platform.h"
@@ -171,8 +172,8 @@ static void disable_softdevice(void) {
 //
 //--------------------------------------------------------------------+
 int main(void) {
-  // bootloader_util_app_start() protects the bootloader and settings with
-  // ACL/BPROT before launching the application. Adafruit BLEDfu enters with a
+  // bootloader_util_app_start() protects MBR and settings with ACL/BPROT;
+  // bootloader code and MBR parameters remain writable. Adafruit BLEDfu enters with a
   // direct jump and B1, so bounce that path through a real reset before any
   // bootloader initialization or flash access. A8 retains BLE DFU selection
   // across the reset. Nordic's COPY_BL path already performs its own reset.
@@ -706,6 +707,7 @@ uint32_t proc_ble(void) {
 
 // process SOC event from SD
 uint32_t proc_soc(void) {
+  uint32_t const flash_progress = pstorage_progress_get();
   uint32_t soc_evt = 0;
   uint32_t err = sd_evt_get(&soc_evt);
 
@@ -724,6 +726,15 @@ uint32_t proc_soc(void) {
 #endif
   }
 
+  // Settings-save callers poll SOC events without dispatching BLE/scheduler
+  // callbacks. Keep deferred flash retries progressing in that restricted loop.
+  pstorage_process();
+  if (pstorage_progress_get() != flash_progress) {
+    // Keep inherited watchdogs alive during bounded settings retries, but
+    // never mask an indefinitely stalled flash request by feeding on polls.
+    otafix_watchdog_feed();
+    board_watchdog_feed();
+  }
   return err;
 }
 

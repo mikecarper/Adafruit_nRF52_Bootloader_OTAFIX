@@ -84,6 +84,13 @@ typedef enum {
 uint32_t bootloader_image_crc32(uint8_t const* image, size_t image_size, size_t crc_offset);
 bool bootloader_image_vectors_valid(uint8_t const* image, uint32_t image_size,
                                     uint32_t code_start, uint32_t code_size);
+// Local USB/Legacy BLE replacement accepts older images without our envelope.
+// Recognizable CF2/BLMF identities must match, with the compatible XIAO Sense
+// and non-Sense IDs treated alike. Present BLMF/BLM2 metadata must be valid.
+// info_out->softdevice_family is zero without BLM2; other fields are then unspecified.
+bool bootloader_image_manual_compatible(uint8_t const* image, uint32_t image_start,
+                                        uint32_t image_size, uint32_t expected_board_id,
+                                        bootloader_image_info_t* info_out);
 bool bootloader_extension_validate(bootloader_update_extension_t const* extension);
 // Accepts the board-bound BLMF format used by preview.8 and newer. This is the
 // strict identity predicate and deliberately permits forward or reverse

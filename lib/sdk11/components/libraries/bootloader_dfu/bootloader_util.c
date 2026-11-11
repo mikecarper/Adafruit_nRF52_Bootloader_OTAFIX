@@ -231,11 +231,10 @@ void bootloader_util_app_start(uint32_t start_addr) {
   // Protect MBR against user writes
   bootloader_util_flash_protect(0, MBR_SIZE);
 
-  // Size of the bootloader flash area to protect (Bootloader + MBR params + Bootloader settings)
-  const uint32_t area_size = BOOTLOADER_SETTINGS_ADDRESS + CODE_PAGE_SIZE - BOOTLOADER_REGION_START;
-
-  // Protect bootloader code and params pages against user writes
-  bootloader_util_flash_protect(BOOTLOADER_REGION_START, area_size);
+  // Leave the bootloader and MBR parameter page writable so an application
+  // can deliberately replace the loader through Nordic MBR COPY_BL. Keep the
+  // activation settings protected separately from that open update region.
+  bootloader_util_flash_protect(BOOTLOADER_SETTINGS_ADDRESS, CODE_PAGE_SIZE);
 
   // Jump to user application
   bootloader_util_reset(start_addr);

@@ -93,10 +93,14 @@
   #define TEST_STORAGE_FLAGS  (MOTA_BL_STORAGE_STAGE_CEILING | MOTA_BL_STORAGE_QSPI | \
                               MOTA_BL_STORAGE_BOOT_UPDATE)
 #else
-  #define TEST_BOARD_ID       0x28860044u
-  #define TEST_OTHER_BOARD_ID 0x28860045u
+  #define TEST_BOARD_ID       (((uint32_t)USB_DESC_VID << 16) | USB_DESC_UF2_PID)
+  #define TEST_OTHER_BOARD_ID (TEST_BOARD_ID ^ 1u)
   #define TEST_DEVICE_NAME    "XIAO_DFU"
-  #define TEST_HW_ID          "XIAO_BL_28860044"
+  #if USB_DESC_UF2_PID == 0x0044
+    #define TEST_HW_ID        "XIAO_BL_28860044"
+  #else
+    #define TEST_HW_ID        "XIAO_BL_28860045"
+  #endif
   #define TEST_TARGET_ID      TEST_BOARD_ID
   #define TEST_SOURCE         GPREGRET2_OTA_STAGE_QSPI
   #define TEST_PRESERVE_END   MOTA_NRF52_BL_SCRATCH_START
@@ -667,18 +671,105 @@ static int accepted_with(uint8_t *mota, uint32_t total) {
          app_unchanged();
 }
 
-static void report(const char *name, int ok, int *failures) {
+static void report(const char *name, int ok, volatile int *failures) {
   printf("%-66s %s\n", name, ok ? "PASS" : "FAIL");
   if (!ok) {
     (*failures)++;
   }
 }
 
+#if defined(MOTA_QSPI_XIAO_IDENTITY)
+static int test_xiao_compatibility(uint8_t required_caps) {
+  int failure_count = 0;
+  int *failures = &failure_count;
+  static const char *const identities[] = {"XIAO_BL_28860044", "XIAO_BL_28860045"};
+  for (unsigned int variant = 0; variant < 2u; variant++) {
+    const uint32_t target = 0x28860044u + variant;
+    uint8_t *candidate = make_boot_image(target, 3, required_caps);
+    uint32_t total;
+    uint8_t *package;
+    for (unsigned int signed_package = 0; signed_package < 2u; signed_package++) {
+      package = make_mota(candidate, MOTA_NRF52_BL_SIZE, 3,
+                          MFLAG_FULL | MFLAG_BOOTLOADER | (signed_package ? MFLAG_SIGNED : 0u),
+                          target, identities[variant], &total);
+      report("either XIAO bridge accepts either matching target/image identity",
+             accepted_with(package, total), failures);
+      free(package);
+    }
+
+    package = make_mota(candidate, MOTA_NRF52_BL_SIZE, 3, MFLAG_FULL | MFLAG_BOOTLOADER,
+                        target, identities[variant ^ 1u], &total);
+    report("XIAO target and outer hardware identity must describe the same variant",
+           rejected_with(package, total, GPREGRET2_BL_POLICY), failures);
+    free(package);
+
+    package = make_mota(candidate, MOTA_NRF52_BL_SIZE, 3, MFLAG_FULL | MFLAG_BOOTLOADER,
+                        target, identities[variant], &total);
+    package[8u + 57u + 31u] = 1u;
+    report("XIAO outer hardware identity requires exact zero padding",
+           rejected_with(package, total, GPREGRET2_BL_POLICY), failures);
+    free(package);
+
+    bootloader_update_envelope_t *envelope = (void *)(candidate + MANIFEST_OFFSET);
+    envelope->manifest.board_id = target ^ 1u;
+    fix_image_crc(candidate);
+    package = make_mota(candidate, MOTA_NRF52_BL_SIZE, 3, MFLAG_FULL | MFLAG_BOOTLOADER,
+                        target, identities[variant], &total);
+    report("compatible XIAO outer target still must match its embedded payload ID",
+           rejected_with(package, total, GPREGRET2_BL_MANIFEST), failures);
+    free(package);
+
+    envelope->manifest.board_id = 0x28860046u;
+    fix_image_crc(candidate);
+    package = make_mota(candidate, MOTA_NRF52_BL_SIZE, 3, MFLAG_FULL | MFLAG_BOOTLOADER,
+                        target, identities[variant], &total);
+    report("XIAO compatibility does not accept a foreign embedded board ID",
+           rejected_with(package, total, GPREGRET2_BL_MANIFEST), failures);
+    free(package);
+
+    envelope->manifest.board_id = target;
+    memset(envelope->manifest.device_name, 0, sizeof(envelope->manifest.device_name));
+    memcpy(envelope->manifest.device_name, "SCAP_DFU", sizeof("SCAP_DFU"));
+    fix_image_crc(candidate);
+    package = make_mota(candidate, MOTA_NRF52_BL_SIZE, 3, MFLAG_FULL | MFLAG_BOOTLOADER,
+                        target, identities[variant], &total);
+    report("shared XIAO USB ID cannot authorize a SenseCAP device-name payload",
+           rejected_with(package, total, GPREGRET2_BL_MANIFEST), failures);
+    free(package);
+
+    memcpy(envelope->manifest.device_name, TEST_DEVICE_NAME_FIELD, sizeof(envelope->manifest.device_name));
+    envelope->extension.softdevice_fwid ^= 1u;
+    fix_image_crc(candidate);
+    package = make_mota(candidate, MOTA_NRF52_BL_SIZE, 3, MFLAG_FULL | MFLAG_BOOTLOADER,
+                        target, identities[variant], &total);
+    report("both XIAO target variants retain exact SoftDevice validation",
+           rejected_with(package, total, GPREGRET2_BL_MANIFEST), failures);
+    free(package);
+    free(candidate);
+  }
+
+  uint8_t *candidate = make_boot_image(0x28860044u, 3, required_caps);
+  uint32_t total;
+  uint8_t *package = make_mota(candidate, MOTA_NRF52_BL_SIZE, 3, MFLAG_FULL | MFLAG_BOOTLOADER,
+                              0x28860046u, "XIAO_BL_28860046", &total);
+  report("foreign XIAO-like outer identities remain rejected",
+         rejected_with(package, total, GPREGRET2_BL_POLICY), failures);
+  free(package);
+  package = make_mota(candidate, MOTA_NRF52_BL_SIZE, 3, MFLAG_FULL | MFLAG_BOOTLOADER,
+                      0xD677B472u, "NRF_BL_28860044_SCAP_DFU", &total);
+  report("SenseCAP outer identity cannot borrow the XIAO compatibility pair",
+         rejected_with(package, total, GPREGRET2_BL_POLICY), failures);
+  free(package);
+  free(candidate);
+  return failure_count;
+}
+#endif
+
 int main(void) {
   const uint32_t board_base    = TEST_BOARD_ID;
   const uint32_t board_other   = TEST_OTHER_BOARD_ID;
   const uint8_t  required_caps = TEST_STORAGE_FLAGS;
-  int            failures = 0;
+  volatile int   failures = 0;
   uint32_t       total;
 
   uint8_t *image = make_boot_image(board_base, 3, required_caps);
@@ -951,8 +1042,34 @@ int main(void) {
 
   uint8_t *bad = make_mota(image, MOTA_NRF52_BL_SIZE, 3, MFLAG_FULL | MFLAG_BOOTLOADER,
                            TEST_TARGET_ID, TEST_HW_ID, &total);
-  report("unsigned package is rejected", rejected_with(bad, total, GPREGRET2_BL_POLICY), &failures);
+  report("approved unsigned bootloader package is accepted", accepted_with(bad, total), &failures);
+  bad[8u + 24u] ^= 1u;
+  report("unsigned package still requires its complete image hash",
+         rejected_with(bad, total, GPREGRET2_BL_INTEGRITY), &failures);
   free(bad);
+  bad = make_mota(image, MOTA_NRF52_BL_SIZE, 3, MFLAG_FULL | MFLAG_BOOTLOADER | 0x80u,
+                  TEST_TARGET_ID, TEST_HW_ID, &total);
+  report("unknown bootloader package flags are rejected",
+         rejected_with(bad, total, GPREGRET2_BL_POLICY), &failures);
+  free(bad);
+  bad = make_mota(image, MOTA_NRF52_BL_SIZE, 3, MFLAG_FULL | MFLAG_BOOTLOADER,
+                  TEST_TARGET_ID, TEST_HW_ID, &total);
+  memset(bad + 8u + 193u, 0, 4u);
+  report("unsigned package still requires explicit application approval",
+         rejected_with(bad, total, GPREGRET2_BL_CONTAINER), &failures);
+  free(bad);
+  bad = make_mota(image, MOTA_NRF52_BL_SIZE, 3, MFLAG_FULL | MFLAG_BOOTLOADER,
+                  board_other, TEST_HW_ID, &total);
+  report("unsigned package still requires the exact target identity",
+         rejected_with(bad, total, GPREGRET2_BL_POLICY), &failures);
+  free(bad);
+  wrong_image = make_boot_image(board_other, 3, required_caps);
+  bad = make_mota(wrong_image, MOTA_NRF52_BL_SIZE, 3, MFLAG_FULL | MFLAG_BOOTLOADER,
+                  TEST_TARGET_ID, TEST_HW_ID, &total);
+  report("unsigned package still requires the embedded board identity",
+         rejected_with(bad, total, GPREGRET2_BL_MANIFEST), &failures);
+  free(bad);
+  free(wrong_image);
   bad = make_mota(image, MOTA_NRF52_BL_SIZE, 3, MFLAG_FULL | MFLAG_SIGNED,
                   TEST_TARGET_ID, TEST_HW_ID, &total);
   report("non-bootloader kind is rejected", rejected_with(bad, total, GPREGRET2_BL_POLICY), &failures);
@@ -1031,9 +1148,9 @@ int main(void) {
   bad_envelope->extension.layout_abi++;
   fix_image_crc(bad_image);
   bad = make_mota(bad_image, MOTA_NRF52_BL_SIZE, 3,
-                  MFLAG_FULL | MFLAG_SIGNED | MFLAG_BOOTLOADER,
+                  MFLAG_FULL | MFLAG_BOOTLOADER,
                   TEST_TARGET_ID, TEST_HW_ID, &total);
-  report("candidate layout ABI mismatch is rejected",
+  report("unsigned candidate layout ABI mismatch is rejected",
          rejected_with(bad, total, GPREGRET2_BL_MANIFEST), &failures);
   free(bad);
   free(bad_image);
@@ -1046,9 +1163,10 @@ int main(void) {
 
   bad_image = make_boot_image(board_base, 3, required_caps);
   ((bootloader_update_manifest_t *)(bad_image + MANIFEST_OFFSET))->crc32 ^= 1u;
-  bad = make_mota(bad_image, MOTA_NRF52_BL_SIZE, 3, MFLAG_FULL | MFLAG_SIGNED | MFLAG_BOOTLOADER,
+  bad = make_mota(bad_image, MOTA_NRF52_BL_SIZE, 3, MFLAG_FULL | MFLAG_BOOTLOADER,
                   TEST_TARGET_ID, TEST_HW_ID, &total);
-  report("bad embedded manifest CRC is rejected", rejected_with(bad, total, GPREGRET2_BL_MANIFEST), &failures);
+  report("unsigned candidate with bad embedded manifest CRC is rejected",
+         rejected_with(bad, total, GPREGRET2_BL_MANIFEST), &failures);
   free(bad);
   free(bad_image);
 
@@ -1429,6 +1547,33 @@ int main(void) {
   free(same_usb_id);
 #endif
 
+#if defined(MOTA_QSPI_XIAO_IDENTITY)
+  failures += test_xiao_compatibility(required_caps);
+#elif defined(TEST_GENERIC_QSPI) && USB_DESC_VID == 0x2886 && USB_DESC_UF2_PID == 0x0044
+  // SenseCAP shares the non-Sense USB board ID, but never opts into XIAO's
+  // identity pair. Neither the outer package nor the payload can borrow it.
+  uint8_t *borrowed_image = make_boot_image(board_base, 3, required_caps);
+  bootloader_update_manifest_t *borrowed_manifest =
+    &((bootloader_update_envelope_t *)(void *)(borrowed_image + MANIFEST_OFFSET))->manifest;
+  memset(borrowed_manifest->device_name, 0, sizeof(borrowed_manifest->device_name));
+  memcpy(borrowed_manifest->device_name, "XIAO_DFU", sizeof("XIAO_DFU"));
+  fix_image_crc(borrowed_image);
+  uint32_t borrowed_total;
+  uint8_t *borrowed_package = make_mota(borrowed_image, MOTA_NRF52_BL_SIZE, 3,
+    MFLAG_FULL | MFLAG_BOOTLOADER, TEST_TARGET_ID, TEST_HW_ID, &borrowed_total);
+  report("shared board ID retains the generic loader's exact payload name",
+         rejected_with(borrowed_package, borrowed_total, GPREGRET2_BL_MANIFEST), &failures);
+  free(borrowed_package);
+  static const char *const xiao_identities[] = {"XIAO_BL_28860044", "XIAO_BL_28860045"};
+  for (unsigned variant = 0; variant < 2u; variant++) {
+    borrowed_package = make_mota(borrowed_image, MOTA_NRF52_BL_SIZE, 3,
+      MFLAG_FULL | MFLAG_BOOTLOADER, 0x28860044u + variant, xiao_identities[variant], &borrowed_total);
+    report("generic shared-ID loaders reject both XIAO outer identities",
+           rejected_with(borrowed_package, borrowed_total, GPREGRET2_BL_POLICY), &failures);
+    free(borrowed_package);
+  }
+  free(borrowed_image);
+#endif
   free(mota);
   free(image);
   printf("\n%s (%d failure%s)\n", failures ? "SUITE FAILED" : "SUITE PASSED", failures,

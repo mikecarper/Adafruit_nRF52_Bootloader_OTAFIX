@@ -1,5 +1,27 @@
 # Adafruit nRF52 Bootloader Changelog
 
+## Unreleased
+
+- Allow manual USB/Legacy BLE bootloader replacement without a separate recovery
+  image or OTAFIX manifest. Retain bounds/vectors and recognizable compatibility
+  checks; accept compatible XIAO nRF52840 Sense/non-Sense identities interchangeably.
+- Validate conflicting UF2 bootloader retransmissions against staged/cache bytes,
+  reject duplicate target addresses and allow omitted redundant UICR declarations.
+- Let XIAO Sense/non-Sense bridge bootloaders accept either compatible LoRa
+  bootloader identity, while binding the payload to its package's exact target
+  and hardware ID. This allows two initial bridges followed by one common image.
+- Retry a SoftDevice flash-operation timeout up to 100 times with a 100 ms
+  delay between attempts. Keep foreground retries working while activation
+  settings poll SOC events, and retain queue ownership across BUSY responses.
+- Buffer 16 incoming DFU packets during lazy erase and reset the update status
+  at the start of each new DFU session.
+- Accept approved unsigned format-3 bootloader `.mota` packages as well as
+  signed ones. Retain board/layout, payload hash, CRC and handoff validation.
+- Leave bootloader code and the MBR parameter page writable after application
+  handoff. Continue protecting the MBR itself and bootloader settings. This
+  permits application-driven bootloader replacement but removes write-isolation
+  protection against a buggy or malicious application.
+
 ## OTAFIX 2.4.12 - 2026.10.22
 
 Release notes and current downloads: [OTAFIX 2.4.12](docs/release-2.4.12.md).

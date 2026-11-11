@@ -15,19 +15,25 @@
 static ble_dfu_t      service;
 static jmp_buf        fault_return;
 static uint32_t       fault_code, hvx_error, flash_error, clock_ticks, watchdog_feeds;
+static uint32_t       monotonic_ms, flash_progress, reset_requests;
+static uint32_t       flash_delay_ms, flash_progress_interval_ms, pending_elapsed_ms;
 static uint32_t       hvx_calls;
 static uint32_t       disconnect_requests, disconnect_result;
 static uint32_t       begins, writes, finishes, activations, closes;
 static uint32_t       image_size, flash_offset, pending_size;
 static uint32_t       disconnect_on_flash;
 static const uint8_t *pending_data;
-static bool           pending, stall_flash;
+static bool           pending, stall_flash, reset_rtc_during_flash;
 static uint8_t        flash_image[10000], expected_hash[32], receipt[15];
 static uint16_t       receipt_size;
 static dfu_callback_t completion;
 
 void test_app_error(uint32_t error) {
   fault_code = error;
+  longjmp(fault_return, 1);
+}
+__attribute__((noreturn)) void otafix_system_reset(void) {
+  ++reset_requests;
   longjmp(fault_return, 1);
 }
 uint32_t app_timer_cnt_get(void) {
@@ -39,6 +45,12 @@ uint32_t app_timer_cnt_diff_compute(uint32_t now, uint32_t then) {
 void board_watchdog_feed(void) {
   ++watchdog_feeds;
 }
+uint32_t board_millis(void) {
+  return monotonic_ms;
+}
+uint32_t pstorage_progress_get(void) {
+  return flash_progress;
+}
 void dfu_register_callback(dfu_callback_t callback) {
   completion = callback;
 }
@@ -49,10 +61,22 @@ void dfu_secure_connection_policy(bool writing) {
 }
 
 uint32_t proc_soc(void) {
-  if (!pending || stall_flash) {
+  ++monotonic_ms;
+  if (!pending) {
+    return NRF_ERROR_NOT_FOUND;
+  }
+  ++pending_elapsed_ms;
+  if (reset_rtc_during_flash) {
+    clock_ticks = 0;
+  }
+  if (flash_progress_interval_ms && pending_elapsed_ms % flash_progress_interval_ms == 0) {
+    ++flash_progress;
+  }
+  if (stall_flash || pending_elapsed_ms < flash_delay_ms) {
     return NRF_ERROR_NOT_FOUND;
   }
   pending = false;
+  ++flash_progress;
   if (disconnect_on_flash) {
     hvx_error = disconnect_on_flash;
   }
@@ -74,13 +98,17 @@ uint32_t dfu_secure_start(uint32_t size, const uint8_t digest[32]) {
   flash_offset = pending_size = 0;
   pending_data                = NULL;
   pending                     = true;
+  pending_elapsed_ms          = 0;
+  ++flash_progress;
   return NRF_SUCCESS;
 }
 uint32_t dfu_data_pkt_handle(dfu_update_packet_t *packet) {
   assert(!pending);
-  pending_data = (const uint8_t *)packet->params.data_packet.p_data_packet;
-  pending_size = packet->params.data_packet.packet_length * 4;
-  pending      = true;
+  pending_data       = (const uint8_t *)packet->params.data_packet.p_data_packet;
+  pending_size       = packet->params.data_packet.packet_length * 4;
+  pending            = true;
+  pending_elapsed_ms = 0;
+  ++flash_progress;
   return NRF_SUCCESS;
 }
 uint32_t dfu_image_validate(void) {
@@ -147,13 +175,16 @@ static void dispatch(ble_evt_t *event) {
 void test_ble_reset(void) {
   clear_receipts();
   fault_code = hvx_error = flash_error = clock_ticks = watchdog_feeds = 0;
-  hvx_calls                                                           = 0;
-  disconnect_requests = disconnect_result                             = 0;
+  monotonic_ms = flash_progress = reset_requests = 0;
+  flash_delay_ms = flash_progress_interval_ms = pending_elapsed_ms = 0;
+  hvx_calls                                                        = 0;
+  disconnect_requests = disconnect_result = 0;
   begins = writes = finishes = activations = closes = 0;
   image_size = flash_offset = pending_size = disconnect_on_flash = 0;
-  pending = stall_flash = false;
-  pending_data          = NULL;
-  receipt_size          = 0;
+  pending = stall_flash  = false;
+  reset_rtc_during_flash = false;
+  pending_data           = NULL;
+  receipt_size           = 0;
   memset(&service, 0, sizeof(service));
   assert(secure_dfu_ble_init(&service) == NRF_SUCCESS);
 }
@@ -226,6 +257,23 @@ void test_ble_disconnect_on_flash(uint32_t error) {
 }
 void test_ble_stall_flash(bool stall) {
   stall_flash = stall;
+}
+void test_ble_flash_timing(uint32_t delay_ms, uint32_t progress_interval_ms, bool reset_rtc) {
+  flash_delay_ms             = delay_ms;
+  flash_progress_interval_ms = progress_interval_ms;
+  reset_rtc_during_flash     = reset_rtc;
+}
+void test_ble_set_monotonic(uint32_t now) {
+  monotonic_ms = now;
+}
+uint32_t test_ble_monotonic(void) {
+  return monotonic_ms;
+}
+uint32_t test_ble_resets(void) {
+  return reset_requests;
+}
+bool test_ble_flash_pending(void) {
+  return pending;
 }
 void test_ble_finish_pending(void) {
   (void)proc_soc();

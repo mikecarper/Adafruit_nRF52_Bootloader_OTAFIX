@@ -247,7 +247,7 @@ static int hybrid_ram_read(uint32_t offset, void *dst, uint32_t len) {
 // pre-decode bytes -> mismatch -> apply silently refused. (-fno-strict-aliasing does NOT help: this is
 // provenance, not type-based aliasing.) The host harness can't reproduce it: there read+write hit the
 // same C array, an obvious alias. volatile forces the actual load each time.
-static void fl_read(uint32_t a, void *d, uint32_t n) {
+__attribute__((noinline, noclone)) static void fl_read(uint32_t a, void *d, uint32_t n) {
   const volatile uint8_t *s = (const volatile uint8_t *)(uintptr_t)a;
   uint8_t                *o = (uint8_t *)d;
   for (uint32_t i = 0; i < n; i++) {
@@ -332,6 +332,10 @@ static void otah_settings_commit(uint16_t bank0, uint16_t crc, uint32_t size) {
     (!defined(MOTA_QSPI_BOOTLOADER_UPDATE) || USB_DESC_VID != 0x2886 || \
      (USB_DESC_UF2_PID != 0x0044 && USB_DESC_UF2_PID != 0x0045))
   #error "XIAO compatibility identity requires an exact XIAO QSPI profile"
+#endif
+#if defined(MOTA_QSPI_XIAO_IDENTITY)
+  _Static_assert(__builtin_strcmp(DEVICE_NAME, "XIAO_DFU") == 0,
+                 "XIAO compatibility requires the canonical device name");
 #endif
 
 #if (defined(MOTA_SD_BOOTLOADER_UPDATE) && defined(MOTA_QSPI_BOOTLOADER_UPDATE)) || \
@@ -1210,10 +1214,10 @@ static bool finish_app_update(const struct mota_min *m) {
 }
 
 #if defined(MOTA_BOOTLOADER_UPDATE_ENABLED)
-#if defined(MOTA_QSPI_XIAO_IDENTITY) && USB_DESC_UF2_PID == 0x0044
-static const uint8_t BOOT_UPDATE_HW_ID[32] = "XIAO_BL_28860044";
-#elif defined(MOTA_QSPI_XIAO_IDENTITY)
-static const uint8_t BOOT_UPDATE_HW_ID[32] = "XIAO_BL_28860045";
+#if defined(MOTA_QSPI_XIAO_IDENTITY)
+static const uint8_t BOOT_UPDATE_HW_IDS[2][32] = {
+  "XIAO_BL_28860044", "XIAO_BL_28860045"
+};
 #endif
 
 #define BOOT_UPDATE_BLOCK_COUNT    40u
@@ -1276,11 +1280,8 @@ typedef char boot_update_scratch_must_match_dfu
 #endif
 #endif
 
+#if !defined(MOTA_QSPI_XIAO_IDENTITY)
 static const uint8_t *boot_update_expected_identity(uint32_t *target_id) {
-#if defined(MOTA_QSPI_XIAO_IDENTITY)
-  *target_id = BOOT_UPDATE_BOARD_ID;
-  return BOOT_UPDATE_HW_ID;
-#else
   // Board identity is a build constant. Emit its hexadecimal prefix directly
   // instead of carrying a formatter and digit table in the bootloader.
   #define BOOT_ID_NIBBLE(shift) ((BOOT_UPDATE_BOARD_ID >> (shift)) & 0x0Fu)
@@ -1314,14 +1315,21 @@ static const uint8_t *boot_update_expected_identity(uint32_t *target_id) {
     }
   }
   uint8_t hash[32];
+#ifdef OTA_DELTA_HOST_TEST
+  // Host objects are outside the simulated 32-bit flash address space.
   sha256_ctx_t ctx;
   sha256_init(&ctx);
   sha256_update(&ctx, (const uint8_t *)&identity, sizeof(identity));
   sha256_final(&ctx, hash);
+#else
+  // The identity is in internal flash. Reuse the same live-flash hash loop,
+  // regardless of which external staging backend this update selected.
+  sha256_region((uint32_t)(uintptr_t)&identity, sizeof(identity), hash);
+#endif
   *target_id = rd_u32(hash);
   return *target_id != 0 && *target_id != UINT32_MAX ? (const uint8_t *)&identity : NULL;
-#endif
 }
+#endif
 
 static int boot_vectors_valid(const uint8_t vectors[8]) {
   if (!bootloader_image_vectors_valid(vectors, 8u, MOTA_NRF52_BL_START,
@@ -1344,12 +1352,25 @@ static int staged_vectors_valid(uint32_t payload_addr) {
 
 static int boot_update_policy_valid(const struct mota_min *m) {
   static const uint8_t zeros[8];
+#if defined(MOTA_QSPI_XIAO_IDENTITY)
+  // The initial bridge keeps each deployed USB identity. Later packages may
+  // choose either compatible XIAO identity, with an exact target/hw-id pair.
+  const uint32_t expected_target_id = m->target_id;
+  if ((expected_target_id | 1u) != 0x28860045u) {
+    return 0;
+  }
+  const uint8_t *expected_hw_id = BOOT_UPDATE_HW_IDS[expected_target_id & 1u];
+#else
   uint32_t expected_target_id;
   const uint8_t *expected_hw_id = boot_update_expected_identity(&expected_target_id);
+#endif
   if (!expected_hw_id) {
     return 0;
   }
-  return m->format_ver == 3 && m->flags == (MFLAG_FULL | MFLAG_SIGNED | MFLAG_BOOTLOADER) &&
+  // Signing is optional: the application owns authorization and this loader
+  // still requires its explicit handoff, approval and complete integrity gates.
+  // Do not accept unknown flag bits or let an application package enter here.
+  return m->format_ver == 3 && (m->flags & ~MFLAG_SIGNED) == (MFLAG_FULL | MFLAG_BOOTLOADER) &&
          m->hash_algo == 0x12u && m->is_full && m->codec_id == CODEC_FULL &&
          m->target_id == expected_target_id && m->fw_version != 0 &&
          memcmp(m->hw_id, expected_hw_id, sizeof(m->hw_id)) == 0 &&
@@ -1498,22 +1519,33 @@ static int boot_image_metadata_valid_at(uint32_t address,
   const uint8_t *image = boot_image_pointer(address);
   bootloader_image_info_t candidate;
   bootloader_image_info_t installed;
+#if defined(MOTA_QSPI_XIAO_IDENTITY)
+  if (!m) {
+    return 0;
+  }
+  // Outer policy already validated the compatible target and matching hw-id.
+  // Bind the embedded image to that exact target, not merely either pair ID.
+  const uint32_t expected_board_id = m->target_id;
+  static const char expected_device_name[BOOTLOADER_UPDATE_DEVICE_NAME_SIZE] = "XIAO_DFU";
+#else
+  const uint32_t expected_board_id = BOOT_UPDATE_BOARD_ID;
 #ifdef OTA_DELTA_HOST_TEST
   static const char expected_device_name[BOOTLOADER_UPDATE_DEVICE_NAME_SIZE] = DEVICE_NAME;
 #else
   extern const bootloader_update_envelope_t bootloaderUpdateManifest;
   const char *expected_device_name = bootloaderUpdateManifest.manifest.device_name;
 #endif
+#endif
   if (!image || !m ||
       !bootloader_image_info(image, MOTA_NRF52_BL_START, MOTA_NRF52_BL_SIZE,
-                             BOOT_UPDATE_BOARD_ID, expected_device_name, &candidate) ||
+                             expected_board_id, expected_device_name, &candidate) ||
       !boot_image_caps_valid(image) || !installed_boot_info(&installed)) {
     return 0;
   }
   // Remote bootloader replacement cannot migrate the SoftDevice/application
-  // layout. The outer signed package version must describe the bytes
+  // layout. The outer package version must describe the bytes
   // themselves, but its order is deliberately unrestricted so an operator can
-  // install or restore any compatible signed release.
+  // install or restore any compatible release.
   return candidate.softdevice_family == installed.softdevice_family &&
          candidate.softdevice_fwid == installed.softdevice_fwid &&
          candidate.app_base == installed.app_base &&
@@ -1570,7 +1602,7 @@ static uint32_t scan_bootloader_mota(struct mota_min *m, uint32_t source) {
   return 0;
 }
 
-static bool apply_bootloader_update(void) {
+__attribute__((noinline, noclone)) static bool apply_bootloader_update(void) {
   const uint32_t source = gpregret2_get();
   gpregret_set(0); // consume first: every validation/copy failure is fail-closed
   gpregret2_set(GPREGRET2_BL_GATE);
@@ -1621,7 +1653,7 @@ static bool apply_bootloader_update(void) {
   }
 #endif
 #if defined(MOTA_SD_BOOTLOADER_UPDATE)
-  // APRV is removable-media metadata. Bind the candidate bytes to the signed
+  // APRV is removable-media metadata. Bind the candidate bytes to the approved
   // manifest image_hash captured by the app in internal scratch before the
   // first erase. Copying page zero consumes the token.
   if (g_sd_source && !sd_boot_authorization_valid(&m)) {

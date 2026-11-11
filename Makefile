@@ -12,7 +12,7 @@
 # - DUALBANK_FW        : If bootloader will implement a dual bank feature to allow autorecover from failed
 # - FORCE_UF2          : if SIGNED_FW is 1, will force to include UF2 support (UNSECURE, UF2 does NOT validate signature!)
 # - DEFAULT_TO_OTA_DFU : if entering DFU, by default enter OTA DFU instead of Serial DFU
-# - RECOVERY_ALLOW_ALL_BOARDS : recovery-only manual bootloader updates without manifest restrictions
+# - RECOVERY_ALLOW_ALL_BOARDS : historical R_ recovery packaging and wire identity profile
 # - DFU_USB_ENUMERATION_TIMEOUT_MS : no-valid-image USB grace period while VBUS is present
 #------------------------------------------------------------------------------
 
@@ -30,7 +30,7 @@ ifneq ($(RECOVERY_ALLOW_ALL_BOARDS),0)
 endif
 ifeq ($(RECOVERY_ALLOW_ALL_BOARDS),1)
   RECOVERY_VERSION_ARG := --recovery-allow-all-boards
-  $(warning RECOVERY BUILD: manual bootloader manifest/identity checks are disabled)
+  $(warning R_ recovery profile: manual bootloader replacement retains basic compatibility checks)
 endif
 
 # Select the board before loading board-specific configuration.
@@ -635,6 +635,9 @@ CFLAGS += -DDFU_APP_DATA_RESERVED=$(DFU_APP_DATA_RESERVED)
 
 # Exact all-in-one RAK4631 pass choices must also reach the LTO link via CFLAGS.
 # Other boards use the normal size options with their qualified compiler.
+ifneq ($(filter $(BOARD),heltec_t096 heltec_t114 heltec_mesh_tower_v2_sdcard),)
+CFLAGS += -fno-schedule-insns2 -fno-optimize-sibling-calls -fno-tree-loop-im -fno-tree-ter
+endif
 ifneq ($(call mota_feature_flag,MOTA_RAK_SD_STORE),)
 CFLAGS += -fno-schedule-insns -fno-schedule-insns2 -fno-code-hoisting \
   -fno-tree-ter -fno-tree-dominator-opts -fno-tree-tail-merge \

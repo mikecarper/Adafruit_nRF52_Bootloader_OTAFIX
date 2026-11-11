@@ -39,6 +39,8 @@ void flash_nrf5x_discard (void);
 void flash_nrf5x_invalidate_app_settings (void);
 void flash_nrf5x_write (uint32_t dst, void const *src, uint32_t len, bool need_erase);
 void flash_nrf5x_write_erased (uint32_t dst, void const *src, uint32_t len);
+// Compare within one page, including pending cache contents. Cross-page spans fail.
+bool flash_nrf5x_matches (uint32_t dst, void const *src, uint32_t len);
 void flash_nrf5x_flush (bool need_erase);
 
 #ifdef __cplusplus

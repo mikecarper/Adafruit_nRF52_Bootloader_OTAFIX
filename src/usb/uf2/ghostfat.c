@@ -305,6 +305,7 @@ void uf2_init(void) {
   const bootloader_settings_t *settings;
   bootloader_util_settings_get(&settings);
   const uint32_t app_start = DFU_BANK_0_REGION_START;
+
   const uint32_t app_size  = settings->bank_0_size;
 
   current_uf2_sectors = UF2_SECTORS;
@@ -569,6 +570,20 @@ __attribute__((noinline)) int write_block(uint32_t block_no, uint8_t* data, Writ
   // Share its runtime-derived boundary across every validation below.
   const uint32_t app_start = DFU_BANK_0_REGION_START;
 
+  // UICR declarations have the same fixed-address checks on initial receipt
+  // and replay. Validate them before either path can accept the block.
+  if (update_kind == UF2_UPDATE_KIND_BOOTLOADER && in_uicr_space(block->targetAddr)) {
+    uint32_t uicr_boot_addr;
+    uint32_t uicr_mbr_param;
+    memcpy(&uicr_boot_addr, block->data + 0x14, sizeof(uicr_boot_addr));
+    memcpy(&uicr_mbr_param, block->data + 0x18, sizeof(uicr_mbr_param));
+    if (uicr_boot_addr != BOOTLOADER_ADDR_START ||
+        uicr_mbr_param != BOOTLOADER_MBR_PARAMS_PAGE_ADDRESS) {
+      state->aborted = true;
+      return -1;
+    }
+  }
+
   uf2_transfer_result_t const transfer_result =
     uf2_transfer_prepare(block->numBlocks, block->blockNo, update_kind, MAX_BLOCKS,
                          &state->numBlocks, &state->updateKind, &state->aborted,
@@ -580,24 +595,43 @@ __attribute__((noinline)) int write_block(uint32_t block_no, uint8_t* data, Writ
     uf2_application_target_t const target_kind =
       uf2_application_target_classify(block->targetAddr, USER_FLASH_START,
                                       app_start, USER_FLASH_END);
-    bool const destination_matches =
+    bool destination_matches =
       update_kind != UF2_UPDATE_KIND_APPLICATION ||
       (target_kind != UF2_APPLICATION_TARGET_REQUIRE_MATCH &&
        target_kind != UF2_APPLICATION_TARGET_PROGRAM) ||
       memcmp((void const*)(uintptr_t)block->targetAddr, block->data,
              block->payloadSize) == 0;
+    if (update_kind == UF2_UPDATE_KIND_BOOTLOADER) {
+      if (in_bootloader_space(block->targetAddr)) {
+        uint32_t const staging_addr =
+          BOOTLOADER_ADDR_NEW_RECEIVED + (block->targetAddr - BOOTLOADER_ADDR_START);
+        destination_matches = flash_nrf5x_matches(staging_addr, block->data, block->payloadSize);
+      } else if (in_uicr_space(block->targetAddr)) {
+        destination_matches = state->has_uicr;
+      } else {
+        destination_matches = block->targetAddr < USER_FLASH_START;
+      }
+    }
     if (uf2_transfer_validate_duplicate(transfer_result, destination_matches,
                                         &state->aborted) == UF2_TRANSFER_ABORTED) {
-      // A different same-geometry application has reused a committed block
-      // number. Keep the application invalid and require an explicit MSC
-      // session reset before another image can start.
+      // Refuse a conflicting replay of a committed block. An explicit MSC
+      // session reset is required before another image can start.
       return -1;
     }
 
-    // Application retransmissions are accepted only when they are already in
-    // flash. Bootloader retransmissions can be ignored here because the final
-    // board-bound whole-image manifest CRC rejects any mixed staged image.
+    // Accept only idempotent retransmissions, including bootloader data that
+    // may still be pending in the staging page cache.
     return BPB_SECTOR_SIZE;
+  }
+
+  bool const tracks_target = update_kind == UF2_UPDATE_KIND_APPLICATION ?
+                              block->targetAddr < USER_FLASH_END :
+                              in_bootloader_space(block->targetAddr);
+  if (tracks_target &&
+      uf2_transfer_target_prepare(block->targetAddr, CFG_UF2_FLASH_SIZE,
+                                  state->targetMask, sizeof(state->targetMask),
+                                  &state->aborted) == UF2_TRANSFER_ABORTED) {
+    return -1;
   }
 
   switch (update_kind) {
@@ -606,13 +640,6 @@ __attribute__((noinline)) int write_block(uint32_t block_no, uint8_t* data, Writ
       uf2_application_target_t const target_kind =
         uf2_application_target_classify(block->targetAddr, USER_FLASH_START,
                                         app_start, USER_FLASH_END);
-
-      if (block->targetAddr < USER_FLASH_END &&
-          uf2_transfer_target_prepare(block->targetAddr, CFG_UF2_FLASH_SIZE,
-                                      state->targetMask, sizeof(state->targetMask),
-                                      &state->aborted) == UF2_TRANSFER_ABORTED) {
-        return -1;
-      }
 
       if (target_kind == UF2_APPLICATION_TARGET_PROGRAM) {
         if (!prepare_app_block(block, state)) {
@@ -645,19 +672,6 @@ __attribute__((noinline)) int write_block(uint32_t block_no, uint8_t* data, Writ
              state->numWritten, block->numBlocks);
 
       if (in_uicr_space(block->targetAddr)) {
-        uint32_t uicr_boot_addr;
-        uint32_t uicr_mbr_param;
-        memcpy(&uicr_boot_addr, block->data + 0x14, sizeof(uicr_boot_addr));
-        memcpy(&uicr_mbr_param, block->data + 0x18, sizeof(uicr_mbr_param));
-
-        if (uicr_boot_addr != BOOTLOADER_ADDR_START ||
-            uicr_mbr_param != BOOTLOADER_MBR_PARAMS_PAGE_ADDRESS) {
-          PRINTF("Incorrect UICR value\r\n");
-          PRINT_HEX(uicr_boot_addr);
-          PRINT_HEX(uicr_mbr_param);
-          state->aborted = true;
-          return -1;
-        }
         state->has_uicr = true;
       } else if (in_bootloader_space(block->targetAddr)) {
         if (!erase_bootloader_staging(state)) {
@@ -680,8 +694,10 @@ __attribute__((noinline)) int write_block(uint32_t block_no, uint8_t* data, Writ
       return -1;
   }
 
-  if (update_kind == UF2_UPDATE_KIND_APPLICATION) {
+  if (tracks_target) {
     uf2_transfer_target_commit(block->targetAddr, state->targetMask);
+  }
+  if (update_kind == UF2_UPDATE_KIND_APPLICATION) {
     if (block->targetAddr >= app_start &&
         block->targetAddr + UF2_FIRMWARE_BYTES_PER_SECTOR >
           state->appMaximumWrittenEnd) {
@@ -703,7 +719,10 @@ __attribute__((noinline)) int write_block(uint32_t block_no, uint8_t* data, Writ
         .dfu_update_mode = DFU_UPDATE_BL,
         .bl_image_size = DFU_BL_IMAGE_MAX_SIZE,
       };
-      if (!state->has_uicr || !state->bootloaderStagingErased ||
+      // The installed UICR already identifies these fixed bootloader and MBR
+      // parameter addresses. A replacement UF2 may omit that redundant block;
+      // if supplied, it was checked before being committed above.
+      if (!state->bootloaderStagingErased ||
           dfu_image_policy_validate(staged_image, DFU_BL_IMAGE_MAX_SIZE,
                                     &start_packet) != NRF_SUCCESS) {
         PRINTF("Bootloader image validation failed\r\n");

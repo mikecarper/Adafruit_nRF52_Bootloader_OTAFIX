@@ -34,7 +34,7 @@ option(DEFAULT_TO_OTA_DFU "Default to OTA DFU instead of Serial DFU" OFF)
 option(SIGNED_FW "Enable signed firmware verification" OFF)
 option(DUALBANK_FW "Enable dual bank DFU support" OFF)
 option(FORCE_UF2 "Force UF2 support even with SIGNED_FW" OFF)
-option(RECOVERY_ALLOW_ALL_BOARDS "Recovery-only manual bootloader updates without manifest restrictions" OFF)
+option(RECOVERY_ALLOW_ALL_BOARDS "Historical R_ recovery packaging and wire identity profile" OFF)
 option(SECURE_DFU_TEST "Secure-only resumable BLE DFU qualification profile" OFF)
 # Keep existing RAK lab invocations working, without silently ignoring the old flag.
 if (SECURE_DFU_RAK3401_TEST)
@@ -333,6 +333,10 @@ if (MOTA_RAK_SD_SIZE_OPTIONS)
   target_compile_options(bootloader PRIVATE ${MOTA_RAK_SD_SIZE_OPTIONS})
   target_link_options(bootloader PRIVATE ${MOTA_RAK_SD_SIZE_OPTIONS})
 endif ()
+if (MOTA_MANUAL_DFU_SIZE_OPTIONS)
+  target_compile_options(bootloader PRIVATE ${MOTA_MANUAL_DFU_SIZE_OPTIONS})
+  target_link_options(bootloader PRIVATE ${MOTA_MANUAL_DFU_SIZE_OPTIONS})
+endif ()
 
 target_compile_definitions(bootloader PUBLIC
   DETOOLS_CONFIG_IN_PLACE_RESUME=0
@@ -498,7 +502,7 @@ string(REGEX REPLACE "-[0-9]+-g[0-9a-f]+(-dirty)?$" "" GIT_VERSION_BASE "${GIT_V
 if(RECOVERY_ALLOW_ALL_BOARDS)
   set(RECOVERY_VERSION_ARG --recovery-allow-all-boards)
   target_compile_definitions(bootloader PUBLIC RECOVERY_ALLOW_ALL_BOARDS=1)
-  message(WARNING "RECOVERY BUILD: manual bootloader manifest/identity checks are disabled")
+  message(WARNING "R_ recovery profile: manual bootloader replacement retains basic compatibility checks")
 endif()
 
 execute_process(

@@ -101,6 +101,11 @@ typedef uint32_t pstorage_size_t;      /** Size of length and offset fields. */
 /**@brief Handles Flash Access Result Events. To be called in the system event dispatcher of the application. */
 void pstorage_sys_event_handler (uint32_t sys_evt);
 
+/**@brief Service due flash retries from foreground code, including settings-save polling. */
+void pstorage_process(void);
+/**@brief Sequence changes only when a flash request or result makes progress. */
+uint32_t pstorage_progress_get(void);
+
 #endif // PSTORAGE_PL_H__
 
 /** @} */

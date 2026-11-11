@@ -288,6 +288,8 @@ pstorage_busy_test: pstorage_busy_test.c $(PSTORAGE_SRC) $(wildcard pstorage_stu
 check: apply_sim readback_test readback_test_v7 readback_internal_test bootloader_image_test sd_apply_test qspi_apply_test bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test softdevice_fwid_test dfu_init_bounds_test dfu_init_signed_bounds_test qspi_alignment_test qspi_wake_test usb_wait_test dfu_timeout_test uf2_write_state_test bootloader_settings_guard_test dfu_image_policy_test dfu_entry_test peer_data_layout_test peer_data_layout_nrf52_test peer_data_layout_nrf52833_test pstorage_busy_test
 	python3 version_derivation_test.py
 	python3 startup_vector_test.py
+	python3 bootloader_write_policy_test.py
+	python3 dfu_session_start_test.py
 	python3 dfu_hardfault_test.py
 	python3 build_profile_test.py
 	python3 docker_build_test.py
@@ -350,6 +352,7 @@ check: apply_sim readback_test readback_test_v7 readback_internal_test bootloade
 	python3 ../lib/tinyusb/test/otafix/msc_drain_test.py --negative-old --negative-reset-guard
 	python3 uf2_243_differential_test.py
 	python3 uf2_handoff_test.py
+	python3 manual_uf2_integrity_test.py
 	python3 uf2_eject_test.py
 	python3 uf2_drive_hil_test.py
 	python3 uf2conv_discovery_test.py
