@@ -9,6 +9,9 @@ Use `OTAFIX-2.4.12-R_recovery.zip` from the
 [current 2.4.12 release](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.12).
 It contains 28 recovery profiles with inventory and checksums. Nine pending
 source ports and the historical internal-only Tower profile remain excluded.
+The source tree supports MeshTracker X1 for the next release, bringing its
+recovery inventory to 29 profiles and leaving eight pending source ports.
+This does not add an X1 file to the existing 2.4.12 archive.
 It includes the narrow Bluetooth handoff fault fallback for older MeshCore
 applications and the current USB fixes. The separate signed bootloader mOTA
 bundle remains board-protected; no Open kit or automatic settings erase is
@@ -158,7 +161,7 @@ the normal 2.4.12 release is the stable latest release.
 
 Historical standalone 2.4.11 recovery assets included pending ports using
 `--include-pending`. That is not the current normal-release archive policy.
-The nine current pending profiles are excluded from the 2.4.12 normal and
+The nine profiles pending at publication are excluded from the 2.4.12 normal and
 recovery bundles. `thinknode_m8` also remains blocked because its factory USB
 identity is unverified. The historical internal-only Tower profile is retired
 from both bundles; use the normal combined profile and its documented local

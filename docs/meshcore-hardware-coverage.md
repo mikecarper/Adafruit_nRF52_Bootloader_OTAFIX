@@ -2,7 +2,7 @@
 
 Current release: [OTAFIX 2.4.12](release-2.4.12.md). [Download 2.4.12](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.12).
 
-Current mapping checked on 2026-10-22: **55 explicit nRF52 hardware names**,
+Release mapping checked on 2026-10-22: **55 explicit nRF52 hardware names**,
 including PCA10056 and XIAO Sense beyond the 53-name 1.17.1.7 picker audit.
 There are **40 names mapped to 23 normal OTAFIX 2.4.12 profiles**. Of the 15
 unavailable names, **12 map to nine pending source ports**, two still require
@@ -14,6 +14,16 @@ production build profiles, 23 normal downloads and 28 recovery profiles.
 For exact files and qualification status, use the
 [supported-board inventory](../supported_boards.md) and the release download
 manifest. Dated verification results below retain their historical versions.
+
+Source update 2026-11-11: MeshTracker X1 is supported for the next release,
+following upstream OTAFIX 2.5/2.6.0 X1 support. The current source inventories
+now contain 30 production build profiles, 24 normal profiles / 41 hardware names, 29 recovery profiles and
+eight pending source ports / 11 hardware names. Existing 2.4.12 downloads are
+unchanged. The [X1 profile](meshtracker-x1-qualification.md) remains internal
+staging with S140 7.3.0; this is not a claim of a local physical X1 test.
+This adds bootloader/package support. A matching released internal-staging X1
+application and its LoRa bootloader-update handoff are not enabled by this
+promotion.
 
 This audit verifies source compatibility and download identity. It does not
 claim that every carrier was physically tested. Sharing an nRF52840 or a
@@ -37,7 +47,7 @@ and [MeshCore board variants](https://github.com/mikecarper/MeshCore/tree/keymin
 
 ## New variants with confirmed need
 
-These nine source ports have `OTAFIX_BOARD_QUALIFICATION_PENDING ON`.
+Eight source ports have `OTAFIX_BOARD_QUALIFICATION_PENDING ON`.
 Qualification CI builds them but production CI, normal release uploads, download
 manifests and signed release bundles exclude them. Recovery release archives
 also exclude pending profiles. Remove
@@ -53,7 +63,6 @@ that marker only after the checks below pass. They remain excluded from
 | `nano_g2_ultra` | Designer schematic confirms a distinct flash layout, one user button and no ordinary LEDs. Factory HEX uses 4251:8695, unlike the generic application HWIDs. | No PWM LEDs; button P1.06; QSPI P0.08/P1.07/P0.06/26/P1.04/02; unique `NANOG2_DFU`. Preserve factory `nRF52840-BQ-rev1` identity. |
 | `meshtiny` | Manufacturer specifies IS25LP080D and explicitly moves three flash pins away from encoder/buzzer pins. GAT562's flash and second button mappings cannot be reused. | LEDs P1.03/04 active high; side/down buttons P0.09/04; QSPI P0.03/22/27/29/21/02; factory 239A:0029 and `Meshtiny-MT001-Board`; unique `MT001_DFU`. |
 | `thinknode_m8` | V0.3-tested source confirms M1's button is M8's display enable and M1's LED is M8's GPS PPS. | Compile-only draft: no PWM LEDs, button P0.12 active low, QSPI P1.14/15/12/13/P0.07/05; unique `TNM8_DFU`. Factory USB identity is unknown; invalid 0000:0000 fixtures prevent a valid bootloader update identity. |
-| `meshtracker_x1` | Real factory USB/UF2 and active-high button differ from L1. External-flash rail/reset behavior remains unverified. | Internal-staging S140 7.3.0 qualification candidate; LEDs P0.03/24 active high, button P0.06 with pulldown; preserve factory 2886:0057/`nRF52840-MeshTracker-X1-v1`, unique `X1INT_DFU`. No QSPI or peripheral-rail outputs; explicit test-mode/version guards. |
 | `heltec_mesh_solar` | Conflicting LED/flash BSP definitions cannot be copied safely; author-confirmed watchdog revision needs servicing throughout DFU. | Internal-staging S140 6.1.1 qualification candidate with no LED/QSPI/rail outputs, confirmed button P1.10 and DONE P0.09/1 ms pulse/60-second feed. Preserve factory HT-n5262 239A:0071 with unique `SOLARINT_DFU`; explicit test-mode/version guards. |
 
 Primary references:
@@ -66,9 +75,9 @@ The follow-up [seven-board pin provenance audit](seven-board-pin-provenance.md)
 records manufacturer references, factory download inspection, git blame,
 commit diffs and associated PR discussions for Nano, Meshtiny, M8 and the four
 remaining omissions. It distinguishes source confirmation from hardware tests.
-The new [X1 internal-staging qualification plan](meshtracker-x1-qualification.md)
-avoids the unverified external rail while recording the remaining power/reset
-and physical update gates. Internal staging supports exact-base application
+The supported [X1 internal-staging profile](meshtracker-x1-qualification.md)
+avoids the unverified external rail while recording the physical regression
+checklist. Internal staging supports exact-base application
 deltas and signed bootloader self-update, **not full application images**.
 The [Solar internal-staging qualification plan](meshsolar-qualification.md)
 similarly avoids all conflicting LED/flash/rail definitions while reusing the
@@ -161,6 +170,7 @@ catalog entry has a specific reason instead of silently guessing another board.
 | `keepteen_lt1` | `KeepteenLT1` |
 | `lilygo_techo` | `LilyGo_T-Echo` |
 | `lilygo_techo_lite` | `LilyGo_T-Echo-Lite`, `LilyGo_T-Echo-Lite_non_shell` |
+| `meshtracker_x1` (next release) | `MeshTracker_X1` |
 | `minewsemi_mx25le01` | `Minewsemi_me25ls01` |
 | `pca10056` | `PCA10056` |
 | `promicro_nrf52840` | `ProMicro` |
@@ -186,7 +196,6 @@ catalog entry has a specific reason instead of silently guessing another board.
 | `lilygo_t_impulse_plus` | `LilyGo_T_Impulse_Plus` |
 | `lilygo_techo_card` | `LilyGo_T-Echo_Card` |
 | `meshtiny` | `Meshtiny` |
-| `meshtracker_x1` | `MeshTracker_X1` |
 | `muzi_base` | `muzi_base_duo`, `muzi_base_duo_superIO`, `muzi_base_uno`, `muzi_base_uno_superIO` |
 | `nano_g2_ultra` | `Nano_G2_Ultra` |
 | `thinknode_m4` | `ThinkNode_M4` |

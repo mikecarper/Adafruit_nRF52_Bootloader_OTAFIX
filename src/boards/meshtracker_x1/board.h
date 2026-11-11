@@ -3,12 +3,9 @@
 #ifndef _MESHTRACKER_X1_H
 #define _MESHTRACKER_X1_H
 
-// Internal-staging qualification candidate, not a Wio Tracker L1 alias.
+// Supported internal-staging X1 profile, not a Wio Tracker L1 alias.
 // Pin and factory-identity evidence: docs/meshtracker-x1-qualification.md.
 // No external flash, sensor, GNSS, RTC, haptic, or power-latch pins are driven.
-#if !defined(OTAFIX_X1_QUALIFICATION_ONLY) || OTAFIX_X1_QUALIFICATION_ONLY != 1
-  #error "MeshTracker X1 requires an explicit qualification build"
-#endif
 
 #define LEDS_NUMBER 2
 #define LED_PRIMARY_PIN PINNUM(0, 3)
@@ -24,7 +21,7 @@
 #define BUTTON_DFU_PROBE_USB 1
 
 #define BLEDIS_MANUFACTURER "Seeed"
-#define BLEDIS_MODEL "MeshTracker X1 QUAL"
+#define BLEDIS_MODEL "MeshTracker X1"
 
 // Verified in the manufacturer Bootloader.zip's CF2. Preserve the existing
 // factory identity for CDC too; do not copy generic Arduino application HWIDs.
@@ -33,9 +30,9 @@
 #define USB_DESC_CDC_ONLY_PID 0x0057
 
 // Factory board string is preserved. The new DFU name binds this internal
-// candidate's mOTA identity separately from future external-staging profiles.
-#define UF2_PRODUCT_NAME "Seeed MeshTracker-X1 QUAL"
-#define UF2_VOLUME_LABEL "X1QUAL"
+// profile's mOTA identity separately from future external-staging profiles.
+#define UF2_PRODUCT_NAME "Seeed MeshTracker-X1"
+#define UF2_VOLUME_LABEL "X1"
 #define UF2_BOARD_ID "nRF52840-MeshTracker-X1-v1"
 #define UF2_INDEX_URL "https://wiki.seeedstudio.com/sensecap_meshtracker_x1_meshcore/"
 

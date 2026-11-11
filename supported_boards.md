@@ -1,10 +1,12 @@
 # Supported Boards
 
 The current [OTAFIX 2.4.12 release](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.12)
-provides the 23 normal profiles below. Use its
+provides 23 normal profiles. Use its
 [exact-board download manifest](docs/bootloader-download-manifest.md) for
-files and checksums. The separate recovery archive contains 28 profiles;
-nine source ports remain pending and excluded from the normal and recovery bundles.
+files and checksums. The separate recovery archive contains 28 profiles.
+The source tree additionally supports MeshTracker X1 for the next release:
+24 normal and 29 recovery profiles, with eight source ports still pending.
+This does not add files to the already-published 2.4.12 release.
 See the [release notes](docs/release-2.4.12.md) for hardware-test limits.
 
 ## Adafruit Boards
@@ -25,6 +27,7 @@ See the [release notes](docs/release-2.4.12.md) for hardware-test limits.
 | keepteen_lt1 | Keepteen LT1 | 0x239A:0x00B3 | https://www.keepteen.com/ |
 | lilygo_techo | LilyGo T-Echo | 0x239A:0x0029 | https://lilygo.cc/products/t-echo-lilygo |
 | lilygo_techo_lite | LilyGo T-Echo Lite | 0x239A:0x00DA | https://lilygo.cc/products/t-echo-lite |
+| meshtracker_x1 (next release) | Seeed MeshTracker X1, internal staging | 0x2886:0x0057 | https://wiki.seeedstudio.com/sensecap_meshtracker_x1_meshcore/ |
 | minewsemi_mx25le01 | MinewSemi MX25LE01 | 0x239A:0x0029 | https://www.minewsemi.com |
 | pca10056 | Nordic nRF52840 DK | 0x239A:0x00DA | https://www.nordicsemi.com/Products/Development-hardware/nRF52840-DK |
 | promicro_nrf52840 | ProMicro NRF52840 | 0x239A:0x00B3 | https://www.nologo.tech/product/otherboard/NRF52840.html |
@@ -52,6 +55,10 @@ See [recovery instructions](docs/recovery-allow-all.md).
 
 ## Internal app-preserving bootloader-update identities
 
+The X1 entry describes its bootloader/package contract. A matching released
+internal-staging MeshCore X1 application and LoRa bootloader-update handoff
+still require separate integration.
+
 This source-level inventory includes historical targets; it is not the normal
 download list above. These nRF52840 targets have no enabled SD/QSPI OTA store
 and use the internal `0x0A`
@@ -70,6 +77,7 @@ from both build systems and fails on an unsafe target, noncanonical name, or col
 | heltec_t114 | 0x239A0071 | T114_DFU | 0x0C3F2902 |
 | keepteen_lt1 | 0x239A00B3 | KeepteenLT1_OTA | 0xDB2E7B51 |
 | minewsemi_mx25le01 | 0x239A0029 | MX25_DFU | 0x026AA982 |
+| meshtracker_x1 | 0x28860057 | X1INT_DFU | 0xCDDA9FF9 |
 | promicro_nrf52840 | 0x239A00B3 | PROM_DFU | 0xAF79E8CC |
 | t1000_e | 0x28860057 | T1KE_DFU | 0xE6F5F03F |
 | thinknode_m3 | 0x239A00DA | TNM3_DFU | 0x0CA41DB2 |

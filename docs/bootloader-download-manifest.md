@@ -5,6 +5,10 @@ Download its [manifest](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_
 and [SHA-256 sidecar](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/download/v0.11.0-OTAFIX2.4.12/bootloader-manifest.json.sha256)
 for the 23 normal profiles.
 
+The source tree also supports MeshTracker X1 for the next release (24 normal
+profiles). Its exact files must be uploaded by that new release before the
+generator can add an X1 download; existing 2.4.12 metadata is unchanged.
+
 Every normal release publishes `bootloader-manifest.json` and its SHA-256
 sidecar. This is download metadata, not the Nordic DFU manifest inside each
 DFU ZIP. It does not change or rebuild the bootloader binaries.

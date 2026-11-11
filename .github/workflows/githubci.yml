@@ -31,7 +31,7 @@ concurrency:
 jobs:
   set-matrix:
     if: ${{ !startsWith(github.ref_name, 'R_') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
@@ -56,7 +56,7 @@ jobs:
 
   build:
     needs: set-matrix
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix:
@@ -132,7 +132,7 @@ jobs:
 
   feature-builds:
     if: ${{ !startsWith(github.ref_name, 'R_') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix:
@@ -225,7 +225,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: mikecarper/motatool
-          ref: 9a9b9a4e4f03dc4a29e984b440fa6a0c40b4190f
+          ref: 65032857fc428269d81b461557d821672682f656
           path: _motatool
 
       - name: Set up Python
@@ -288,7 +288,7 @@ jobs:
   recovery-bundle:
     if: ${{ (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.release_build)) && !startsWith(github.ref_name, 'R_') }}
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -312,7 +312,7 @@ jobs:
   release:
     if: ${{ github.event_name == 'release' && !startsWith(github.ref_name, 'R_') }}
     needs: [build, feature-builds, bootloader-mota, recovery-bundle]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: write
     steps:

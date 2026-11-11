@@ -49,13 +49,13 @@ uint32_t dfu_start_packet_validate(dfu_start_packet_t const* start_packet,
   uint32_t image_size;
   if (start_packet->bl_image_size > DFU_BL_IMAGE_MAX_SIZE ||
       __builtin_add_overflow(start_packet->sd_image_size,
-                             start_packet->bl_image_size, &image_size)) {
+                             start_packet->bl_image_size, &image_size) ||
+      __builtin_add_overflow(image_size, start_packet->app_image_size,
+                             &image_size)) {
     return NRF_ERROR_DATA_SIZE;
   }
 
-  // APP is standalone under the mode checks above, so these sizes cannot
-  // both be nonzero and require no second overflow check.
-  *image_size_out = image_size | start_packet->app_image_size;
+  *image_size_out = image_size;
   return NRF_SUCCESS;
 }
 

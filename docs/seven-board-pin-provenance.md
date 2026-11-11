@@ -2,6 +2,11 @@
 
 Current release: [OTAFIX 2.4.12](release-2.4.12.md). [Download 2.4.12](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.12). Historical versions and qualification evidence below are retained as recorded.
 
+Update 2026-11-11: MeshTracker X1 is now a supported next-release internal
+profile, following upstream OTAFIX 2.5 and 2.6.0 support. The earlier pending
+decision below is historical; see the [current X1 contract](meshtracker-x1-qualification.md).
+No local physical X1 test or change to published 2.4.12 assets is implied.
+
 Checked 2026-09-29 against MeshCore upstream **dev** at
 `33468c4f80aaeae64e8bef5692e66d8978c82434` and Meshtastic **develop** at
 `778184c7a1b91993c810558325570cdbec4cc457`, plus manufacturer documentation,

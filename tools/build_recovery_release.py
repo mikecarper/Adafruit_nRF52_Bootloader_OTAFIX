@@ -12,7 +12,10 @@ import zipfile
 
 from intelhex import IntelHex
 
-from build_bootloader_mota_release import RETIRED_NORMAL_PROFILES, add_to_zip, parse_package, pending_boards, sha256, version_from_tag
+from build_bootloader_mota_release import (
+    RETIRED_NORMAL_PROFILES, add_to_zip, parse_package, pending_boards,
+    sha256, source_directories, version_from_tag,
+)
 from patch_bootloader_manifest import find_manifest, verify_manifest
 from recovery_release_provenance import validate as validate_provenance
 
@@ -114,8 +117,8 @@ def build(artifacts, output, tag, recovery_mota_dir=None, source_tag=None,
         provenance = validate_provenance(ROOT, source_tag, release_tag)
         artifact_tag = source_tag.removeprefix("R_")
     pending = pending_boards(ROOT / "src/boards")
-    boards = sorted(path.name for path in (ROOT / "src/boards").iterdir()
-                    if path.is_dir() and path.name not in RELEASE_BLOCKED_BOARDS
+    boards = sorted(path.name for path in source_directories(ROOT / "src/boards")
+                    if path.name not in RELEASE_BLOCKED_BOARDS
                     and (release_tag is not None or path.name not in RETIRED_NORMAL_PROFILES)
                     and (include_pending or path.name not in pending))
     inventory, entries = [], []

@@ -7,16 +7,18 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 from build_bootloader_mota_release import PENDING_BOARDS, QUALIFIED_BOARDS, ci_boards
+import build_recovery_release as recovery_release
 
 
 class PendingBoardTests(unittest.TestCase):
     def test_pending_ports_have_no_released_download(self):
         expected = {"gat562_mesh_watch13", "lilygo_techo_card", "lilygo_t_impulse_plus",
-                    "muzi_base", "meshtiny", "nano_g2_ultra", "thinknode_m8", "meshtracker_x1",
+                    "muzi_base", "meshtiny", "nano_g2_ultra", "thinknode_m8",
                     "heltec_mesh_solar"}
         self.assertEqual(expected, PENDING_BOARDS)
         self.assertFalse(expected.intersection(QUALIFIED_BOARDS))
@@ -30,7 +32,7 @@ class PendingBoardTests(unittest.TestCase):
             directory = ROOT / "src/boards" / board
             cmake = (directory / "board.cmake").read_text()
             make = (directory / "board.mk").read_text()
-            backend = "INTERNAL" if board in {"meshtracker_x1", "heltec_mesh_solar"} else "QSPI"
+            backend = "INTERNAL" if board == "heltec_mesh_solar" else "QSPI"
             self.assertIn(f"set(MOTA_{backend}_BOOTLOADER_UPDATE ON)", cmake)
             self.assertIn(f"-DMOTA_{backend}_BOOTLOADER_UPDATE=1", make)
             # NFC must survive both build systems on the Card.
@@ -74,7 +76,7 @@ int main(void) {
 #define NRF_GPIO_PIN_PULLDOWN 1
 #include "board.h"
 #ifdef MOTA_QSPI_SCK_PIN
-#error "X1 internal candidate must not drive speculative external flash"
+#error "X1 internal profile must not drive speculative external flash"
 #endif
 int main(void) {
   printf("%u %u %u %u %u %u %u %u\\n", LEDS_NUMBER, LED_STATE_ON,
@@ -85,8 +87,7 @@ int main(void) {
         directory = ROOT / "src/boards/meshtracker_x1"
         with tempfile.TemporaryDirectory() as temp:
             output = str(Path(temp) / "pins")
-            subprocess.run(["cc", "-Wall", "-Werror", "-DOTAFIX_X1_QUALIFICATION_ONLY=1",
-                            "-x", "c", "-", "-I", str(directory), "-o", output],
+            subprocess.run(["cc", "-Wall", "-Werror", "-x", "c", "-", "-I", str(directory), "-o", output],
                            input=source, text=True, check=True, capture_output=True)
             self.assertEqual([2, 1, 3, 24, 6, 6, 1, 0x28860057],
                              list(map(int, subprocess.check_output([output]).split())))
@@ -95,6 +96,12 @@ int main(void) {
         self.assertIn("set(SD_VERSION 7.3.0)", cmake)
         self.assertIn("SD_VERSION = 7.3.0", make)
         self.assertIn("set(DEVICE_NAME X1INT_DFU)", cmake)
+        self.assertIn("set(MOTA_INTERNAL_BOOTLOADER_UPDATE ON)", cmake)
+        self.assertIn("-DMOTA_INTERNAL_BOOTLOADER_UPDATE=1", make)
+        self.assertNotIn("QUALIFICATION", cmake + make + (directory / "board.h").read_text())
+        self.assertIn("meshtracker_x1", QUALIFIED_BOARDS)
+        self.assertIn("meshtracker_x1", ci_boards(production=True))
+        self.assertNotIn("meshtracker_x1", PENDING_BOARDS)
         self.assertIn("#define BUTTON_DFU_PROBE_USB 1", (directory / "board.h").read_text())
         main = (ROOT / "src/main.c").read_text()
         policy = main[main.index("#if defined(BUTTON_DFU_PROBE_USB)"):
@@ -106,8 +113,21 @@ int main(void) {
         hooks = (directory / "pinconfig.c").read_text()
         self.assertNotIn("nrf_gpio_", hooks)
 
+    def test_x1_recovery_release_requires_its_real_artifacts(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            directory = root / "src/boards/meshtracker_x1"
+            directory.mkdir(parents=True)
+            (directory / "board.cmake").write_text(
+                (ROOT / "src/boards/meshtracker_x1/board.cmake").read_text())
+            artifacts = root / "artifacts"
+            artifacts.mkdir()
+            with mock.patch.object(recovery_release, "ROOT", root):
+                with self.assertRaisesRegex(ValueError, "meshtracker_x1: expected one regular R_meshtracker_x1"):
+                    recovery_release.build(artifacts, root / "output", "v0.11.0-OTAFIX2.4.13")
+
     def test_internal_candidates_require_qualification_build_and_version(self):
-        for board in ("meshtracker_x1", "heltec_mesh_solar"):
+        for board in ("heltec_mesh_solar",):
             for options, reason in (([], "explicit qualification build"),
                                     (["MOTA_BOOTLOADER_TEST_BUILD=1"], "explicit test version")):
                 with self.subTest(board=board, options=options):
@@ -122,7 +142,7 @@ int main(void) {
                         self.assertNotEqual(cmake.returncode, 0)
                         self.assertIn(reason, cmake.stdout + cmake.stderr)
         header = subprocess.run(["cc", "-x", "c", "-", "-fsyntax-only", "-I",
-                                 str(ROOT / "src/boards/meshtracker_x1")],
+                                 str(ROOT / "src/boards/heltec_mesh_solar")],
                                 input='#include "board.h"\n', text=True, capture_output=True)
         self.assertNotEqual(header.returncode, 0)
         self.assertIn("explicit qualification build", header.stderr)

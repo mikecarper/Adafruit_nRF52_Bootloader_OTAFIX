@@ -21,15 +21,16 @@ class DownloadManifestTests(unittest.TestCase):
                         "draft": False, "prerelease": False, "assets": []}
         for profile in self.mapping["profiles"]:
             prefix = profile["id"] + "_bootloader-" + tag
-            for name in ("update-" + prefix + "_mbr.uf2", prefix + "_s140_6.1.1.zip",
-                         prefix + "_s140_6.1.1.hex"):
+            sd_version = "7.3.0" if profile["id"] == "meshtracker_x1" else "6.1.1"
+            for name in ("update-" + prefix + "_mbr.uf2", prefix + "_s140_" + sd_version + ".zip",
+                         prefix + "_s140_" + sd_version + ".hex"):
                 self.release["assets"].append({"name": name, "size": 100,
                     "digest": "sha256:" + "a" * 64,
                     "browser_download_url": base + "/releases/download/" + tag + "/" + name})
 
     def test_all_normal_profiles_and_exact_storage(self):
         manifest = build_manifest(self.release, self.mapping)
-        self.assertEqual(23, len(manifest["profiles"]))
+        self.assertEqual(24, len(manifest["profiles"]))
         profiles = {p["id"]: p for p in manifest["profiles"]}
         self.assertNotIn("heltec_mesh_tower_v2", profiles)
         for board, storage in (("heltec_t096", "internal"), ("heltec_t114", "internal"),
@@ -45,6 +46,12 @@ class DownloadManifestTests(unittest.TestCase):
         self.release["assets"].append(extra)
         manifest = build_manifest(self.release, self.mapping)
         self.assertNotIn("update-R_", manifest["profiles"][0]["files"]["uf2"]["name"])
+
+    def test_x1_requires_actual_assets_not_a_synthetic_download(self):
+        self.release["assets"] = [asset for asset in self.release["assets"]
+                                  if not asset["name"].startswith("meshtracker_x1_")]
+        with self.assertRaisesRegex(ValueError, "meshtracker_x1: expected one exact zip asset"):
+            build_manifest(self.release, self.mapping)
 
     def test_legacy_rak_release_identity_does_not_claim_supplemental_sd(self):
         # Current source flags must not retroactively grant an old release SD
@@ -67,7 +74,14 @@ class DownloadManifestTests(unittest.TestCase):
             self.assertEqual("wio_tracker_l1", aliases[h])
         self.assertEqual("heltec_mesh_tower_v2_sdcard", aliases["Heltec_tower_v2_sdcard"])
         gaps = {h: p for p in manifest["unavailableProfiles"] for h in p["meshcoreHardware"]}
-        self.assertEqual(15, len(gaps))
+        self.assertEqual(14, len(gaps))
+        self.assertEqual("meshtracker_x1", aliases["MeshTracker_X1"])
+        self.assertEqual("internal", next(p for p in manifest["profiles"]
+                                         if p["id"] == "meshtracker_x1")["storage"])
+        x1 = next(p for p in manifest["profiles"] if p["id"] == "meshtracker_x1")
+        self.assertEqual("X1INT_DFU", x1["deviceName"])
+        self.assertTrue(x1["files"]["zip"]["name"].endswith("_s140_7.3.0.zip"))
+        self.assertTrue(x1["files"]["hex"]["name"].endswith("_s140_7.3.0.hex"))
         for h in ("wio_wm1110", "GAT562_Mesh_Watch13", "ThinkNode_M8", "LilyGo_T-Echo_Card",
                   "Heltec_tower_v2"):
             self.assertNotIn(h, aliases)

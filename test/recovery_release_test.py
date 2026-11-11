@@ -106,6 +106,14 @@ class RecoveryReleaseTest(unittest.TestCase):
             self.assertEqual(manifest["board_count"], 1)
             self.assertFalse(any("pending_test_board" in name for name in archive.namelist()))
 
+    def test_empty_board_leftover_is_not_a_recovery_profile(self):
+        (self.root / "src/boards/heltec_mesh_tower_v2_dual").mkdir()
+        bundle = release.build(self.input, self.root / "out", TAG)
+        with zipfile.ZipFile(bundle) as archive:
+            manifest = json.loads(archive.read("manifest.json"))
+            self.assertEqual(manifest["board_count"], 1)
+            self.assertFalse(any("heltec_mesh_tower_v2_dual" in name for name in archive.namelist()))
+
     def test_retired_tower_excluded_from_normal_release_recovery(self):
         retired = self.root / "src/boards/heltec_mesh_tower_v2"
         retired.mkdir()

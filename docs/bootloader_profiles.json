@@ -11,6 +11,7 @@
     {"id": "keepteen_lt1", "label": "Keepteen LT1", "meshcoreHardware": ["KeepteenLT1"]},
     {"id": "lilygo_techo", "label": "LilyGo T-Echo", "meshcoreHardware": ["LilyGo_T-Echo"]},
     {"id": "lilygo_techo_lite", "label": "LilyGo T-Echo Lite", "meshcoreHardware": ["LilyGo_T-Echo-Lite", "LilyGo_T-Echo-Lite_non_shell"]},
+    {"id": "meshtracker_x1", "label": "MeshTracker X1", "meshcoreHardware": ["MeshTracker_X1"]},
     {"id": "minewsemi_mx25le01", "label": "MinewSemi MX25LE01", "meshcoreHardware": ["Minewsemi_me25ls01"]},
     {"id": "pca10056", "label": "Nordic nRF52840 DK PCA10056", "meshcoreHardware": ["PCA10056"]},
     {"id": "promicro_nrf52840", "label": "ProMicro nRF52840", "meshcoreHardware": ["ProMicro"]},
@@ -56,11 +57,6 @@
       "id": "meshtiny", "label": "Meshtiny", "meshcoreHardware": ["Meshtiny"],
       "reason": "A dedicated Meshtiny QSPI source port preserves factory identity and real side/top controls. Physical flash, power, DFU and update qualification remains pending; no verified download is available.",
       "qualification": {"status": "source-pending", "sourceBoard": "meshtiny", "storage": "qspi", "factoryIdentity": "verified", "hardwareQualified": false, "blockers": ["Physical side/top-button entry, flash and power-loss update qualification.", "Matching application must use external raw staging; application flash macros cannot be inferred from the bootloader."], "evidence": ["https://shop.mtoolstec.com/bootloader-update-on-meshtiny.html", "https://dl.mtoolstec.com/meshtiny/bootloader.uf2"]}
-    },
-    {
-      "id": "meshtracker_x1", "label": "MeshTracker X1", "meshcoreHardware": ["MeshTracker_X1"],
-      "reason": "A dedicated internal-staging S140-v7 qualification source port preserves factory USB identity and the active-high button without driving unverified flash or peripheral rails. Cold USB/reset/power behavior and matching internal-staging application updates still need hardware testing. No verified download is available.",
-      "qualification": {"status": "source-pending", "sourceBoard": "meshtracker_x1", "storage": "internal", "factoryIdentity": "verified", "hardwareQualified": false, "blockers": ["Cold USB, button-plus-USB, BLE, timeout and power-controller behavior during lengthy updates.", "Matching internal-staging S140 7.3.0 application, exact-base delta and signed exact-profile self-update qualification.", "External full-image staging remains unsupported until flash-rail/reset behavior is corroborated."], "evidence": ["https://wiki.seeedstudio.com/sensecap_meshtracker_x1_meshcore/", "https://files.seeedstudio.com/wiki/SenseCAP/Meshcore/MeshTrackerX1/Bootloader.zip", "https://github.com/meshcore-dev/MeshCore/pull/3112", "https://github.com/meshcore-dev/MeshCore/pull/3139"]}
     },
     {
       "id": "muzi_base", "label": "Muzi Base", "meshcoreHardware": ["muzi_base_duo", "muzi_base_duo_superIO", "muzi_base_uno", "muzi_base_uno_superIO"],

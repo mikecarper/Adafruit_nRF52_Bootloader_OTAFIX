@@ -20,18 +20,17 @@ class CoverageTests(unittest.TestCase):
         return next(item for item in self.mapping["unavailableProfiles"] if item["id"] == board)
 
     def test_all_hardware_is_honestly_classified(self):
-        self.assertEqual({"releasedProfiles": 23, "releasedHardware": 40,
-                          "pendingProfiles": 9, "pendingHardware": 12,
+        self.assertEqual({"releasedProfiles": 24, "releasedHardware": 41,
+                          "pendingProfiles": 8, "pendingHardware": 11,
                           "blockedProfiles": 2, "blockedHardware": 2,
                           "retiredProfiles": 1, "retiredHardware": 1},
                          validate_coverage(self.mapping))
-        x1 = self.candidate("meshtracker_x1")["qualification"]
-        self.assertEqual("internal", x1["storage"])
-        self.assertEqual("source-pending", x1["status"])
-        self.assertFalse(x1["hardwareQualified"])
+        x1 = next(item for item in self.mapping["profiles"] if item["id"] == "meshtracker_x1")
+        self.assertEqual(["MeshTracker_X1"], x1["meshcoreHardware"])
+        self.assertNotIn("meshtracker_x1", {item["id"] for item in self.mapping["unavailableProfiles"]})
 
     def test_pending_port_cannot_be_omitted(self):
-        self.mapping["unavailableProfiles"].remove(self.candidate("meshtracker_x1"))
+        self.mapping["unavailableProfiles"].remove(self.candidate("heltec_mesh_solar"))
         with self.assertRaisesRegex(ValueError, "every pending source"):
             validate_coverage(self.mapping)
 
@@ -40,17 +39,17 @@ class CoverageTests(unittest.TestCase):
             with self.subTest(field=field):
                 mapping = copy.deepcopy(self.mapping)
                 next(item for item in mapping["unavailableProfiles"] if item["id"] ==
-                     "meshtracker_x1")["qualification"][field] = value
+                     "heltec_mesh_solar")["qualification"][field] = value
                 with self.assertRaises(ValueError):
                     validate_coverage(mapping)
 
     def test_unavailable_cannot_claim_files_or_physical_qualification(self):
-        x1 = self.candidate("meshtracker_x1")
-        x1["files"] = {"uf2": {"url": "https://example.invalid/not-qualified.uf2"}}
+        pending = self.candidate("heltec_mesh_solar")
+        pending["files"] = {"uf2": {"url": "https://example.invalid/not-qualified.uf2"}}
         with self.assertRaisesRegex(ValueError, "cannot claim qualified downloads"):
             validate_coverage(self.mapping)
-        del x1["files"]
-        x1["qualification"]["hardwareQualified"] = True
+        del pending["files"]
+        pending["qualification"]["hardwareQualified"] = True
         with self.assertRaisesRegex(ValueError, "cannot claim qualified downloads"):
             validate_coverage(self.mapping)
 
@@ -70,7 +69,7 @@ class CoverageTests(unittest.TestCase):
             validate_coverage(self.mapping)
 
     def test_metadata_requires_evidence_and_remaining_blockers(self):
-        self.candidate("meshtracker_x1")["qualification"]["blockers"] = []
+        self.candidate("heltec_mesh_solar")["qualification"]["blockers"] = []
         with self.assertRaisesRegex(ValueError, "explicit blockers and primary evidence"):
             validate_coverage(self.mapping)
 

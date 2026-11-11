@@ -119,8 +119,6 @@ int main(int argc, char **argv) {
         for board in ("t1000_e", "pca10056", "wismesh_tag", "meshtracker_x1"):
             binary = Path(cls.temp.name) / board
             flags = ["-DREQUIRE_SINGLE_BUTTON=1"] if board == "t1000_e" else []
-            if board == "meshtracker_x1":
-                flags.append("-DOTAFIX_X1_QUALIFICATION_ONLY=1")
             subprocess.run(["cc", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
                             *flags, f'-DBOARD_HEADER="boards/{board}/board.h"',
                             "-x", "c", "-", "-I", str(ROOT / "src"),
