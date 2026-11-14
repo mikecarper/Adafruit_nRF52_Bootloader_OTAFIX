@@ -2,6 +2,7 @@
 """Check electrically distinct ports and keep untested images out of releases."""
 
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -146,6 +147,41 @@ int main(void) {
                                 input='#include "board.h"\n', text=True, capture_output=True)
         self.assertNotEqual(header.returncode, 0)
         self.assertIn("explicit qualification build", header.stderr)
+
+    def test_solar_preview_is_explicit_and_requires_an_exact_preview_tag(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            fake_git = directory / "git"
+            fake_git.write_text('#!/bin/sh\nprintf "%s\\n" "$PREVIEW_TEST_TAG"\n', encoding="ascii")
+            fake_git.chmod(0o755)
+            environment = dict(os.environ, PATH=str(directory) + os.pathsep + os.environ["PATH"])
+            cmakelists = directory / "CMakeLists.txt"
+            cmakelists.write_text(
+                "cmake_minimum_required(VERSION 3.17)\nproject(preview NONE)\n"
+                f'set(Python_EXECUTABLE "{sys.executable}")\n'
+                f'include("{ROOT / "src/boards/heltec_mesh_solar/board.cmake"}")\n',
+                encoding="ascii")
+            makefile = (f"PYTHON := {sys.executable}\n"
+                        "MOTA_BOOTLOADER_TEST_BUILD := 1\n"
+                        "OTAFIX_EXPERIMENTAL_PORT_PREVIEW := 1\n"
+                        f"include {ROOT / 'src/boards/heltec_mesh_solar/board.mk'}\n"
+                        "all:\n\t@true\n")
+            for index, (tag, accepted) in enumerate((
+                ("v0.11.0-OTAFIX2.4.13-preview.1", True),
+                ("v0.11.0-OTAFIX2.4.13", False),
+                ("v0.11.0-OTAFIX2.4.13-preview.1-dirty", False),
+                ("v0.11.0-OTAFIX2.4.13-preview.1-1-gdeadbeef", False),
+            )):
+                environment["PREVIEW_TEST_TAG"] = tag
+                with self.subTest(tag=tag):
+                    make = subprocess.run(["make", "-f", "-", "-n", "all"], input=makefile,
+                                          cwd=ROOT, text=True, capture_output=True, env=environment)
+                    cmake = subprocess.run(["cmake", "-S", str(directory), "-B", str(directory / f"build{index}"),
+                                            "-DMOTA_BOOTLOADER_TEST_BUILD=ON",
+                                            "-DOTAFIX_EXPERIMENTAL_PORT_PREVIEW=ON"],
+                                           text=True, capture_output=True, env=environment)
+                    self.assertEqual(make.returncode == 0, accepted, make.stdout + make.stderr)
+                    self.assertEqual(cmake.returncode == 0, accepted, cmake.stdout + cmake.stderr)
 
     def test_solar_safe_subset_and_watchdog_contract(self):
         directory = ROOT / "src/boards/heltec_mesh_solar"

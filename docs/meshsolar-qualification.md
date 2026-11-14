@@ -7,6 +7,14 @@ This is a source/build candidate, **not a physically qualified download**.
 test mode and an explicit packed test version. The header additionally requires
 the qualification definition. Normal/recovery releases do not publish it.
 
+For an explicitly selected experimental preview, the build systems also accept
+test mode plus `OTAFIX_EXPERIMENTAL_PORT_PREVIEW` when the source is at an exact,
+clean OTAFIX preview tag. This produces the actual preview version label rather
+than the `TEST_` label, so a later normal OTAFIX migration can identify it. It
+does not remove the pending marker or establish hardware qualification.
+`tools/build_experimental_board_previews.py` builds and verifies this and the
+other selected board-specific preview images outside the source checkout.
+
 ## Confirmed subset used by the candidate
 
 - The [manufacturer carrier pin map](https://resource.heltec.cn/download/MeshSolar/Pin_map/MeshSolar_pinmap.jpg)

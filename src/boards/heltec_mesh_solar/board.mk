@@ -8,6 +8,13 @@ ifneq ($(MOTA_BOOTLOADER_TEST_BUILD),1)
 $(error Mesh Solar requires an explicit qualification build)
 endif
 ifeq ($(strip $(MOTA_BOOTLOADER_VERSION_TEST_OVERRIDE)),)
-$(error Mesh Solar qualification checks require an explicit test version)
+  ifneq ($(OTAFIX_EXPERIMENTAL_PORT_PREVIEW),1)
+    $(error Mesh Solar qualification checks require an explicit test version)
+  endif
+  solar_preview_tag := $(shell git describe --exact-match --dirty --tags 2>/dev/null)
+  solar_preview_version := $(shell $(PYTHON) tools/derive_otafix_version.py "$(solar_preview_tag)" --preview-only --hex 2>/dev/null)
+  ifeq ($(solar_preview_version),)
+    $(error Mesh Solar preview requires an exact clean OTAFIX preview tag)
+  endif
 endif
 CFLAGS += -DOTAFIX_SOLAR_QUALIFICATION_ONLY=1

@@ -13,7 +13,8 @@ PATTERN = re.compile(
 )
 
 
-def derive(text: str, recovery_allow_all_boards: bool = False) -> int:
+def derive(text: str, recovery_allow_all_boards: bool = False,
+           preview_only: bool = False) -> int:
     if recovery_allow_all_boards:
         text = text.removeprefix("R_")
     match = PATTERN.fullmatch(text)
@@ -22,6 +23,8 @@ def derive(text: str, recovery_allow_all_boards: bool = False) -> int:
     major, minor, patch = (int(match.group(name)) for name in
                            ("major", "minor", "patch"))
     preview_text = match.group("preview")
+    if preview_only and preview_text is None:
+        raise ValueError("experimental board images require a preview tag")
     preview = 0xFF if preview_text is None else int(preview_text)
     if any(component > 0xFF for component in (major, minor, patch)):
         raise ValueError("OTAFIX X/Y/Z components must fit one byte")
@@ -39,9 +42,11 @@ def main() -> int:
     parser.add_argument("--hex", action="store_true")
     parser.add_argument("--recovery-allow-all-boards", action="store_true",
                         help="also accept a separate R_ recovery release tag")
+    parser.add_argument("--preview-only", action="store_true",
+                        help="reject stable tags for experimental board builds")
     args = parser.parse_args()
     try:
-        value = derive(args.version, args.recovery_allow_all_boards)
+        value = derive(args.version, args.recovery_allow_all_boards, args.preview_only)
     except ValueError as exc:
         print(f"derive_otafix_version: {exc}: {args.version!r}", file=sys.stderr)
         return 2

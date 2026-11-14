@@ -57,6 +57,15 @@ readback_internal_test: readback_test.c $(SRC)/ota_delta.c $(SRC)/detools/detool
 		readback_test.c $(SRC)/detools/detools.c $(SRC)/sha256.c \
 		$(SRC)/usb/uf2/bootloader_image.c -o $@
 
+# A QSPI bootloader must also accept the internal-flash handoff used by
+# existing MeshCore firmware, without attempting to initialize external flash.
+readback_qspi_internal_test: readback_test.c $(SRC)/ota_delta.c $(SRC)/detools/detools.c \
+    $(SRC)/sha256.c $(SRC)/usb/uf2/bootloader_image.c $(SRC)/ota_layout.h
+	$(CC) $(CFLAGS) -DOTA_DELTA_HOST_TEST -DMOTA_QSPI_FLASH -DMOTA_QSPI_BOOTLOADER_UPDATE \
+		-DUSB_DESC_VID=0x239A -DUSB_DESC_UF2_PID=0x00DA -DDEVICE_NAME='"LTECARD_DFU"' $(INC) \
+		readback_test.c $(SRC)/detools/detools.c $(SRC)/sha256.c \
+		$(SRC)/usb/uf2/bootloader_image.c -o $@
+
 X1_INTERNAL_FLAGS = -DOTA_DELTA_HOST_TEST -DMOTA_INTERNAL_BOOTLOADER_UPDATE \
 	-DMOTA_RAM_ARENA_SIZE=65536 -DMOTA_NRF52_APP_BASE=0x00027000u \
 	-DUSB_DESC_VID=0x2886 -DUSB_DESC_UF2_PID=0x0057 -DDEVICE_NAME='"X1INT_DFU"'
@@ -378,6 +387,7 @@ check: apply_sim readback_test readback_test_v7 readback_internal_test bootloade
 	./readback_test_v7
 	@echo
 	./readback_internal_test
+	./readback_qspi_internal_test
 	./readback_x1_internal_v7_test
 	./readback_solar_internal_test
 	@echo
@@ -443,6 +453,7 @@ sanitize:
 	$(MAKE) CFLAGS="$(SANITIZER_CFLAGS)" check
 
 clean:
+	rm -f readback_qspi_internal_test
 	rm -f readback_x1_internal_v7_test bootloader_mota_x1_internal_v7_test
 	rm -f readback_solar_internal_test bootloader_mota_solar_internal_test
 	rm -f tower_dual_sd_test tower_dual_internal_test tower_dual_boot_sd_test tower_dual_boot_internal_test
@@ -459,7 +470,7 @@ clean:
 
 # These executables include the retained handoff headers and/or image validator.
 # Rebuild them when the shared CRC implementation changes, not only its callers.
-apply_sim readback_test readback_test_v7 readback_internal_test \
+apply_sim readback_test readback_test_v7 readback_internal_test readback_qspi_internal_test \
 rak_auto_apply_4631_test rak_auto_apply_3401_test rak_auto_hybrid_4631_test rak_auto_hybrid_3401_test \
 bootloader_image_test bootloader_image_recovery_test sd_apply_test qspi_apply_test \
 bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test \
@@ -482,3 +493,4 @@ check: check-tower-dual
 check: rak_auto_apply_4631_test rak_auto_apply_3401_test rak_auto_hybrid_4631_test rak_auto_hybrid_3401_test
 check: readback_x1_internal_v7_test bootloader_mota_x1_internal_v7_test
 check: readback_solar_internal_test bootloader_mota_solar_internal_test
+check: readback_qspi_internal_test

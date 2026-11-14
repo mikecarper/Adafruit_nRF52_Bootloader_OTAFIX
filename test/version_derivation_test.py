@@ -53,6 +53,16 @@ class VersionDerivationTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             MODULE.derive("R_" + tag, recovery_allow_all_boards=True)
 
+    def test_experimental_boards_accept_only_exact_preview_versions(self):
+        self.assertEqual(0x02040D01, MODULE.derive(
+            "v0.11.0-OTAFIX2.4.13-preview.1", preview_only=True))
+        for version in ("v0.11.0-OTAFIX2.4.13",
+                        "v0.11.0-OTAFIX2.4.13-preview.1-dirty",
+                        "v0.11.0-OTAFIX2.4.13-preview.1-1-gdeadbeef",
+                        "R_v0.11.0-OTAFIX2.4.13-preview.1"):
+            with self.subTest(version=version), self.assertRaises(ValueError):
+                MODULE.derive(version, preview_only=True)
+
 
 if __name__ == "__main__":
     unittest.main()
