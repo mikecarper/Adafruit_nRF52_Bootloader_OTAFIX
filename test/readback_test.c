@@ -150,7 +150,7 @@ int otah_crc_bound_app_size(uint32_t *size) {
 }
 #endif
 
-#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_QSPI_BOOTLOADER_UPDATE)
 const uint8_t *otah_flash_pointer(uint32_t address, uint32_t len) {
     return (uint64_t)address + len <= FLASH_LEN ? FLASH + address : NULL;
 }
@@ -161,7 +161,7 @@ int otah_mbr_copy_bl(uint32_t source, uint32_t word_count) {
 
 #include "ota_delta.c"   // unit under test (its static page-cache g_cache_page/g_cache_dirty are visible here)
 
-#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE)
+#if defined(MOTA_INTERNAL_BOOTLOADER_UPDATE) || defined(MOTA_QSPI_BOOTLOADER_UPDATE)
 int otah_installed_boot_info(bootloader_image_info_t *info) {
     info->boot_version = 0x0204010Cu;
     info->softdevice_family = 140u;
