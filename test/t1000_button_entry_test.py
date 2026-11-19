@@ -23,6 +23,7 @@ class T1000ButtonTests(unittest.TestCase):
         cls.binaries = {}
         main = (ROOT / "src/main.c").read_text()
         boards = (ROOT / "src/boards/boards.c").read_text()
+        watchdog = (ROOT / "src/watchdog.c").read_text()
         constants = main[main.index("#define DFU_MAGIC_SERIAL_ONLY_RESET"):
                          main.index("#define BOOTLOADER_VERSION_REGISTER")]
         harness = r'''
@@ -101,6 +102,9 @@ static void bootloader_dfu_start(bool ota, uint32_t timeout, bool cancel) {
 }
 '''
         harness += constants + "\n"
+        harness += "#if defined(MOTA_RAK_SD_STORE)\n"
+        harness += function(watchdog, "void otafix_watchdog_start(uint32_t ticks)") + "\n"
+        harness += "#endif\n"
         harness += function(boards, "bool button_pressed(uint32_t pin)") + "\n"
         harness += function(main, "static void check_dfu_mode(void) {") + "\n"
         harness += r'''
@@ -137,7 +141,7 @@ int main(int argc, char **argv) {
             "pca10056": ("pca10056", ["-DMOTA_ROLLBACK_ENABLED=1"]),
             "wismesh_tag": ("wismesh_tag", []),
             "meshtracker_x1": ("meshtracker_x1", []),
-            "rak_recovery": ("pca10056", ["-DMOTA_RAK_SD_STORE=1"]),
+            "rak_recovery": ("pca10056", ["-DMOTA_RAK_SD_STORE=1", "-DMOTA_ROLLBACK_ENABLED=1"]),
         }
         for name, (board, flags) in profiles.items():
             binary = Path(cls.temp.name) / name
@@ -271,8 +275,8 @@ int main(int argc, char **argv) {
         state = self.run_entry(10000, single_tap=True)
         self.assertEqual((state["usb_calls"], state["ota"], state["timeout_ms"]), (1, 0, 0))
 
-    def test_rollback_keeps_manual_recovery_and_first_reset_window(self):
-        options = dict(board="pca10056", valid_app=False, rollback=True)
+    def check_rollback_keeps_manual_recovery_and_first_reset_window(self, board):
+        options = dict(board=board, valid_app=False, rollback=True)
         idle = self.run_entry(**options)
         self.assertEqual(idle["dfu_calls"], 0)
         self.assertEqual(self.run_entry(single_tap=True, **options)["dfu_calls"], 0)
@@ -286,6 +290,11 @@ int main(int argc, char **argv) {
         for magic, ota in ((0x4e, 0), (0x57, 0), (0xa8, 1)):
             state = self.run_entry(magic=magic, **options)
             self.assertEqual((state["dfu_calls"], state["ota"]), (1, ota))
+
+    def test_rollback_keeps_manual_recovery_and_first_reset_window(self):
+        for board in ("pca10056", "rak_recovery"):
+            with self.subTest(board=board):
+                self.check_rollback_keeps_manual_recovery_and_first_reset_window(board)
 
     def test_rak_failed_ble_recovery_still_reaches_headless_radios(self):
         options = dict(board="rak_recovery", valid_app=False, magic=0xaa)

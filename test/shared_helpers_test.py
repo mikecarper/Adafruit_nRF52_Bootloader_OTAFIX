@@ -37,6 +37,7 @@ class SharedHelpersTest(unittest.TestCase):
         cls.lib.test_sha.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_size_t, ctypes.c_void_p]
         cls.lib.test_sha_bitlen.argtypes = [ctypes.c_uint64, ctypes.c_uint32, ctypes.c_void_p]
         cls.lib.test_watchdog.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
+        cls.lib.test_watchdog_start.argtypes = [ctypes.c_uint32]
 
     def test_crc_streaming_and_unaligned_inputs(self):
         self.assertEqual(self.lib.test_crc(0, b'123456789', 9), 0xCBF43926)
@@ -77,6 +78,10 @@ class SharedHelpersTest(unittest.TestCase):
         out = ctypes.create_string_buffer(32)
         self.lib.test_sha(data, len(data), 256, out)
         self.assertEqual(out.raw.hex(), 'cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0')
+
+    def test_watchdog_start_uses_requested_timeout(self):
+        for seconds in (15, 60):
+            self.assertEqual(self.lib.test_watchdog_start(seconds * 32768), 1)
 
     def test_watchdog_running_and_every_channel_mask(self):
         for running in [0, 1]:

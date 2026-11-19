@@ -552,10 +552,7 @@ static void check_dfu_mode(void) {
       }
       if (!NRF_WDT->RUNSTATUS) {
         NRF_POWER->GPREGRET |= DFU_MAGIC_OTA_WDT;
-        NRF_WDT->CONFIG = WDT_CONFIG_SLEEP_Msk;
-        NRF_WDT->CRV = 15 * 32768;
-        NRF_WDT->RREN = WDT_RREN_RR0_Msk;
-        NRF_WDT->TASKS_START = 1;
+        otafix_watchdog_start(15u * 32768u);
       }
 #else
       // Preserve BLE recovery through pin/watchdog resets while no app exists.

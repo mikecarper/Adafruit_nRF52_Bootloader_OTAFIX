@@ -2245,6 +2245,144 @@ static int in_place_callbacks_process(
     return (res);
 }
 
+#if defined(MOTA_RAK_SD_STORE)
+struct crle_input {
+    detools_read_t read;
+    void *arg;
+    size_t remaining, offset, buffered;
+    uint32_t run;
+    uint8_t kind, value;
+    uint8_t buffer[512];
+};
+
+static int crle_refill(struct crle_input *input)
+{
+    if (input->offset != input->buffered) return 0;
+    size_t n = MIN(input->remaining, sizeof(input->buffer));
+    if (n == 0) return -DETOOLS_NOT_ENOUGH_PATCH_DATA;
+    if (input->read(input->arg, input->buffer, n)) return -DETOOLS_IO_FAILED;
+    input->remaining -= n;
+    input->offset = 0;
+    input->buffered = n;
+    return 0;
+}
+
+static int crle_raw_byte(struct crle_input *input)
+{
+    int res = crle_refill(input);
+    return res ? res : input->buffer[input->offset++];
+}
+
+// Return the number of bytes produced, or a negative detools error.
+static int crle_pull(struct crle_input *input, uint8_t *buf, size_t size)
+{
+    while (input->run == 0) {
+        int kind = crle_raw_byte(input);
+        if (kind < 0) return kind;
+        if (kind > 1) return -DETOOLS_CORRUPT_PATCH_CRLE_KIND;
+        input->kind = (uint8_t)kind;
+        // CRLE uses unsigned base-128 lengths of at most four bytes.
+        int byte;
+        for (unsigned shift = 0;; shift += 7) {
+            byte = crle_raw_byte(input);
+            if (byte < 0) return byte;
+            if (shift == 28) return -DETOOLS_CORRUPT_PATCH_OVERFLOW;
+            input->run |= (uint32_t)(byte & 0x7f) << shift;
+            if (!(byte & 0x80)) break;
+        }
+        if (kind == 1) {
+            byte = crle_raw_byte(input);
+            if (byte < 0) return byte;
+            input->value = (uint8_t)byte;
+        }
+    }
+
+    size_t n = MIN(size, input->run);
+    if (input->kind == 0) {
+        int res = crle_refill(input);
+        if (res) return res;
+        n = MIN(n, input->buffered - input->offset);
+        memcpy(buf, input->buffer + input->offset, n);
+        input->offset += n;
+    } else {
+        memset(buf, input->value, n);
+    }
+    input->run -= n;
+    return (int)n;
+}
+
+static int crle_number(struct crle_input *input, int *number)
+{
+    uint8_t byte;
+    int res = crle_pull(input, &byte, 1);
+    if (res < 0) return res;
+    bool negative = (byte & 0x40u) != 0;
+    uint32_t magnitude = byte & 0x3fu;
+    for (unsigned shift = 6; byte & 0x80u; shift += 7) {
+        res = crle_pull(input, &byte, 1);
+        if (res < 0) return res;
+        if (shift == 27) return -DETOOLS_CORRUPT_PATCH_OVERFLOW;
+        magnitude |= (uint32_t)(byte & 0x7fu) << shift;
+    }
+    *number = negative ? -(int)magnitude : (int)magnitude;
+    return 0;
+}
+
+int detools_apply_validated_crle(const struct detools_validated_geometry *g,
+                                detools_mem_read_t mem_read,
+                                detools_mem_write_t mem_write,
+                                detools_mem_erase_t mem_erase,
+                                detools_read_t patch_read,
+                                size_t patch_size,
+                                void *arg)
+{
+    struct crle_input input = {.read = patch_read, .arg = arg, .remaining = patch_size};
+
+    uint8_t to[128], base[128];
+    for (uint32_t pos = 0; pos < g->to;) {
+        int number;
+        int res = crle_number(&input, &number);
+        if (res) return res;
+        if (number > 0) return -DETOOLS_NOT_IMPLEMENTED;
+        uint32_t end = MIN(pos + g->segment, g->to);
+        uint32_t from = MAX(pos + g->segment, g->shift);
+        if (mem_erase(arg, pos, end - pos)) return -DETOOLS_IO_FAILED;
+        do {
+            for (unsigned phase = 0; phase < 2; ++phase) {
+                res = crle_number(&input, &number);
+                if (res) return res;
+                if ((uint32_t)number > end - pos) return -DETOOLS_CORRUPT_PATCH;
+                while (number != 0) {
+                    res = crle_pull(&input, to, MIN((size_t)number, sizeof(to)));
+                    if (res < 0) return res;
+                    size_t n = (size_t)res;
+                    if (phase == 0) {
+                        if (mem_read(arg, base, from, n)) return -DETOOLS_IO_FAILED;
+                        for (size_t i = 0; i < n; ++i) to[i] += base[i];
+                        from += n;
+                    }
+                    if (mem_write(arg, pos, to, n)) return -DETOOLS_IO_FAILED;
+                    pos += n;
+                    number -= n;
+                }
+            }
+            res = crle_number(&input, &number);
+            if (res) return res;
+            from += (uint32_t)number;
+        } while (pos < end);
+    }
+
+    // The callback API reads the entire payload, including unused trailing
+    // input. Retain that read/error behavior.
+    while (input.remaining) {
+        input.offset = input.buffered;
+        int res = crle_refill(&input);
+        if (res) return res;
+    }
+    return (int)g->to;
+}
+#endif
+
 int detools_apply_patch_in_place_callbacks(detools_mem_read_t mem_read,
                                            detools_mem_write_t mem_write,
                                            detools_mem_erase_t mem_erase,

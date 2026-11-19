@@ -139,6 +139,7 @@ static jmp_buf waiting_for_watchdog;
 #define __WFE() longjmp(waiting_for_watchdog, 1)
 '''
         release = function(source, "static void ble_watchdog_release(void)")
+        start = function((ROOT / "src/watchdog.c").read_text(), "void otafix_watchdog_start(")
         cases = r'''
 int main(void) {
   power.GPREGRET = 0;
@@ -173,7 +174,7 @@ int main(void) {
   assert(power.GPREGRET == 0x6B);
 }
 '''
-        harness = header + release + "\nstatic void enter_ble(uint32_t gpregret, bool ble_usb) {\n" + entry + "}\n" + cases
+        harness = header + start + release + "\nstatic void enter_ble(uint32_t gpregret, bool ble_usb) {\n" + entry + "}\n" + cases
         with tempfile.TemporaryDirectory(prefix="otafix-owned-watchdog-") as directory:
             binary = Path(directory) / ("watchdog.exe" if os.name == "nt" else "watchdog")
             subprocess.run([os.environ.get("CC", "gcc"), "-std=c11", "-O2", "-Wall", "-Wextra",

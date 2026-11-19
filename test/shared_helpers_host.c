@@ -32,6 +32,13 @@ void test_sha_bitlen(uint64_t previous, uint32_t tail, uint8_t encoded[8]) {
   memcpy(encoded, c.data + 56, 8);
 }
 
+int test_watchdog_start(uint32_t ticks) {
+  memset(&test_wdt, 0, sizeof(test_wdt));
+  otafix_watchdog_start(ticks);
+  return test_wdt.CONFIG == WDT_CONFIG_SLEEP_Msk && test_wdt.CRV == ticks &&
+         test_wdt.RREN == WDT_RREN_RR0_Msk && test_wdt.TASKS_START == 1u;
+}
+
 int test_watchdog(uint32_t running, uint32_t enabled) {
   test_wdt.RUNSTATUS = running;
   test_wdt.RREN = enabled;

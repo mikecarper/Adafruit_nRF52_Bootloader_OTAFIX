@@ -52,7 +52,7 @@ class RakSdStoreTests(unittest.TestCase):
         if os.name != "nt":
             flags += ["-fsanitize=address,undefined", "-fno-omit-frame-pointer", "-fno-pie", "-no-pie"]
         fixtures = {
-            "apply": ("rak_sd_apply_test.c", BASE + SD),
+            "apply": ("rak_sd_apply_test.c", BASE + SD + ["-DMOTA_ROLLBACK_HOST_TEST"]),
             "internal": ("readback_test.c", BASE + SD),
             "boot-internal": ("bootloader_mota_test.c", BASE + SD + IDENTITY),
             "boot-sd-reject": ("bootloader_mota_test.c", BASE + SD + IDENTITY + ["-DTEST_RAK_SD_REJECT=1"]),
@@ -91,6 +91,11 @@ class RakSdStoreTests(unittest.TestCase):
 
     def test_sd_full_and_delta_apply_without_nor(self):
         for scenario in (0, 1):
+            with self.subTest(scenario=scenario):
+                self.assertIn("PASS", self.run_fixture("apply", scenario))
+
+    def test_sd_and_nor_rollback_trial_and_failures(self):
+        for scenario in range(10, 17):
             with self.subTest(scenario=scenario):
                 self.assertIn("PASS", self.run_fixture("apply", scenario))
 

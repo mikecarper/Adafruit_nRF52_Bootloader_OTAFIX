@@ -44,7 +44,7 @@ struct HostSpim {
   HostStartRegister TASKS_START;
 };
 struct HostWatchdog {
-  uint32_t RUNSTATUS = 0, RREN = 0;
+  uint32_t RUNSTATUS = 0, RREN = 0, CONFIG = 0, CRV = 0, TASKS_START = 0;
   HostWatchdogReload RR[8];
 };
 struct HostPinConfig {

@@ -16,7 +16,7 @@ import compiler_policy
 FLAGS = ("-fno-schedule-insns", "-fno-schedule-insns2", "-fno-code-hoisting",
          "-fno-tree-ter", "-fno-tree-dominator-opts", "-fno-tree-tail-merge",
          "-fno-optimize-sibling-calls", "-fno-if-conversion", "-mbranch-cost=3",
-         "-fno-tree-loop-im", "-fno-early-inlining", "-fno-move-loop-invariants")
+         "-fno-tree-loop-im", "-fearly-inlining", "-fno-move-loop-invariants")
 RAK = "wiscore_rak4631_auto"
 
 
@@ -145,10 +145,10 @@ class CompilerPolicyTests(unittest.TestCase):
                 result = self.make_variable(variable, recovery=recovery)
                 self.assertEqual(0, result.returncode, result.stderr)
                 for flag in FLAGS:
-                    self.assertIn(flag, result.stdout)
+                    self.assertIn(flag, result.stdout.split())
                 self.assertNotIn("-fmerge-all-constants", result.stdout)
         unchanged = self.make_variable("CFLAGS", board="wiscore_rak3401_auto", version="14.2.1")
-        self.assertNotIn(FLAGS[0], unchanged.stdout)
+        self.assertNotIn(FLAGS[0], unchanged.stdout.split())
 
     def test_ci_selects_each_board_from_the_shared_table(self):
         for name in ("githubci.yml", "recovery.yml"):
