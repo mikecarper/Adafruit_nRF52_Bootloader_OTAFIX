@@ -482,8 +482,7 @@ int main(int argc, char** argv) {
 
     printf("[flash] transient and persistent page-erase mismatch: ");
     stage_flash();
-    struct apply_ctx erase_ctx = {.ws_lo = MOTA_NRF52_APP_BASE,
-                                  .ws_hi = g_write_start};
+    struct apply_ctx erase_ctx = {.ws_hi = g_write_start};
     g_fault_erase_address = MOTA_NRF52_APP_BASE;
     g_fault_erases_remaining = 1;
     int transient_erase = dt_me(&erase_ctx, 0, MOTA_NRF52_FLASH_PAGE);
@@ -537,8 +536,7 @@ int main(int argc, char** argv) {
     printf("[4] malformed detools bounds/geometry: ");
     {
         stage_flash();
-        struct apply_ctx c = {.patch_len = 4, .ws_lo = MOTA_NRF52_APP_BASE,
-                              .ws_hi = g_write_start};
+        struct apply_ctx c = {.patch_len = 4, .ws_hi = g_write_start};
         uint8_t byte = 0;
         int bounds_ok = dt_mr(&c, &byte, UINTPTR_MAX, 1) < 0 &&
                         dt_mw(&c, UINTPTR_MAX, &byte, 1) < 0 &&

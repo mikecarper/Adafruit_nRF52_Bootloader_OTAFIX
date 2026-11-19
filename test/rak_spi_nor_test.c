@@ -32,7 +32,7 @@ bool ota_rak_spi_begin(uint8_t cs, uint8_t sck, uint8_t mosi, uint8_t miso, uint
 }
 void ota_rak_spi_set_frequency(uint32_t frequency) { spi_frequency = frequency; }
 bool ota_rak_spi_healthy(void) { return healthy; }
-void ota_rak_spi_watchdog(void) { watchdog_calls++; }
+void otafix_watchdog_feed(void) { watchdog_calls++; }
 void ota_rak_spi_release(bool keep) {
   assert(!selected);
   release_calls++;

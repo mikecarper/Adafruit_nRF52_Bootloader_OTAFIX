@@ -24,6 +24,24 @@ tests passed (34 cases). No RAK15002 is available in this lab, so real card
 compatibility, removal, interrupted updates and power-cut recovery have not
 been physically validated for this path.
 
+## 2.4.13 rollback candidate
+
+The combined profile can restore the previous application from a verified
+backup on RAK15002 SD or any of the three supported NOR layouts. A compatible
+MeshCore build must stage the backup and confirm the trial boot. Internal and
+retained-RAM staging still work without an external rollback backup. SD
+remains application-only; the bootloader update still stages internally.
+
+Make and CMake qualification builds at `0x02040DFE` use 40,777 of 40,784
+code and initialized-data bytes for the normal image and 40,765 for the
+recovery image. A local Make link using the proposed `2.4.13` release label
+uses 40,773 bytes. The raw image remains 40,960 bytes; CF2, the manifest
+address and the normal/recovery identities are unchanged.
+
+Host tests cover confirmation, interrupted full and delta installs, failed
+trials, corrupt backups and watchdog startup failure. The candidate has not
+been flashed or power-cut tested on physical RAK4631 hardware.
+
 ## Storage contract
 
 One bootloader supports the existing internal flash and retained-RAM staging,

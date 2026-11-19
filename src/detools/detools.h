@@ -591,6 +591,21 @@ int detools_apply_patch_callbacks(detools_read_t from_read,
  *
  * @return Size of to-data in bytes or negative error code.
  */
+struct detools_validated_geometry {
+    uint32_t segment, shift, from, to, header_size;
+};
+
+#if defined(MOTA_RAK_SD_STORE)
+/* One-shot CRLE apply after the caller validates geometry and moves the base. */
+int detools_apply_validated_crle(const struct detools_validated_geometry *geometry,
+                                detools_mem_read_t mem_read,
+                                detools_mem_write_t mem_write,
+                                detools_mem_erase_t mem_erase,
+                                detools_read_t patch_read,
+                                size_t patch_size,
+                                void *arg);
+#endif
+
 int detools_apply_patch_in_place_callbacks(detools_mem_read_t mem_read,
                                            detools_mem_write_t mem_write,
                                            detools_mem_erase_t mem_erase,

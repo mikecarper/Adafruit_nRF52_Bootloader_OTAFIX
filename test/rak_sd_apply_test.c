@@ -73,6 +73,107 @@ static int committed(const uint8_t *image, uint32_t size) {
          memcmp(FLASH + MOTA_NRF52_APP_BASE, image, size) == 0;
 }
 
+#ifdef MOTA_ROLLBACK_HOST_TEST
+static bool trial_watchdog_available;
+static unsigned trial_watchdog_starts;
+
+bool otah_start_trial_watchdog(void) {
+  trial_watchdog_starts++;
+  return trial_watchdog_available;
+}
+
+static void cold_boot(void) {
+  g_gpregret = 0;
+  g_sd_source = g_sd_active = g_sd_auth_loaded = g_qspi_source = false;
+  g_cache_page = g_cache_dirty = 0;
+  rollback_armed_page = 0;
+}
+
+static bool run_rollback(const uint8_t *base, uint32_t base_len,
+                         uint8_t *next, uint32_t next_len,
+                         const uint8_t *delta, uint32_t delta_len,
+                         uint32_t medium, uint32_t page, int scenario) {
+  prepare(base, base_len);
+  const bool interrupted = scenario == 2 || scenario == 6;
+  uint32_t package_len = delta_len;
+  uint8_t *full = NULL;
+  if (scenario != 6) {
+    memcpy(next + 64, MOTA_ROLLBACK_APP_CAPABILITY, 8);
+    full = make_full_mota(next, next_len, &package_len);
+  }
+  const uint8_t *package = full ? full : delta;
+  g_gpregret2 = medium;
+  const bool sd = medium == GPREGRET2_OTA_STAGE_SD;
+  if (sd) {
+    if (!stage_external_mota(package, package_len)) abort();
+  } else {
+    stage_nor(package, package_len);
+  }
+  free(full);
+
+  mota_rollback_record_t record = {
+    .magic = MOTA_ROLLBACK_MAGIC, .media = medium,
+    .offset = sd ? 128u : 0x100000u,
+    .previous_size = base_len, .next_size = next_len, .phase = MOTA_ROLLBACK_READY,
+  };
+  uint8_t *backup = sd ? SD_CARD + record.offset * MOTA_SD_SECTOR_SIZE : QSPI_FLASH + record.offset;
+  memcpy(backup, base, base_len);
+  sha256_bytes(base, base_len, record.previous_hash);
+  sha256_bytes(next, next_len, record.next_hash);
+  record.crc32 = mota_rollback_crc(&record);
+  memcpy(FLASH + page, &record, sizeof(record));
+  const mota_rollback_record_t *saved = rollback_record_at(page);
+  trial_watchdog_available = scenario != 5;
+  trial_watchdog_starts = 0;
+
+  if (scenario == 3) backup[64] ^= 1u;
+  if (interrupted) {
+    g_fault_write_address = APP_BASE;
+    g_fault_writes_remaining = -1;
+  }
+  bool reset = ota_delta_check_and_apply();
+  if (scenario == 3) {
+    return !reset && saved->phase == MOTA_ROLLBACK_READY && g_gpregret2 == 0xADu &&
+           g_settings_writes == 0 && memcmp(FLASH + APP_BASE, base, base_len) == 0;
+  }
+  if (!reset) return false;
+  if (interrupted) {
+    if (saved->phase != MOTA_ROLLBACK_INSTALLING || g_bank0 != BANK_INVALID_APP_V) return false;
+    g_fault_writes_remaining = 0;
+  } else {
+    if (saved->phase != MOTA_ROLLBACK_TRIAL || g_bank0 != BANK_VALID_APP_V ||
+        memcmp(FLASH + APP_BASE, next, next_len) != 0) return false;
+    cold_boot();
+    if (scenario == 5) {
+      if (!ota_delta_check_and_apply()) return false;
+    } else {
+      if (!ota_rollback_pending() || ota_delta_check_and_apply() ||
+          saved->phase != MOTA_ROLLBACK_RUNNING || trial_watchdog_starts != 1) return false;
+    }
+    if (scenario == 0) {
+      // The application confirms by programming the phase word once healthy.
+      rollback_phase(page, MOTA_ROLLBACK_DONE);
+      cold_boot();
+      return !ota_rollback_pending() && !ota_delta_check_and_apply() &&
+             g_bank0 == BANK_VALID_APP_V && memcmp(FLASH + APP_BASE, next, next_len) == 0;
+    }
+  }
+  if (scenario != 5) {
+    if (scenario == 4) backup[64] ^= 1u;
+    cold_boot();
+    if (!ota_rollback_pending() || !ota_delta_check_and_apply()) return false;
+  }
+  if (scenario == 4) {
+    return saved->phase == MOTA_ROLLBACK_FAILED && g_bank0 == BANK_INVALID_APP_V &&
+           g_gpregret2 == 0xADu && !ota_rollback_pending();
+  }
+  return saved->phase == MOTA_ROLLBACK_DONE && g_bank0 == BANK_VALID_APP_V &&
+         g_gpregret2 == 0xACu && g_size == base_len &&
+         memcmp(FLASH + APP_BASE, base, base_len) == 0 &&
+         (sd ? no_nor() : g_sd_init_calls == 0 && g_qspi_source_marker == (int)medium);
+}
+#endif
+
 int main(int argc, char **argv) {
   if (argc != 2) return 2;
   int scenario = atoi(argv[1]);
@@ -187,6 +288,22 @@ int main(int argc, char **argv) {
          g_mota_rak_sd_info.storage_flags == 0x01u &&
          g_mota_rak_sd_info.stage_marker == GPREGRET2_OTA_STAGE_SD &&
          g_mota_rak_sd_info.reserved[0] == 0u && g_mota_rak_sd_info.reserved[1] == 0u;
+#ifdef MOTA_ROLLBACK_HOST_TEST
+  } else if (scenario >= 10 && scenario < 17) {
+    const uint32_t media[] = {GPREGRET2_OTA_STAGE_SD, GPREGRET2_OTA_STAGE_RAK15001,
+                              GPREGRET2_OTA_STAGE_QSPI, GPREGRET2_OTA_STAGE_HEADER_W25};
+    for (unsigned i = 0; i < sizeof(media) / sizeof(media[0]); ++i) {
+      for (unsigned expanded = 0; expanded < 2; ++expanded) {
+        uint32_t page = expanded ? MOTA_ROLLBACK_EXPANDED_PAGE : MOTA_ROLLBACK_LEGACY_PAGE;
+        rollback_armed_page = 0;
+        if (!run_rollback(base, base_len, expected, expected_len, delta, delta_len,
+                          media[i], page, scenario - 10)) {
+          printf("rollback failed: medium=0x%X page=0x%X result=0x%X\n", media[i], page, g_gpregret2);
+          ok = 0;
+        }
+      }
+    }
+#endif
   } else {
     ok = 0;
   }

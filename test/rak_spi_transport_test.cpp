@@ -78,6 +78,9 @@ extern "C" void nrf_delay_us(uint32_t) {}
 extern "C" void nrf_delay_ms(uint32_t) {}
 
 #include "ota_sd_spi.c"
+#define WDT_CONFIG_SLEEP_Msk 1u
+#define WDT_RREN_RR0_Msk 1u
+#include "watchdog.c"
 
 static uint8_t *host_dma_pointer(uint32_t address) {
   if (address == 0u) return nullptr;

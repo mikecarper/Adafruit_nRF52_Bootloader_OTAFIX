@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "crc32.h"
 
 // Application and OTAFIX share this flash record. Only the phase word changes
 // after publication, by clearing bits so the bootloader need not erase the page.
@@ -34,23 +35,17 @@ typedef char mota_rollback_record_size_must_be_92
     [(sizeof(mota_rollback_record_t) == 92u) ? 1 : -1];
 
 static inline uint32_t mota_rollback_crc(const mota_rollback_record_t* record) {
-  uint32_t crc = ~0u;
-  const uint8_t* data = (const uint8_t*) record;
-  for (size_t i = 0; i < offsetof(mota_rollback_record_t, crc32); ++i) {
-    crc ^= data[i];
-    for (unsigned bit = 0; bit != 8; ++bit) {
-      crc = (crc >> 1) ^ ((0u - (crc & 1u)) & 0xEDB88320u);
-    }
-  }
-  return ~crc;
+  return otafix_crc32_update(0, (const uint8_t*)record,
+                             offsetof(mota_rollback_record_t, crc32));
 }
 
 static inline int mota_rollback_valid(const mota_rollback_record_t* record,
                                       uint32_t base, uint32_t page) {
+  if ((page != MOTA_ROLLBACK_LEGACY_PAGE && page != MOTA_ROLLBACK_EXPANDED_PAGE) ||
+      base > page - 56u) return 0;
+  const uint32_t span = page - base - 56u;
   return record->magic == MOTA_ROLLBACK_MAGIC &&
-         (page == MOTA_ROLLBACK_LEGACY_PAGE || page == MOTA_ROLLBACK_EXPANDED_PAGE) &&
-         base < page && record->previous_size >= 56u && record->next_size >= 56u &&
-         record->previous_size <= page - base && record->next_size <= page - base &&
+         record->previous_size - 56u <= span && record->next_size - 56u <= span &&
          record->offset != 0u && record->crc32 == mota_rollback_crc(record);
 }
 

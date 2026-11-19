@@ -28,9 +28,8 @@ extern "C" {
 // Returns false if there was nothing to do, or it failed (caller continues the normal boot/DFU path).
 bool ota_delta_check_and_apply(void);
 
-// The combined RAK SD/NOR/internal image has no executable space left in the
-// deployed bootloader region. Dedicated RAK NOR profiles use the common path.
-#if defined(NRF52840_XXAA) && !defined(OTA_DELTA_HOST_TEST) && !defined(MOTA_RAK_SD_STORE) && \
+#if ((defined(NRF52840_XXAA) && !defined(OTA_DELTA_HOST_TEST)) || \
+     defined(MOTA_ROLLBACK_HOST_TEST)) && \
     (defined(MOTA_SD_CARD) || defined(MOTA_QSPI_FLASH))
 #define MOTA_ROLLBACK_ENABLED 1
 bool ota_rollback_pending(void);

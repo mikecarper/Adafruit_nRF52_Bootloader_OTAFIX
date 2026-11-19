@@ -47,7 +47,7 @@ if (MOTA_RAK_SD_STORE AND BOARD STREQUAL "wiscore_rak4631_auto")
     -fno-if-conversion
     -mbranch-cost=3
     -fno-tree-loop-im
-    -fno-early-inlining
+    -fearly-inlining
     -fno-move-loop-invariants)
 endif ()
 
