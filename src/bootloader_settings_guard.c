@@ -10,6 +10,16 @@ bool bootloader_settings_is_legacy(bootloader_settings_t const* settings) {
          settings->record_crc_inv == UINT16_MAX;
 }
 
+bool bootloader_settings_is_erased(bootloader_settings_t const* settings) {
+  const uint8_t *record = (const uint8_t *)settings;
+  for (size_t offset = 0; offset < sizeof(*settings); ++offset) {
+    if (record[offset] != UINT8_MAX) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool bootloader_settings_integrity_valid(bootloader_settings_t const* settings) {
   if (settings == NULL) {
     return false;

@@ -118,6 +118,69 @@ int main(void) {
                            input=harness, text=True, check=True)
             subprocess.run([str(binary)], check=True)
 
+
+    def test_rak_ble_arms_and_releases_only_a_bootloader_owned_watchdog(self):
+        source = (ROOT / "src/main.c").read_text()
+        begin = source.index("      // Keep the retry state and watchdog ownership")
+        entry = source[begin:source.index("#else", begin)]
+        header = r'''
+#include <assert.h>
+#include <setjmp.h>
+#include <stdint.h>
+#define MOTA_RAK_SD_STORE 1
+#include "dfu_entry.h"
+#define WDT_CONFIG_SLEEP_Msk 1u
+#define WDT_RREN_RR0_Msk 1u
+static struct { uint32_t GPREGRET; } power;
+static struct { uint32_t RUNSTATUS, CONFIG, CRV, RREN, TASKS_START; } watchdog;
+#define NRF_POWER (&power)
+#define NRF_WDT (&watchdog)
+static jmp_buf waiting_for_watchdog;
+#define __WFE() longjmp(waiting_for_watchdog, 1)
+'''
+        release = function(source, "static void ble_watchdog_release(void)")
+        cases = r'''
+int main(void) {
+  power.GPREGRET = 0;
+  enter_ble(power.GPREGRET, false);
+  assert(power.GPREGRET == (DFU_MAGIC_OTA_RESET | DFU_MAGIC_OTA_WDT));
+  assert(watchdog.CONFIG == 1 && watchdog.CRV == 15 * 32768 &&
+         watchdog.RREN == 1 && watchdog.TASKS_START == 1);
+  watchdog.RUNSTATUS = 1;
+  if (setjmp(waiting_for_watchdog) == 0) {
+    ble_watchdog_release();
+    assert(!"a bootloader-owned watchdog must expire before handoff");
+  }
+  assert(power.GPREGRET == 0);
+
+  power.GPREGRET = DFU_MAGIC_OTA_RETRY;
+  watchdog.CRV = 60 * 32768; watchdog.RREN = 0x40; watchdog.TASKS_START = 0;
+  enter_ble(power.GPREGRET, false);
+  assert(power.GPREGRET == DFU_MAGIC_OTA_RETRY);
+  assert(watchdog.CRV == 60 * 32768 && watchdog.RREN == 0x40 && watchdog.TASKS_START == 0);
+  if (setjmp(waiting_for_watchdog) != 0) assert(false);
+  ble_watchdog_release();
+  assert(power.GPREGRET == 0 && watchdog.RUNSTATUS == 1);
+
+  power.GPREGRET = DFU_MAGIC_OTA_USB | DFU_MAGIC_OTA_WDT;
+  enter_ble(power.GPREGRET, true);
+  assert(power.GPREGRET == (DFU_MAGIC_OTA_RETRY | DFU_MAGIC_OTA_WDT));
+  watchdog.RUNSTATUS = 0;
+  ble_watchdog_release();
+  assert(power.GPREGRET == 0);
+  power.GPREGRET = 0x6B; /* Existing mOTA bootloader apply request. */
+  ble_watchdog_release();
+  assert(power.GPREGRET == 0x6B);
+}
+'''
+        harness = header + release + "\nstatic void enter_ble(uint32_t gpregret, bool ble_usb) {\n" + entry + "}\n" + cases
+        with tempfile.TemporaryDirectory(prefix="otafix-owned-watchdog-") as directory:
+            binary = Path(directory) / ("watchdog.exe" if os.name == "nt" else "watchdog")
+            subprocess.run([os.environ.get("CC", "gcc"), "-std=c11", "-O2", "-Wall", "-Wextra",
+                            "-Werror", "-I" + str(ROOT / "src"), "-x", "c", "-", "-o", str(binary)],
+                           input=harness, text=True, check=True)
+            subprocess.run([str(binary)], check=True)
+
     def test_hint_is_owned_by_ble_and_cleared_only_after_settings_commit(self):
         source = (CORE / "bootloader.c").read_text()
         types = (CORE / "dfu_types.h").read_text()
@@ -219,6 +282,8 @@ int main(void) {
       assert(power.GPREGRET == expected && clears == 0);
     }
   }
+  const unsigned late[] = {DFU_TIMEOUT, DFU_BANK_0_ERASED, DFU_UPDATE_APP_COMPLETE,
+    DFU_UPDATE_SD_COMPLETE, DFU_UPDATE_BOOT_COMPLETE, DFU_UPDATE_SD_SWAPPED, DFU_RESET};
   const unsigned complete[] = {DFU_UPDATE_APP_COMPLETE, DFU_UPDATE_SD_COMPLETE,
                                DFU_UPDATE_BOOT_COMPLETE, DFU_UPDATE_SD_SWAPPED};
   for (unsigned use_ota = 0; use_ota != 2; ++use_ota) {
@@ -248,6 +313,16 @@ int main(void) {
         callback(PSTORAGE_STORE_OP_CODE);
         assert(m_settings_store_pending == 1 && power.GPREGRET == magics[i]);
         assert(m_update_status == saving && !bootloader_dfu_app_update_complete());
+        /* Events already in the scheduler must not abort or replace an accepted commit. */
+        bootloader_settings_t const in_flight = saved;
+        for (unsigned event = 0; event < sizeof(late) / sizeof(late[0]); ++event) {
+          bootloader_dfu_update_process(&(dfu_update_status_t){.status_code = late[event],
+                                                             .restart_into_bootloader = true});
+          assert(m_update_status == saving && m_settings_store_pending == 1 && saves == 1);
+          assert(memcmp(&saved, &in_flight, sizeof(saved)) == 0 && power.GPREGRET == magics[i]);
+        }
+        bootloader_dfu_restart();
+        assert(m_update_status == saving && m_settings_store_pending == 1);
         callback(PSTORAGE_STORE_OP_CODE);
         assert(m_update_status == (app_update ? BOOTLOADER_APP_COMPLETE : BOOTLOADER_COMPLETE));
         assert(bootloader_dfu_app_update_complete() == app_update);
@@ -257,7 +332,10 @@ int main(void) {
         /* A repeated completion callback cannot clear a later unrelated request. */
         power.GPREGRET = 0xD1;
         callback(PSTORAGE_STORE_OP_CODE);
-        assert(power.GPREGRET == 0xD1);
+        bootloader_dfu_update_process(&(dfu_update_status_t){.status_code = DFU_TIMEOUT});
+        bootloader_dfu_restart();
+        assert(m_update_status == (app_update ? BOOTLOADER_APP_COMPLETE : BOOTLOADER_COMPLETE));
+        assert(power.GPREGRET == 0xD1 && saves == 1);
       }
     }
   }
@@ -287,12 +365,12 @@ int main(void) {
     }
   }
   /* A recovery reset stays authoritative while older scheduled work drains. */
-  for (unsigned route = 0; route != 8; ++route) {
+  for (unsigned route = 0; route != 4; ++route) {
     const bool direct = (route & 2U) != 0;
     const bool use_ota = (route & 1U) != 0;
     for (unsigned i = 0; i != sizeof(magics) / sizeof(magics[0]); ++i) {
       reset_case(use_ota != 0, magics[i]);
-      m_update_status = route & 4U ? BOOTLOADER_APP_SETTINGS_SAVING : BOOTLOADER_SETTINGS_SAVING;
+      /* First-page erase invalidation may have pending stores during the download. */
       m_settings_store_pending = 2;
       if (direct) {
         bootloader_dfu_restart();
@@ -306,8 +384,6 @@ int main(void) {
       const unsigned prior_gets = gets;
       callback(PSTORAGE_STORE_OP_CODE); callback(PSTORAGE_STORE_OP_CODE);
       assert(m_settings_store_pending == 2 && m_update_status == BOOTLOADER_RESET_TO_SELF);
-      const unsigned late[] = {DFU_TIMEOUT, DFU_BANK_0_ERASED, DFU_UPDATE_APP_COMPLETE,
-        DFU_UPDATE_SD_COMPLETE, DFU_UPDATE_BOOT_COMPLETE, DFU_UPDATE_SD_SWAPPED, DFU_RESET};
       for (unsigned event = 0; event != sizeof(late) / sizeof(late[0]); ++event) {
         bootloader_dfu_update_process(&(dfu_update_status_t){.status_code = late[event]});
         assert(m_update_status == BOOTLOADER_RESET_TO_SELF);

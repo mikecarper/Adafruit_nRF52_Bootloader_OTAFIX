@@ -39,7 +39,9 @@ class T1000ButtonTests(unittest.TestCase):
 #if defined(REQUIRE_SINGLE_BUTTON) && defined(BUTTON_DFU_OTA)
 #error "P0.18 is RESET, not a second T1000 user button"
 #endif
+#if !defined(MOTA_ROLLBACK_ENABLED) && !defined(MOTA_RAK_SD_STORE)
 #define DEFAULT_TO_OTA_DFU 1
+#endif
 #define POWER_RESETREAS_RESETPIN_Msk 1u
 #define APP_ASKS_FOR_SINGLE_TAP_RESET() (single_tap)
 static struct { uint32_t GPREGRET, RESETREAS; } power;
@@ -47,6 +49,16 @@ static struct { uint32_t GPREGRET, RESETREAS; } power;
 static uint32_t dbl_reset_word;
 static uint32_t *dbl_reset_mem = &dbl_reset_word;
 static bool _ota_dfu, _sd_inited, single_tap, host_mounts = true;
+static bool application_valid = true, rollback_pending;
+#if defined(MOTA_ROLLBACK_ENABLED)
+static bool ota_rollback_pending(void) { return rollback_pending && power.GPREGRET == 0; }
+#endif
+#if defined(MOTA_RAK_SD_STORE)
+static struct { uint32_t RUNSTATUS, CONFIG, CRV, RREN, TASKS_START; } watchdog;
+#define NRF_WDT (&watchdog)
+#define WDT_CONFIG_SLEEP_Msk 1u
+#define WDT_RREN_RR0_Msk 1u
+#endif
 static uint32_t now_ms, held_until, gpio_reads, usb_calls, ble_calls, dfu_calls;
 static uint32_t primary_reads, secondary_reads;
 static uint32_t last_timeout;
@@ -73,7 +85,7 @@ static uint32_t nrf_gpio_pin_read(uint32_t pin) {
 }
 static void delay_ms(uint32_t milliseconds) { now_ms += milliseconds; }
 #define NRFX_DELAY_MS(x) delay_ms(x)
-static bool bootloader_app_is_valid(void) { return true; }
+static bool bootloader_app_is_valid(void) { return application_valid; }
 static void disable_softdevice(void) { _sd_inited = false; }
 static void mbr_init_sd(void) {}
 static void led_state(int state) { (void)state; }
@@ -93,7 +105,7 @@ static void bootloader_dfu_start(bool ota, uint32_t timeout, bool cancel) {
         harness += function(main, "static void check_dfu_mode(void) {") + "\n"
         harness += r'''
 int main(int argc, char **argv) {
-  if (argc != 9) return 2;
+  if (argc != 12) return 2;
   held_until = strtoul(argv[1], NULL, 0);
   power.GPREGRET = strtoul(argv[2], NULL, 0);
   host_mounts = atoi(argv[3]);
@@ -101,6 +113,9 @@ int main(int argc, char **argv) {
   single_tap = atoi(argv[5]);
   second_held = atoi(argv[7]);
   repress_after_release = atoi(argv[8]);
+  application_valid = atoi(argv[9]);
+  rollback_pending = atoi(argv[10]);
+  if (atoi(argv[11])) power.RESETREAS = POWER_RESETREAS_RESETPIN_Msk;
   if (atoi(argv[6])) {
     dbl_reset_word = DFU_DBL_RESET_MAGIC;
     power.RESETREAS = POWER_RESETREAS_RESETPIN_Msk;
@@ -109,22 +124,29 @@ int main(int argc, char **argv) {
   printf("{\"elapsed_ms\":%u,\"usb_calls\":%u,\"ble_calls\":%u,"
          "\"dfu_calls\":%u,\"ota\":%u,\"timeout_ms\":%u,\"cancel\":%u,"
          "\"gpio_reads\":%u,\"pull\":%u,\"button\":%u,"
-         "\"primary_reads\":%u,\"secondary_reads\":%u}\n",
+         "\"primary_reads\":%u,\"secondary_reads\":%u,"
+         "\"recovery_magic\":%u}\n",
          now_ms, usb_calls, ble_calls, dfu_calls, last_ota, last_timeout,
          last_cancel, gpio_reads, BUTTON_PULL, BUTTON_DFU,
-         primary_reads, secondary_reads);
+         primary_reads, secondary_reads, power.GPREGRET);
   return 0;
 }
 '''
-        for board in ("t1000_e", "pca10056", "wismesh_tag", "meshtracker_x1"):
-            binary = Path(cls.temp.name) / board
-            flags = ["-DREQUIRE_SINGLE_BUTTON=1"] if board == "t1000_e" else []
+        profiles = {
+            "t1000_e": ("t1000_e", ["-DREQUIRE_SINGLE_BUTTON=1"]),
+            "pca10056": ("pca10056", ["-DMOTA_ROLLBACK_ENABLED=1"]),
+            "wismesh_tag": ("wismesh_tag", []),
+            "meshtracker_x1": ("meshtracker_x1", []),
+            "rak_recovery": ("pca10056", ["-DMOTA_RAK_SD_STORE=1"]),
+        }
+        for name, (board, flags) in profiles.items():
+            binary = Path(cls.temp.name) / name
             subprocess.run(["cc", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
                             *flags, f'-DBOARD_HEADER="boards/{board}/board.h"',
                             "-x", "c", "-", "-I", str(ROOT / "src"),
                             "-o", str(binary)], input=harness, text=True,
                            check=True, capture_output=True)
-            cls.binaries[board] = binary
+            cls.binaries[name] = binary
 
     @classmethod
     def tearDownClass(cls):
@@ -132,11 +154,14 @@ int main(int argc, char **argv) {
 
     def run_entry(self, held_ms=0, magic=0, host=True, release=False,
                   single_tap=False, double_reset=False, second_held=False,
-                  board="t1000_e", repress=False):
+                  board="t1000_e", repress=False, valid_app=True, rollback=False,
+                  pin_reset=False):
         output = subprocess.check_output([str(self.binaries[board]), str(held_ms), str(magic),
                                           str(int(host)), str(int(release)),
                                           str(int(single_tap)), str(int(double_reset)),
-                                          str(int(second_held)), str(int(repress))])
+                                          str(int(second_held)), str(int(repress)),
+                                          str(int(valid_app)), str(int(rollback)),
+                                          str(int(pin_reset))])
         return json.loads(output)
 
     def test_electrical_contract_and_idle_boot(self):
@@ -245,6 +270,33 @@ int main(int argc, char **argv) {
     def test_held_button_overrides_brief_makecode_timeout(self):
         state = self.run_entry(10000, single_tap=True)
         self.assertEqual((state["usb_calls"], state["ota"], state["timeout_ms"]), (1, 0, 0))
+
+    def test_rollback_keeps_manual_recovery_and_first_reset_window(self):
+        options = dict(board="pca10056", valid_app=False, rollback=True)
+        idle = self.run_entry(**options)
+        self.assertEqual(idle["dfu_calls"], 0)
+        self.assertEqual(self.run_entry(single_tap=True, **options)["dfu_calls"], 0)
+        self.assertEqual(self.run_entry(single_tap=True, pin_reset=True, **options)["dfu_calls"], 1)
+        first = self.run_entry(pin_reset=True, **options)
+        self.assertEqual((first["elapsed_ms"], first["dfu_calls"]), (500, 0))
+        second = self.run_entry(double_reset=True, **options)
+        self.assertEqual((second["usb_calls"], second["dfu_calls"], second["ota"]), (1, 1, 0))
+        button = self.run_entry(10000, host=False, **options)
+        self.assertEqual((button["ble_calls"], button["dfu_calls"], button["ota"]), (1, 1, 1))
+        for magic, ota in ((0x4e, 0), (0x57, 0), (0xa8, 1)):
+            state = self.run_entry(magic=magic, **options)
+            self.assertEqual((state["dfu_calls"], state["ota"]), (1, ota))
+
+    def test_rak_failed_ble_recovery_still_reaches_headless_radios(self):
+        options = dict(board="rak_recovery", valid_app=False, magic=0xaa)
+        usb = self.run_entry(**options)
+        self.assertEqual((usb["usb_calls"], usb["ble_calls"], usb["ota"], usb["cancel"]),
+                         (1, 0, 0, 1))
+        ble = self.run_entry(host=False, **options)
+        self.assertEqual((ble["usb_calls"], ble["ble_calls"], ble["ota"], ble["recovery_magic"]),
+                         (1, 1, 1, 0xad))
+        manual = self.run_entry(board="rak_recovery", magic=0xaa, double_reset=True)
+        self.assertEqual((manual["usb_calls"], manual["ble_calls"], manual["ota"]), (1, 0, 0))
 
 
 if __name__ == "__main__":

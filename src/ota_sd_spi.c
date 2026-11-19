@@ -32,12 +32,6 @@ static bool g_spi_ok;
 #define g_io_ok g_spi_ok
 #define spi_byte ota_rak_spi_byte
 
-void ota_rak_spi_watchdog(void) {
-  static uint16_t external_feed_divider;
-  otafix_watchdog_feed();
-  if ((external_feed_divider++ & 0x0FFFu) == 0) board_watchdog_feed();
-}
-
 void ota_rak_spi_set_frequency(uint32_t frequency) {
   MOTA_SD_SPIM->ENABLE = SPIM_ENABLE_ENABLE_Disabled;
   MOTA_SD_SPIM->FREQUENCY = frequency;
@@ -96,7 +90,7 @@ __attribute__((noinline, noclone)) bool ota_rak_spi_transfer(const void *tx, voi
   uint8_t *output = rx;
   while (length != 0u) {
     const uint32_t count = length > 255u ? 255u : length;
-    ota_rak_spi_watchdog();
+    otafix_watchdog_feed();
     MOTA_SD_SPIM->TXD.PTR = (uint32_t)(uintptr_t)input;
     MOTA_SD_SPIM->TXD.MAXCNT = input ? count : 0;
     MOTA_SD_SPIM->RXD.PTR = (uint32_t)(uintptr_t)output;
@@ -106,7 +100,7 @@ __attribute__((noinline, noclone)) bool ota_rak_spi_transfer(const void *tx, voi
     MOTA_SD_SPIM->TASKS_START = 1;
     uint32_t spins = MOTA_SD_SPI_WAIT_SPINS;
     while (!MOTA_SD_SPIM->EVENTS_END && spins-- != 0u) {
-      if ((spins & 0x3FFu) == 0u) ota_rak_spi_watchdog();
+      if ((spins & 0x3FFu) == 0u) otafix_watchdog_feed();
     }
     if (!MOTA_SD_SPIM->EVENTS_END) {
       MOTA_SD_SPIM->TASKS_STOP = 1;

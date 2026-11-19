@@ -19,7 +19,7 @@ set(MOTA_ARM_GCC_MINIMUM "14.2")
 set(MOTA_RAK_SD_SIZE_OPTIONS)
 set(MOTA_MANUAL_DFU_SIZE_OPTIONS)
 if (BOARD STREQUAL "heltec_t096" OR BOARD STREQUAL "heltec_t114" OR
-    BOARD STREQUAL "heltec_mesh_tower_v2_sdcard")
+    BOARD STREQUAL "heltec_mesh_tower_v2_sdcard" OR BOARD STREQUAL "wiscore_rak3401_auto")
   # Qualified with Arm GNU 15.3: keep manual-update compatibility checks and
   # every transport/display path within the unchanged executable envelope.
   set(MOTA_MANUAL_DFU_SIZE_OPTIONS
@@ -27,6 +27,10 @@ if (BOARD STREQUAL "heltec_t096" OR BOARD STREQUAL "heltec_t114" OR
     -fno-optimize-sibling-calls
     -fno-tree-loop-im
     -fno-tree-ter)
+endif ()
+if (BOARD STREQUAL "heltec_mesh_tower_v2_sdcard" OR BOARD STREQUAL "wiscore_rak3401_auto")
+  list(APPEND MOTA_MANUAL_DFU_SIZE_OPTIONS
+    -fno-code-hoisting -fno-tree-dominator-opts -fno-tree-tail-merge)
 endif ()
 if (MOTA_RAK_SD_STORE AND BOARD STREQUAL "wiscore_rak4631_auto")
   set(MOTA_ARM_GCC_MINIMUM "15.3")

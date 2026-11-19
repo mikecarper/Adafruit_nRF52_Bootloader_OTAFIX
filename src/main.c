@@ -148,8 +148,24 @@ bool is_ota(void) {
   return _ota_dfu;
 }
 
-static void check_dfu_mode(void);
-static uint32_t ble_stack_init(void);
+static void __attribute__((noinline)) check_dfu_mode(void);
+
+#if defined(MOTA_RAK_SD_STORE)
+static void ble_watchdog_release(void) {
+  uint32_t const magic = NRF_POWER->GPREGRET;
+  if (dfu_ble_recovery_magic(magic)) {
+    NRF_POWER->GPREGRET = 0;
+    if ((magic & DFU_MAGIC_OTA_WDT) && NRF_WDT->RUNSTATUS) {
+      // A software reset would pass our watchdog into older applications.
+      // Let the watchdog reset clear it before handing off.
+      for (;;) {
+        __WFE();
+      }
+    }
+  }
+}
+#endif
+static uint32_t __attribute__((noinline)) ble_stack_init(void);
 
 // The SoftDevice must only be initialized if a chip reset has occurred.
 // Soft reset (jump ) from application must not reinitialize the SoftDevice.
@@ -200,6 +216,9 @@ int main(void) {
 
   // When updating SoftDevice, bootloader will reset before swapping SD
   if (bootloader_dfu_sd_in_progress()) {
+#if defined(MOTA_RAK_SD_STORE)
+    ble_watchdog_release();
+#endif
     led_state(STATE_WRITING_STARTED);
 
     bootloader_dfu_sd_update_continue();
@@ -235,6 +254,12 @@ int main(void) {
   board_teardown();
 
   if (reset_after_app_update) {
+#if defined(MOTA_ROLLBACK_ENABLED)
+    ota_rollback_cancel();
+#endif
+#if defined(MOTA_RAK_SD_STORE)
+    ble_watchdog_release();
+#endif
     otafix_system_reset();
   }
 
@@ -268,10 +293,14 @@ int main(void) {
     // clear in case we kept DFU_DBL_RESET_APP there
     (*dbl_reset_mem) = 0;
 
+#if defined(MOTA_RAK_SD_STORE)
+    ble_watchdog_release();
+#else
     // A finished recovery must not request DFU again after the app starts.
     if (NRF_POWER->GPREGRET == DFU_MAGIC_OTA_RESET) {
       NRF_POWER->GPREGRET = 0;
     }
+#endif
 
     // start application
     PRINTF("Starting app...\r\n");
@@ -282,25 +311,37 @@ int main(void) {
 
   // Reset the system with the OTA DFU update in case we were in it,
   // to allow completion of FLASHING, otherwise, default to normal reset
+#if !defined(MOTA_RAK_SD_STORE)
   if (_ota_was_connected) {
     NRF_POWER->GPREGRET = DFU_MAGIC_OTA_RESET;
   }
+#endif
 
   otafix_system_reset();
 }
 
 static void check_dfu_mode(void) {
   uint32_t const gpregret = NRF_POWER->GPREGRET;
-
-  // SD is already Initialized in case of BOOTLOADER_DFU_OTA_MAGIC
-  _sd_inited = (gpregret == DFU_MAGIC_OTA_APPJUM);
+  bool const valid_app = bootloader_app_is_valid();
 
   // Start Bootloader in BLE OTA mode
+#if defined(MOTA_RAK_SD_STORE)
+  // main() has already converted any legacy direct jump to a hardware reset.
+  uint32_t const ble_mode = gpregret & ~DFU_MAGIC_OTA_WDT;
+  bool const ble_usb = ble_mode == DFU_MAGIC_OTA_USB && !valid_app;
+  _ota_dfu = (ble_mode & ~1u) == DFU_MAGIC_OTA_RESET;
+#else
+  _sd_inited = gpregret == DFU_MAGIC_OTA_APPJUM;
   _ota_dfu = (gpregret == DFU_MAGIC_OTA_APPJUM) || (gpregret == DFU_MAGIC_OTA_RESET);
+#endif
 
   // Serial only mode
   bool const serial_only_dfu = (gpregret == DFU_MAGIC_SERIAL_ONLY_RESET);
-  bool const uf2_dfu         = (gpregret == DFU_MAGIC_UF2_RESET);
+  bool const uf2_dfu         = (gpregret == DFU_MAGIC_UF2_RESET)
+#if defined(MOTA_RAK_SD_STORE)
+                               || ble_usb
+#endif
+  ;
   bool const dfu_skip        = (gpregret == DFU_MAGIC_SKIP);
 
   bool const reason_reset_pin = (NRF_POWER->RESETREAS & POWER_RESETREAS_RESETPIN_Msk) ? true : false;
@@ -311,7 +352,11 @@ static void check_dfu_mode(void) {
                    (((*dbl_reset_mem) == DFU_DBL_RESET_MAGIC) && reason_reset_pin);
 
   // Clear GPREGRET if it is our values
-  if (dfu_start || dfu_skip) {
+  if ((dfu_start || dfu_skip)
+#if defined(MOTA_RAK_SD_STORE)
+      && !dfu_ble_recovery_magic(gpregret)
+#endif
+  ) {
     NRF_POWER->GPREGRET = 0;
   }
 
@@ -382,11 +427,18 @@ static void check_dfu_mode(void) {
   _ota_dfu = _ota_dfu || (button_pressed(BUTTON_DFU) && button_pressed(BUTTON_DFU_OTA));
 #endif
 
-  bool const valid_app = bootloader_app_is_valid();
   bool const just_start_app = valid_app && !dfu_start && (*dbl_reset_mem) == DFU_DBL_RESET_APP;
   bool const app_single_tap = APP_ASKS_FOR_SINGLE_TAP_RESET();
 
-  if (!just_start_app && app_single_tap) {
+#if defined(MOTA_ROLLBACK_ENABLED)
+  // Manual transport requests, buttons and reset taps take precedence.
+  // A pending rollback supersedes only the automatic DFU fallback.
+  bool const rollback_first = !dfu_start && !(reason_reset_pin && app_single_tap) &&
+                              ota_rollback_pending();
+#else
+  bool const rollback_first = false;
+#endif
+  if (!rollback_first && !just_start_app && app_single_tap) {
     dfu_start = 1;
   }
 
@@ -401,7 +453,7 @@ static void check_dfu_mode(void) {
 #endif
 
   // App mode: Double Reset detection or DFU startup for nrf52832
-  if (!(just_start_app || dfu_start)) { // removed !valid_app check to allow double reset even when no app
+  if (rollback_first || !(just_start_app || dfu_start)) { // Allow double reset even when no app.
 #ifdef NRF52832_XXAA
     /* Even DFU is not active, we still force an 1000 ms dfu serial mode when startup
      * to support auto programming from Arduino IDE
@@ -419,6 +471,11 @@ static void check_dfu_mode(void) {
 #endif
   }
 
+  if (rollback_first) {
+    (*dbl_reset_mem) = 0;
+    return;
+  }
+
   if (app_single_tap) {
     (*dbl_reset_mem) = DFU_DBL_RESET_APP;
   } else {
@@ -427,7 +484,12 @@ static void check_dfu_mode(void) {
 
   // With no application and no explicitly requested transport, briefly offer
   // USB first. If an active host does not enumerate us, fall back to BLE OTA.
-  bool probe_usb = !valid_app && !_ota_dfu && !serial_only_dfu && !uf2_dfu && !double_reset;
+  bool probe_usb = !double_reset &&
+#if defined(MOTA_RAK_SD_STORE)
+                   (ble_usb || (!valid_app && !_ota_dfu && !serial_only_dfu && !uf2_dfu));
+#else
+                   !valid_app && !_ota_dfu && !serial_only_dfu && !uf2_dfu;
+#endif
 
   if ((dfu_start || !valid_app) && !serial_only_dfu && !uf2_dfu && !double_reset && !probe_usb) {
     _ota_dfu = true; // set default to OTA only when no explicit UF2/serial/dbl-reset
@@ -481,10 +543,26 @@ static void check_dfu_mode(void) {
         screen_draw_ble();
       #endif
       led_state(STATE_BLE_DISCONNECTED);
+#if defined(MOTA_RAK_SD_STORE)
+      // Keep the retry state and watchdog ownership across software resets.
+      if (ble_usb) {
+        NRF_POWER->GPREGRET = DFU_MAGIC_OTA_RETRY | (gpregret & DFU_MAGIC_OTA_WDT);
+      } else if (!dfu_ble_recovery_magic(gpregret)) {
+        NRF_POWER->GPREGRET = DFU_MAGIC_OTA_RESET;
+      }
+      if (!NRF_WDT->RUNSTATUS) {
+        NRF_POWER->GPREGRET |= DFU_MAGIC_OTA_WDT;
+        NRF_WDT->CONFIG = WDT_CONFIG_SLEEP_Msk;
+        NRF_WDT->CRV = 15 * 32768;
+        NRF_WDT->RREN = WDT_RREN_RR0_Msk;
+        NRF_WDT->TASKS_START = 1;
+      }
+#else
       // Preserve BLE recovery through pin/watchdog resets while no app exists.
       if (!valid_app && NRF_POWER->GPREGRET == 0) {
         NRF_POWER->GPREGRET = DFU_MAGIC_OTA_RESET;
       }
+#endif
       if (!_sd_inited) mbr_init_sd();
       _sd_inited = true;
       ble_stack_init();
@@ -494,7 +572,11 @@ static void check_dfu_mode(void) {
     }
 
     // Initiate an update of the firmware.
-    if ((app_single_tap || uf2_dfu || serial_only_dfu) && !single_button_probe) {
+    if ((app_single_tap || uf2_dfu || serial_only_dfu) && !single_button_probe
+#if defined(MOTA_RAK_SD_STORE)
+        && !ble_usb
+#endif
+    ) {
       // Explicit 0x4E/0x57 entry gets the complete host-enumeration window;
       // MakeCode-style single-tap entry intentionally remains brief.
       uint32_t const timeout_ms = dfu_buttonless_timeout_ms(serial_only_dfu, uf2_dfu);

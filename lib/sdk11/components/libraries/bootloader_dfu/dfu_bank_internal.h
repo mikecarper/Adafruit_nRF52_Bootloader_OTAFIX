@@ -37,7 +37,8 @@ typedef enum
     DFU_STATE_RX_INIT_PKT,                                                          /**< State for: receiving initialization packet. */
     DFU_STATE_RX_DATA_PKT,                                                          /**< State for: receiving data packet. */
     DFU_STATE_VALIDATE,                                                             /**< State for: validate. */
-    DFU_STATE_WAIT_4_ACTIVATE                                                       /**< State for: waiting for dfu_image_activate(). */
+    DFU_STATE_WAIT_4_ACTIVATE,                                                      /**< State for: waiting for dfu_image_activate(). */
+    DFU_STATE_ACTIVATING                                                           /**< State for: activation has already been dispatched. */
 } dfu_state_t;
 
 #define DFU_TIMEOUT_INTERVAL        APP_TIMER_TICKS(360000)                         /**< DFU timeout interval in milliseconds. */

@@ -1440,15 +1440,12 @@ uint32_t dfu_transport_ble_close()
     {
         // Disconnect from peer.
         err_code = sd_ble_gap_disconnect(m_conn_handle, BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
-#ifdef SECURE_DFU_TEST
-        // A final receipt can complete just before the peer disconnects. Do
-        // not reset before saving the validated image's activation settings.
-        if (err_code == BLE_ERROR_INVALID_CONN_HANDLE || err_code == NRF_ERROR_INVALID_STATE)
+        // The peer may already be gone while its disconnect event is queued.
+        // Closing an already closed link must allow image activation to finish.
+        if (err_code != BLE_ERROR_INVALID_CONN_HANDLE && err_code != NRF_ERROR_INVALID_STATE)
         {
-            err_code = NRF_SUCCESS;
+            APP_ERROR_CHECK(err_code);
         }
-#endif
-        APP_ERROR_CHECK(err_code);
     }
     else
     {

@@ -106,6 +106,7 @@ add_executable(bootloader
   src/dfu_image_policy.c
   src/bootloader_settings_guard.c
   src/flash_nrf5x.c
+  src/watchdog.c
   src/main.c
   src/screen.c
   src/images.c

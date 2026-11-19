@@ -1,6 +1,6 @@
 #include "crc32.h"
 #include "sha256.h"
-#include "watchdog.h"
+#include "../src/watchdog.c"
 #include <string.h>
 
 test_wdt_t test_wdt;

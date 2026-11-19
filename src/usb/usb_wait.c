@@ -36,7 +36,7 @@ extern void usb_wait_delay_ms(uint32_t delay_ms);
 
 #include "nrfx.h"
 #include "nrf_usbd.h"
-#include "nrf_wdt.h"
+#include "watchdog.h"
 #include "tusb.h"
 
 static bool usb_wait_vbus_present(void) {
@@ -51,15 +51,7 @@ static bool usb_wait_mounted(void) {
   return tud_mounted();
 }
 
-static void usb_wait_feed_watchdog(void) {
-  // WDT configuration survives a reset, so keep feeding a watchdog that was
-  // started by the previous application while waiting for USB enumeration.
-  if (nrf_wdt_started(NRF_WDT)) {
-    for (uint8_t i = 0; i < 8; i++) {
-      nrf_wdt_reload_request_set(NRF_WDT, i);
-    }
-  }
-}
+#define usb_wait_feed_watchdog otafix_watchdog_feed
 
 static void usb_wait_delay_ms(uint32_t delay_ms) {
   NRFX_DELAY_MS(delay_ms);

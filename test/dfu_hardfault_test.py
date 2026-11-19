@@ -29,7 +29,7 @@ class DfuHardFaultTest(unittest.TestCase):
             if os.environ.get("OTAFIX_REQUIRE_DFU_EMULATOR") == "1":
                 raise AssertionError("Arm compiler is required for the HardFault recovery regression")
             raise unittest.SkipTest("Arm compiler unavailable")
-        cls.prefix = cls.gcc.removesuffix("gcc")
+        cls.prefix = str(Path(cls.gcc).with_suffix("")).removesuffix("gcc")
         cls.directory = tempfile.TemporaryDirectory(prefix="otafix-dfu-hardfault-")
         cls.work = Path(cls.directory.name)
         linker = cls.work / "test.ld"
@@ -57,13 +57,15 @@ main: b .
         cls.images = {}
         for variant, macro in (("nrf52", "NRF52832_XXAA"),
                                ("nrf52833", "NRF52833_XXAA"),
-                               ("nrf52840", "NRF52840_XXAA")):
+                               ("nrf52840", "NRF52840_XXAA"),
+                               ("rak4631", "NRF52840_XXAA")):
             elf = cls.work / (variant + ".elf")
-            startup = (ROOT / "src/startup_nrf52840.S" if variant == "nrf52840"
+            startup = (ROOT / "src/startup_nrf52840.S" if macro == "NRF52840_XXAA"
                        else SDK / ("gcc_startup_" + variant + ".S"))
             subprocess.run([
                 cls.gcc, "-mcpu=cortex-m4", "-mthumb", "-Oz", "-nostdlib",
                 "-ffunction-sections", "-fdata-sections", "-D" + macro,
+                *(["-DMOTA_RAK_SD_STORE=1"] if variant == "rak4631" else []),
                 "-D__START=main", "-D__STARTUP_CLEAR_BSS", "-D__HEAP_SIZE=0",
                 "-DCONFIG_GPIO_AS_PINRESET", "-DCONFIG_NFCT_PINS_AS_GPIOS",
                 "-I" + str(SDK), "-I" + str(ROOT / "src/cmsis/include"),
@@ -116,7 +118,7 @@ main: b .
         _, symbols, binary = self.images[variant]
         machine = unicorn.Uc(unicorn.UC_ARCH_ARM, unicorn.UC_MODE_THUMB | unicorn.UC_MODE_MCLASS)
         machine.mem_map(0xF4000, 0xA000)
-        ram_size = 0x40000 if variant == "nrf52840" else 0x20000
+        ram_size = 0x40000 if variant in ("nrf52840", "rak4631") else 0x20000
         machine.mem_map(0x20000000, ram_size)
         machine.mem_map(0x40000000, 0x1000)
         machine.mem_map(0xE000E000, 0x1000)
@@ -154,11 +156,28 @@ main: b .
 
     def test_other_faults_halt_without_touching_retained_state_or_requesting_reset(self):
         for variant in self.images:
-            for magic in (0, 0xA8, 0x57, 0x6A, 0x6B, 0xFF):
+            markers = (0, 0x57, 0x6A, 0x6B, 0xFF) if variant == "rak4631" else (0, 0xA8, 0x57, 0x6A, 0x6B, 0xFF)
+            for magic in markers:
                 with self.subTest(variant=variant, magic=magic):
                     machine, writes = self.emulate(variant, magic)
                     self.assertEqual(writes, [])
                     self.assertEqual(struct.unpack("<I", machine.mem_read(0x4000051C, 4))[0], magic)
+
+    def test_rak4631_fault_uses_one_ble_retry_then_usb_recovery(self):
+        for phase in (0xA8, 0xA9):
+            for owned in (0, 4):
+                magic = phase | owned
+                with self.subTest(magic=magic):
+                    _, writes = self.emulate("rak4631", magic)
+                    self.assertEqual(writes, [
+                        (0x4000051C, 4, magic + 1),
+                        (0xE000ED0C, 4, 0x05FA0004),
+                    ])
+        for magic in (0, 0xAA, 0xAE, 0x57, 0x6A, 0x6B):
+            with self.subTest(magic=magic):
+                machine, writes = self.emulate("rak4631", magic)
+                self.assertEqual(writes, [])
+                self.assertEqual(struct.unpack("<I", machine.mem_read(0x4000051C, 4))[0], magic)
 
     def test_shared_normal_reset_preserves_priority_group(self):
         for variant in self.images:

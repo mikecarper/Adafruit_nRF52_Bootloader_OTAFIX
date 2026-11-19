@@ -19,6 +19,7 @@
 #include "nrf.h"
 #include "nrf_soc.h"
 #include "app_util.h"
+#include "system_reset.h"
 
 // Independent SysTick timebase: app_timer may clear RTC1 when its last timer
 // is stopped, so its raw counter cannot be used for a persistent retry deadline.
@@ -53,7 +54,7 @@ extern uint32_t board_millis(void);
 #define PENDING_PACKET_COUNT        16      /**< Holds a complete Android PRN burst while an erase/retry is pending. */
 #define FLASH_RETRY_LIMIT           100     /**< Additional attempts for one failed flash chunk. */
 #define FLASH_RETRY_DELAY_MS        100     /**< Let radio scheduling clear between timed-out attempts. */
-#define FLASH_BUSY_WAIT_MS          10000   /**< Bound a retry blocked on a foreign flash completion. */
+#define FLASH_EVENT_WAIT_MS         10000   /**< Bound the wait for a SoftDevice flash event. */
 
 #define FLASH_ACCESS_IDLE           0       /**< No flash request is active or waiting to be retried. */
 #define FLASH_ACCESS_IN_FLIGHT      1       /**< A request issued by this module is in progress. */
@@ -610,12 +611,6 @@ static void flash_retry_schedule(uint32_t delay_ms) {
   m_retry_delay_ms = delay_ms;
 }
 
-static void flash_retry_watch_busy(void) {
-  if (m_cmd_queue.flash_access == FLASH_ACCESS_WAIT_BUSY && m_flash_retries != 0) {
-    flash_retry_schedule(FLASH_BUSY_WAIT_MS);
-  }
-}
-
 // Also polled by proc_soc(): settings-save backpressure drains SOC events
 // without reentering the scheduler/BLE command handlers. SysTick polling keeps a
 // delayed retry progressing there without queuing timer or BLE callbacks.
@@ -628,20 +623,14 @@ void pstorage_process(void) {
     return;
   }
 
-  if (m_cmd_queue.flash_access == FLASH_ACCESS_WAIT_BUSY) {
-    // Do not blindly re-issue after BUSY: a foreign completion may still
-    // be queued, and must never be mistaken for our own successful write.
-    // Fail our accepted head, but retain WAIT_BUSY until that event arrives.
-    cmd_queue_fail_head(NRF_ERROR_BUSY);
-    return;
-  }
   if (m_cmd_queue.flash_access != FLASH_ACCESS_WAIT_RETRY) {
-    return;
+    // The completion is missing. Reset before releasing an owned source
+    // buffer or starting a command that could consume a stale event.
+    otafix_system_reset();
   }
 
   m_cmd_queue.flash_access = FLASH_ACCESS_IDLE;
   cmd_queue_dequeue();
-  flash_retry_watch_busy();
 }
 
 static void flash_retry(void) {
@@ -677,7 +666,6 @@ void pstorage_sys_event_handler(uint32_t sys_evt)
         flash_retry_cancel();
         m_cmd_queue.flash_access = FLASH_ACCESS_IDLE;
         cmd_queue_dequeue();
-        flash_retry_watch_busy();
         return;
     }
 
@@ -837,10 +825,12 @@ static uint32_t cmd_process(void)
     if (retval == NRF_SUCCESS)
     {
        ++m_flash_progress;
+       flash_retry_schedule(FLASH_EVENT_WAIT_MS);
     }
     else if (retval == NRF_ERROR_BUSY)
     {
        m_cmd_queue.flash_access = FLASH_ACCESS_WAIT_BUSY;
+       flash_retry_schedule(FLASH_EVENT_WAIT_MS);
     }
     else if (retval != NRF_SUCCESS)
     {

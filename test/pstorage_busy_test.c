@@ -2,6 +2,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <assert.h>
+#include <setjmp.h>
+#include "system_reset.h"
 #include <stdlib.h>
 
 #include "nrf_error.h"
@@ -39,6 +42,13 @@ static uint32_t          nested_store_offset;
 static uint32_t          nested_store_result;
 static uint32_t          timer_now;
 static uint32_t          rtc_now;
+static bool              expect_flash_reset;
+static jmp_buf           flash_reset;
+
+void otafix_system_reset(void) {
+  assert(expect_flash_reset);
+  longjmp(flash_reset, 1);
+}
 
 void     pstorage_process(void);
 uint32_t pstorage_progress_get(void);
@@ -929,18 +939,19 @@ static int timeout_retry_busy_bound_test(void) {
   }
   pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_ERROR);
   advance_retry_time(100u);
-  advance_retry_time(10000u);
-  if (callback_calls != 1u || callback_results[0] != NRF_ERROR_BUSY || callback_blocks[0] != first.block_id ||
-      erase_calls != 2u) {
+  advance_retry_time(9999u);
+  if (callback_calls != 0u || erase_calls != 2u) {
     return 261;
   }
-  // Even after timeout, an outstanding foreign event cannot complete second.
-  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_SUCCESS);
-  if (callback_calls != 1u || erase_calls != 3u) {
+  // The old event has no owner we can safely advance past. A reset must
+  // abandon both queued commands without telling either owner it completed.
+  expect_flash_reset = true;
+  if (setjmp(flash_reset) == 0) {
+    advance_retry_time(1u);
     return 262;
   }
-  pstorage_sys_event_handler(NRF_EVT_FLASH_OPERATION_SUCCESS);
-  return callback_calls == 2u && callback_blocks[1] == second.block_id && callback_results[1] == NRF_SUCCESS ? 0 : 263;
+  expect_flash_reset = false;
+  return callback_calls == 0u && erase_calls == 2u ? 0 : 263;
 }
 
 static int timeout_clock_wrap_and_reinit_test(void) {
@@ -1122,7 +1133,28 @@ static int stale_command_slot_reuse_test(void) {
   return callback_calls == 36u ? 0 : 324;
 }
 
+static void missing_flash_event_test(uint32_t softdevice_result) {
+  alignas(4) uint32_t word = 0x11223344u;
+  pstorage_handle_t handle = reset_and_register(0x0007B000u);
+  write_results[0] = softdevice_result;
+  write_result_count = 1;
+  assert(pstorage_store(&handle, (uint8_t *)&word, sizeof(word), 0) == NRF_SUCCESS);
+  assert(pstorage_store(&handle, (uint8_t *)&word, sizeof(word), 4) == NRF_SUCCESS);
+  advance_retry_time(9999u);
+  assert(write_calls == 1u && callback_calls == 0u);
+
+  expect_flash_reset = true;
+  if (setjmp(flash_reset) == 0) {
+    advance_retry_time(1u);
+    assert(!"missing flash completion did not reset");
+  }
+  expect_flash_reset = false;
+  assert(write_calls == 1u && callback_calls == 0u);
+}
+
 int main(void) {
+  missing_flash_event_test(NRF_SUCCESS);
+  missing_flash_event_test(NRF_ERROR_BUSY);
   int rc = busy_success_retry_test();
   if (rc == 0) {
     rc = repeated_busy_foreign_error_test();

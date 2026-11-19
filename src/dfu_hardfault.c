@@ -30,17 +30,36 @@ __attribute__((naked, noinline, noreturn, section(".text.otafix_reset"))) void o
 _Static_assert(NRF_POWER_BASE + offsetof(NRF_POWER_Type, GPREGRET) == 0x4000051C, "unexpected nRF52 GPREGRET address");
 _Static_assert(sizeof(NRF_POWER->GPREGRET) == 4, "GPREGRET requires word MMIO");
 _Static_assert(DFU_MAGIC_OTA_APPJUM == 0xB1 && DFU_MAGIC_OTA_RESET == 0xA8, "unexpected BLE DFU entry magic");
+#if defined(MOTA_RAK_SD_STORE)
+_Static_assert(DFU_MAGIC_OTA_RETRY == DFU_MAGIC_OTA_RESET + 1 && DFU_MAGIC_OTA_USB == DFU_MAGIC_OTA_RETRY + 1,
+               "BLE fault recovery advances the retained phase");
+#endif
 
 // The shared section keeps the branch to the reset sequence in 16-bit range.
 __attribute__((naked, noreturn, section(".text.otafix_reset"))) void HardFault_Handler(void) {
   __asm volatile("ldr r1, =0x4000051C\n"
                  "ldr r0, [r1]\n"
                  "cmp r0, #0xB1\n"
+#if defined(MOTA_RAK_SD_STORE)
+                 "beq 2f\n"
+                 "bic r2, r0, #%c[wdt]\n"
+                 "subs r2, #%c[ble]\n"
+                 "cmp r2, #1\n"
+                 "bhi 1f\n"
+                 "adds r0, #1\n"
+                 "b 3f\n"
+#else
                  "bne 1f\n"
-                 "movs r0, #0xA8\n"
-                 "str r0, [r1]\n"
+#endif
+                 "2: movs r0, #0xA8\n"
+                 "3: str r0, [r1]\n"
                  "b.n otafix_system_reset\n"
-                 "1: b 1b\n");
+                 "1: b 1b\n"
+#if defined(MOTA_RAK_SD_STORE)
+                 :
+                 : [wdt] "i"(DFU_MAGIC_OTA_WDT), [ble] "i"(DFU_MAGIC_OTA_RESET)
+#endif
+  );
 }
 
 #endif

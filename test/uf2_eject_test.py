@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Run real MSC eject callbacks across status, reset, and update boundaries."""
+"""Run real MSC callbacks across status, reset, and update boundaries."""
 
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -8,6 +9,8 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+CC = os.environ.get("CC", "cc")
+EXE_SUFFIX = ".exe" if os.name == "nt" else ""
 
 
 def function(source, signature):
@@ -16,6 +19,81 @@ def function(source, signature):
 
 
 class Uf2EjectTests(unittest.TestCase):
+    def test_failed_bootloader_copy_leaves_recovery_mounted_and_retryable(self):
+        source = (ROOT / "src/usb/msc_uf2.c").read_text()
+        harness = r'''
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <string.h>
+#include <setjmp.h>
+enum { UF2_UPDATE_KIND_BOOTLOADER = 2, DFU_RESET = 4, SD_MBR_COMMAND_COPY_BL = 0 };
+enum { STATE_USB_MOUNTED, STATE_WRITING_STARTED, STATE_WRITING_FINISHED };
+#define PRINTF(...) ((void)0)
+#define PRINT_HEX(...) ((void)0)
+static uint32_t current[4], staged[4];
+#define BOOTLOADER_ADDR_NEW_RECEIVED staged
+#define BOOTLOADER_ADDR_START current
+#define DFU_BL_IMAGE_MAX_SIZE sizeof(staged)
+typedef struct { int status_code; bool restart_into_bootloader; } dfu_update_status_t;
+typedef struct {
+  unsigned command;
+  struct { struct { uint32_t *bl_src; unsigned bl_len; } copy_bl; } params;
+} sd_mbr_command_t;
+typedef struct { unsigned numBlocks, numWritten, updateKind; bool aborted; } WriteState;
+static WriteState _wr_state;
+static bool _first_write = true, _app_completion_pending, _app_completion_after_eject;
+static bool accept_copy;
+static jmp_buf mbr_reset;
+static unsigned copies, resets, discards, led;
+static uint32_t sd_mbr_command(sd_mbr_command_t *command) {
+  assert(command->command == SD_MBR_COMMAND_COPY_BL);
+  assert(command->params.copy_bl.bl_src == staged && command->params.copy_bl.bl_len == 4);
+  ++copies;
+  if (accept_copy) longjmp(mbr_reset, 1);
+  return 4; // NRF_ERROR_NO_MEM: no parameter page for the MBR command.
+}
+static void uf2_write_session_reset(void) {
+  ++discards;
+  memset(&_wr_state, 0, sizeof(_wr_state));
+  _first_write = true;
+}
+static void bootloader_dfu_update_process(dfu_update_status_t const *status) {
+  assert(status->status_code == DFU_RESET && !status->restart_into_bootloader);
+  ++resets;
+}
+static void led_state(unsigned state) { led = state; }
+static void defer_app_completion(void) { assert(!"unexpected app update"); }
+'''
+        harness += function(source, "void tud_msc_write10_complete_cb(uint8_t lun)") + r'''
+int main(void) {
+  staged[0] = 1;
+  _wr_state = (WriteState){1, 1, UF2_UPDATE_KIND_BOOTLOADER, false};
+  tud_msc_write10_complete_cb(0);
+  assert(copies == 1 && discards == 1 && resets == 0 && led == STATE_USB_MOUNTED);
+  tud_msc_write10_complete_cb(0); // A later metadata write cannot replay the failed image.
+  assert(copies == 1);
+
+  accept_copy = true;
+  _wr_state = (WriteState){1, 1, UF2_UPDATE_KIND_BOOTLOADER, false};
+  if (setjmp(mbr_reset) == 0) {
+    tud_msc_write10_complete_cb(0);
+    assert(!"successful MBR copy must reset");
+  }
+  assert(copies == 2 && discards == 1 && resets == 0);
+
+  current[0] = staged[0];
+  tud_msc_write10_complete_cb(0);
+  assert(copies == 2 && resets == 1 && led == STATE_WRITING_FINISHED);
+}
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / f"msc-copy{EXE_SUFFIX}"
+            subprocess.run([CC, "-std=c11", "-O2", "-Wall", "-Wextra",
+                            "-Werror", "-Wno-unused-parameter", "-x", "c", "-", "-o", str(binary)],
+                           input=harness, text=True, check=True)
+            subprocess.run([str(binary)], check=True)
+
     def test_real_read_callback_initializes_only_complete_sectors(self):
         source = (ROOT / "src/usb/msc_uf2.c").read_text()
         harness = r'''
@@ -62,11 +140,11 @@ int main(void) {
 }
 '''
         with tempfile.TemporaryDirectory() as directory:
-            binary = Path(directory) / "msc-read"
+            binary = Path(directory) / f"msc-read{EXE_SUFFIX}"
             subprocess.run(
-                ["cc", "-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror",
+                [CC, "-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror",
                  "-x", "c", "-", "-o", str(binary)],
-                input=harness, text=True, check=True, capture_output=True,
+                input=harness, text=True, check=True,
             )
             subprocess.run([str(binary)], check=True)
 
@@ -221,12 +299,12 @@ int main(void) {
         with tempfile.TemporaryDirectory() as directory:
             for board in ("t1000_e", "pca10056"):
                 with self.subTest(board=board):
-                    binary = Path(directory) / board
+                    binary = Path(directory) / f"{board}{EXE_SUFFIX}"
+                    board_harness = harness.replace("#include BOARD_HEADER", f'#include "boards/{board}/board.h"')
                     subprocess.run(
-                        ["cc", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
-                         f'-DBOARD_HEADER="boards/{board}/board.h"',
+                        [CC, "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
                          "-x", "c", "-", "-I", str(ROOT / "src"), "-o", str(binary)],
-                        input=harness, text=True, check=True, capture_output=True,
+                        input=board_harness, text=True, check=True,
                     )
                     subprocess.run([str(binary)], check=True)
 

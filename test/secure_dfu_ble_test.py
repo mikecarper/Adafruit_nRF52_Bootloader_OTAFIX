@@ -440,7 +440,7 @@ class SecureDfuDisconnectTest(unittest.TestCase):
         self.assertIn('!m_tear_down_in_progress', poll)
         self.assertIn('secure_dfu_ble_poll(&m_dfu)', poll)
 
-    def test_disconnect_races_only_tolerated_by_secure_profile(self):
+    def test_close_tolerates_already_disconnected_peer_in_both_profiles(self):
         # Execute the shared transport's actual close function and timeout case;
         # the full BLE harness above mocks this backend boundary.
         source = (ROOT / 'lib/sdk11/components/libraries/bootloader_dfu/dfu_transport_ble.c').read_text()
@@ -448,20 +448,32 @@ class SecureDfuDisconnectTest(unittest.TestCase):
         close = close[:close.index('\n#ifdef CFG_DEBUG')]
         timeout = source[source.index('        case BLE_GATTS_EVT_TIMEOUT:'):]
         timeout = timeout[:timeout.index('        case BLE_GAP_EVT_ADV_SET_TERMINATED:')]
+        activate = source[source.index('        case BLE_DFU_ACTIVATE_N_RESET:'):]
+        activate = activate[:activate.index('        case BLE_DFU_SYS_RESET:')]
         prefix = r'''
 #include <assert.h>
+#include <setjmp.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include "nrf_error.h"
 #include "ble_err.h"
 #define BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION 0x13
+#define BLE_DFU_ACTIVATE_N_RESET 2
 #define BLE_GATTS_EVT_TIMEOUT 1
 #define BLE_GATT_TIMEOUT_SRC_PROTOCOL 0
 #define IS_CONNECTED() 1
-#define APP_ERROR_CHECK(error) do { fault = (error); } while (0)
+#define APP_ERROR_CHECK(error) do { \
+    uint32_t code = (error); \
+    if (code != NRF_SUCCESS) { fault = code; longjmp(fault_reset, 1); } \
+} while (0)
+static jmp_buf fault_reset;
 static uint16_t m_conn_handle;
 static bool m_tear_down_in_progress;
-static uint32_t injected, fault;
+static uint32_t injected, fault, activations;
+static uint32_t dfu_image_activate(void) {
+  assert(m_tear_down_in_progress); ++activations; return NRF_SUCCESS;
+}
+static void dfu_reset(void) { assert(false); }
 static void restore_ble_connection_policy(void) {}
 static void advertising_stop(void) {}
 static uint32_t sd_ble_gap_disconnect(uint16_t handle, uint8_t reason) {
@@ -475,28 +487,35 @@ static void handle_timeout(void) {
   uint32_t err_code;
   switch (BLE_GATTS_EVT_TIMEOUT) {
 '''
+        activate_wrapper = r'''
+static void handle_activate(void) {
+  uint32_t err_code;
+  switch (BLE_DFU_ACTIVATE_N_RESET) {
+'''
         main = r'''
 int main(void) {
   const uint32_t errors[] = {NRF_SUCCESS, BLE_ERROR_INVALID_CONN_HANDLE,
                             NRF_ERROR_INVALID_STATE, NRF_ERROR_INVALID_PARAM};
   for (unsigned i = 0; i < 4; ++i) {
     injected = errors[i];
-    uint32_t expected = injected;
+    const bool link_closed = injected == BLE_ERROR_INVALID_CONN_HANDLE || injected == NRF_ERROR_INVALID_STATE;
+    fault = activations = 0;
+    if (setjmp(fault_reset) == 0) handle_activate();
+    assert(m_tear_down_in_progress && fault == (link_closed ? NRF_SUCCESS : injected));
+    assert(activations == (unsigned)(link_closed || injected == NRF_SUCCESS));
+    fault = 0;
+    if (setjmp(fault_reset) == 0) handle_timeout();
 #ifdef SECURE_DFU_TEST
-    if (injected == BLE_ERROR_INVALID_CONN_HANDLE || injected == NRF_ERROR_INVALID_STATE)
-      expected = NRF_SUCCESS;
+    assert(fault == (link_closed ? NRF_SUCCESS : injected));
+#else
+    assert(fault == injected);
 #endif
-    fault = 0;
-    assert(dfu_transport_ble_close() == NRF_SUCCESS);
-    assert(m_tear_down_in_progress && fault == expected);
-    fault = 0;
-    handle_timeout();
-    assert(fault == expected);
   }
   return 0;
 }
 '''
-        code = prefix + close + timeout_wrapper + timeout + '\n}}\n' + main
+        code = (prefix + close + timeout_wrapper + timeout + '\n}}\n' +
+                activate_wrapper + activate + '\n}}\n' + main)
         sdk = ROOT / 'lib/softdevice/s140_nrf52_6.1.1/s140_nrf52_6.1.1_API/include'
         with tempfile.TemporaryDirectory(prefix='otafix-disconnect-') as directory:
             for secure in (False, True):

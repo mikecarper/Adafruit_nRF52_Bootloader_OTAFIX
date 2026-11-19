@@ -34,11 +34,6 @@
 static uint32_t _fl_addr = FLASH_CACHE_INVALID_ADDR;
 static uint8_t _fl_buf[CODE_PAGE_SIZE] __attribute__((aligned(4)));
 
-static void inherited_watchdog_feed(void)
-{
-    otafix_watchdog_feed();
-}
-
 void flash_nrf5x_discard(void)
 {
     // An interrupted bootloader UF2 can leave an unflushed staging page in the
@@ -55,9 +50,9 @@ void flash_nrf5x_erase (uint32_t dst, uint32_t len)
     {
         uint32_t const addr = page_addr + i * CODE_PAGE_SIZE;
         PRINTF("Erase 0x%08lX\r\n", addr);
-        inherited_watchdog_feed();
+        otafix_watchdog_feed();
         nrfx_nvmc_page_erase(addr);
-        inherited_watchdog_feed();
+        otafix_watchdog_feed();
     }
 }
 
@@ -84,16 +79,16 @@ void flash_nrf5x_flush (bool need_erase)
         if ( need_erase )
         {
             PRINTF("Erase and ");
-            inherited_watchdog_feed();
+            otafix_watchdog_feed();
             nrfx_nvmc_page_erase(_fl_addr);
-            inherited_watchdog_feed();
+            otafix_watchdog_feed();
         }
 
         PRINTF("Write 0x%08lX\r\n", _fl_addr);
         for (uint32_t offset = 0; offset < CODE_PAGE_SIZE; offset += 256)
         {
             nrfx_nvmc_words_write(_fl_addr + offset, _fl_buf + offset, 256 / sizeof(uint32_t));
-            inherited_watchdog_feed();
+            otafix_watchdog_feed();
         }
     }
 
@@ -145,7 +140,7 @@ void flash_nrf5x_write_erased(uint32_t dst, void const *src, uint32_t len)
     // individual blocks after their page has been erased in a prior callback;
     // keeping each NVMC write short bounds USB interrupt latency.
     nrfx_nvmc_words_write(dst, src, len / sizeof(uint32_t));
-    inherited_watchdog_feed();
+    otafix_watchdog_feed();
 }
 
 bool flash_nrf5x_matches(uint32_t dst, void const *src, uint32_t len)

@@ -32,7 +32,7 @@
 #include <string.h>
 
 #include "nrfx.h"
-#include "nrf_wdt.h"
+#include "watchdog.h"
 #include "app_timer.h"
 
 #include "boards.h"
@@ -161,12 +161,7 @@ static void wait_for_events(void)
 //    uint32_t err_code = sd_app_evt_wait();
 //    APP_ERROR_CHECK(err_code);
 
-    // Feed all Watchdog just in case application enable it
-    // WDT cannot be disabled once started. It even last through NVIC soft reset
-    if ( nrf_wdt_started(NRF_WDT) )
-    {
-      for (uint8_t i=0; i<8; i++) nrf_wdt_reload_request_set(NRF_WDT, i);
-    }
+    otafix_watchdog_feed();
 
     // Event received. Process it from the scheduler.
     app_sched_execute();
@@ -278,17 +273,9 @@ bool bootloader_app_is_valid(void)
     return (image_crc == p_bootloader_settings->bank_0_crc);
   }
 
-  // Fallback for debugger-flashed apps: settings page is erased (bank_0 = 0xFFFF)
-  // but an app may still have been written to bank 0 directly. Accept it if its
-  // Cortex-M vector table is plausible: initial SP within RAM, reset vector
-  // within app flash region with the Thumb bit set. The SP upper bound is
-  // inclusive because the empty-descending stack initializes one past RAM end.
-  if (p_bootloader_settings->bank_0 == 0xFFFF)
-  {
-    return true;
-  }
-
-  return false;
+  // Debugger-flashed apps can boot with a genuinely blank settings record.
+  // Erased markers alone also occur midway through a geometry-first commit.
+  return bootloader_settings_is_erased(p_bootloader_settings);
 }
 
 
@@ -366,8 +353,9 @@ static void bootloader_settings_save(bootloader_settings_t * p_settings)
 
 void bootloader_dfu_update_process(dfu_update_status_t const* update_status)
 {
-  // A forced restart owns the exit even if older scheduled callbacks run next.
-  if (m_update_status == BOOTLOADER_RESET_TO_SELF) {
+  // Once a commit or an exit starts, queued transport and timer events
+  // cannot take ownership of the settings buffer or replace the outcome.
+  if (m_update_status != BOOTLOADER_UPDATING) {
     return;
   }
 
@@ -459,8 +447,10 @@ void bootloader_dfu_update_process(dfu_update_status_t const* update_status)
 }
 
 void bootloader_dfu_restart(void) {
-  bootloader_ble_recovery_hint(true);
-  m_update_status = BOOTLOADER_RESET_TO_SELF;
+  if (m_update_status == BOOTLOADER_UPDATING) {
+    bootloader_ble_recovery_hint(true);
+    m_update_status = BOOTLOADER_RESET_TO_SELF;
+  }
 }
 
 bool bootloader_must_reset_to_self(void)

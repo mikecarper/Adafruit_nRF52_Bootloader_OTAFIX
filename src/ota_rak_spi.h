@@ -3,6 +3,7 @@
 #ifndef OTA_RAK_SPI_H_
 #define OTA_RAK_SPI_H_
 
+#include "watchdog.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -13,6 +14,5 @@ bool ota_rak_spi_transfer(const void *tx, void *rx, uint32_t length);
 uint8_t ota_rak_spi_byte(uint8_t value);
 bool ota_rak_spi_healthy(void);
 void ota_rak_spi_release(bool keep_cs_high);
-void ota_rak_spi_watchdog(void);
 
 #endif // OTA_RAK_SPI_H_

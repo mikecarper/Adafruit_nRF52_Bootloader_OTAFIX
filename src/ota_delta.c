@@ -5,6 +5,9 @@
 #include "ota_layout.h"
 #include "ota_bl_info.h"
 #include "ota_ram_info.h"
+#if defined(MOTA_ROLLBACK_ENABLED)
+  #include "ota_rollback_record.h"
+#endif
 #if defined(MOTA_RAK_SD_STORE)
   #if !defined(OTA_DELTA_HOST_TEST)
     // The exact RAK4631 pin/profile identity is provided by board.h, not
@@ -394,8 +397,12 @@ static void otah_settings_commit(uint16_t bank0, uint16_t crc, uint32_t size) {
 // while the in-place delta applier runs outside that loop. Keep every enabled
 // reload channel alive throughout the potentially long scan/hash/apply path.
 // A host test has no hardware watchdog, so this becomes a no-op there.
+#if defined(OTA_DELTA_HOST_TEST)
+#define inherited_watchdog_feed() ((void)0)
+#elif !defined(EXTERNAL_WATCHDOG_DONE_PIN)
+#define inherited_watchdog_feed otafix_watchdog_feed
+#else
 static void inherited_watchdog_feed(void) {
-#ifndef OTA_DELTA_HOST_TEST
   static uint8_t external_feed_divider;
 
   otafix_watchdog_feed();
@@ -406,8 +413,8 @@ static void inherited_watchdog_feed(void) {
   if ((external_feed_divider++ & 0x7FU) == 0) {
     board_watchdog_feed();
   }
-#endif
 }
+#endif
 
 static uint32_t rd_u32(const uint8_t *p) {
   return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
@@ -1697,7 +1704,14 @@ __attribute__((noinline, noclone)) static bool apply_bootloader_update(void) {
 #endif // MOTA_BOOTLOADER_UPDATE_ENABLED
 
 #if defined(MOTA_SD_CARD) || defined(MOTA_QSPI_FLASH)
-static bool apply_full_external(const struct mota_min *m) {
+#if defined(MOTA_ROLLBACK_ENABLED)
+static bool rollback_arm(const struct mota_min *m, uint8_t medium);
+static uint32_t rollback_armed_page;
+#endif
+static bool apply_full_external(const struct mota_min *m, uint8_t medium) {
+#if !defined(MOTA_ROLLBACK_ENABLED)
+  (void)medium;
+#endif
   if (!m->is_full || m->codec_id != CODEC_FULL || m->image_size == 0 || m->payload_size != m->image_size ||
       m->image_size > APP_APPLY_END - APP_BASE) {
     gpregret2_set(0xB3);
@@ -1714,6 +1728,9 @@ static bool apply_full_external(const struct mota_min *m) {
     gpregret2_set(0xBC);
     return false;
   }
+#if defined(MOTA_ROLLBACK_ENABLED)
+  if (!rollback_arm(m, medium)) return false;
+#endif
   inherited_watchdog_feed();
   otah_settings_commit(BANK_INVALID_APP_V, 0, 0);
   g_cache_page  = 0;
@@ -1753,7 +1770,7 @@ static bool finish_apply(bool result) {
   return result;
 }
 
-bool ota_delta_check_and_apply(void) {
+static bool ota_apply_requested(void) {
   inherited_watchdog_feed();
 #if defined(MOTA_RAK_SD_STORE)
   // Real boots initialize .bss; also make a rejected/host-simulated invocation
@@ -1895,7 +1912,7 @@ bool ota_delta_check_and_apply(void) {
 
 #if defined(MOTA_SD_CARD) || defined(MOTA_QSPI_FLASH)
   if (external_staged_source() && m.is_full) {
-    return finish_apply(apply_full_external(&m));
+    return finish_apply(apply_full_external(&m, (uint8_t)stage_handoff));
   }
 #endif
 
@@ -1934,6 +1951,11 @@ bool ota_delta_check_and_apply(void) {
   if (!clear_approval(&m)) {
     return fail_apply(0xBC);
   }
+#if defined(MOTA_ROLLBACK_ENABLED)
+  if (external_staged_source() && !rollback_arm(&m, (uint8_t)stage_handoff)) {
+    return finish_apply(false);
+  }
+#endif
 
   // Commit point: make every subsequent reset enter DFU BEFORE the first destructive application write.
   // This is essential for UF2-installed apps, whose zero CRC otherwise makes a partial image bootable.
@@ -1955,8 +1977,10 @@ bool ota_delta_check_and_apply(void) {
 #else
   c.ws_hi = mota_addr; // workspace stays strictly below internal mota
 #endif
-  // No persistent step journal exists. A reset after the commit point enters
-  // DFU through the invalid bank setting, so do not enable detools replay.
+#if defined(MOTA_ROLLBACK_ENABLED)
+  if (rollback_armed_page && c.ws_hi > rollback_armed_page) c.ws_hi = rollback_armed_page;
+#endif
+  // The backup, rather than the in-place patch, is the recovery source.
   int r = detools_apply_patch_in_place_callbacks(dt_mr, dt_mw, dt_me, NULL,
                                                 NULL, dt_pr, (size_t)m.payload_size, &c);
   if (r < 0) {
@@ -1979,4 +2003,162 @@ reject:
     gpregret2_set(0xBC);
   }
   return finish_apply(false);
+}
+
+#if defined(MOTA_ROLLBACK_ENABLED)
+__attribute__((used, aligned(4))) static const char rollback_capability[] =
+    MOTA_ROLLBACK_CAPABILITY;
+
+static const mota_rollback_record_t *rollback_record(bool ready) {
+  for (unsigned i = 0; i != 2; ++i) {
+    const uint32_t page = i == 0 ? MOTA_ROLLBACK_EXPANDED_PAGE : MOTA_ROLLBACK_LEGACY_PAGE;
+    const mota_rollback_record_t *record = (const mota_rollback_record_t *)(uintptr_t)page;
+    const uint32_t phase = record->phase;
+    if ((ready ? phase == MOTA_ROLLBACK_READY :
+         phase == MOTA_ROLLBACK_TRIAL || mota_rollback_should_restore(phase)) &&
+        mota_rollback_valid(record, APP_BASE, page)) return record;
+  }
+  return NULL;
+}
+
+static bool rollback_phase(const mota_rollback_record_t *record, uint32_t phase) {
+  const uint32_t address = (uint32_t)(uintptr_t)&record->phase;
+  fl_write_words(address, &phase, 1);
+  return *(const volatile uint32_t *)(uintptr_t)address == phase;
+}
+
+static bool rollback_arm(const struct mota_min *m, uint8_t medium) {
+  const mota_rollback_record_t *record = rollback_record(true);
+  if (!record || record->media != medium || record->next_size != m->image_size ||
+      memcmp(record->next_hash, m->image_hash, sizeof(record->next_hash)) != 0) return true;
+
+  if (!region_hash_valid(APP_BASE, record->previous_size, record->previous_hash, false, UINT32_MAX)) {
+    gpregret2_set(0xAD);
+    return false;
+  }
+  bool valid = false;
+#if defined(MOTA_SD_CARD)
+  if (medium == GPREGRET2_OTA_STAGE_SD) {
+    const uint32_t first = g_sd_first_sector, size = g_sd_total_size;
+    // The app recorded a separate contiguous file after checking for overlap.
+    // Independently verify its bytes against the live image before writing.
+    g_sd_first_sector = record->offset;
+    g_sd_total_size = record->previous_size;
+    valid = region_hash_valid(0, record->previous_size, record->previous_hash, true, UINT32_MAX);
+    g_sd_first_sector = first;
+    g_sd_total_size = size;
+  }
+#endif
+#if defined(MOTA_QSPI_FLASH)
+  if (g_qspi_source) {
+    const uint32_t size = g_qspi_total_size;
+    g_qspi_total_size = ota_qspi_capacity();
+    valid = record->offset >= size && (record->offset & (PAGE - 1u)) == 0 &&
+        region_hash_valid(record->offset, record->previous_size, record->previous_hash, true, UINT32_MAX);
+    g_qspi_total_size = size;
+  }
+#endif
+  if (!valid) {
+    gpregret2_set(0xAD);
+    return false;
+  }
+  if (!rollback_phase(record, MOTA_ROLLBACK_INSTALLING)) return false;
+  rollback_armed_page = (uint32_t)(uintptr_t)record;
+  return true;
+}
+
+static bool rollback_restore(const mota_rollback_record_t *record) {
+  struct mota_min image = {.image_size = record->previous_size};
+  memcpy(image.image_hash, record->previous_hash, sizeof(image.image_hash));
+  bool ready = false;
+#if defined(MOTA_SD_CARD)
+  if (record->media == GPREGRET2_OTA_STAGE_SD) {
+#if defined(MOTA_SD_DUAL_STORE) || defined(MOTA_RAK_SD_STORE)
+    g_sd_source = true;
+#endif
+#if defined(MOTA_RAK_SD_STORE)
+    g_sd_active = true;
+#endif
+    g_sd_first_sector = record->offset;
+    g_sd_total_size = record->previous_size;
+    ready = ota_sd_init();
+  }
+#endif
+#if defined(MOTA_QSPI_FLASH)
+  if (record->media == GPREGRET2_OTA_STAGE_QSPI
+#if defined(MOTA_RAK_AUTO_RAK4631)
+      || record->media == GPREGRET2_OTA_STAGE_RAK15001
+#endif
+#if defined(MOTA_RAK_AUTO_STORE)
+      || record->media == GPREGRET2_OTA_STAGE_HEADER_W25
+#endif
+      ) {
+#if defined(MOTA_RAK_AUTO_STORE)
+    ota_qspi_set_rak_source((uint8_t)record->media);
+#endif
+    g_qspi_source = true;
+    image.payload_addr = record->offset;
+    ready = ota_qspi_init();
+    g_qspi_total_size = ota_qspi_capacity();
+  }
+#endif
+  bool restored = false;
+  otah_settings_commit(BANK_INVALID_APP_V, 0, 0);
+  if (ready && full_image_hash_valid(&image, image.payload_addr, true)) {
+    restored = copy_staged_full_image(&image, APP_BASE) == 0 && finish_app_update(&image);
+  }
+  rollback_phase(record, restored ? MOTA_ROLLBACK_DONE : MOTA_ROLLBACK_FAILED);
+  gpregret2_set(restored ? 0xACu : 0xADu);
+  return finish_apply(true);
+}
+
+bool ota_rollback_pending(void) {
+  return gpregret_get() == 0 && rollback_record(false) != NULL;
+}
+
+void ota_rollback_cancel(void) {
+  const mota_rollback_record_t *record = rollback_record(false);
+  if (record) rollback_phase(record, MOTA_ROLLBACK_DONE);
+}
+
+static bool rollback_trial_capable(uint32_t limit) {
+  const uint32_t *image = (const uint32_t *)(uintptr_t)APP_BASE;
+  for (uint32_t words = limit / 4u; words >= 2u; --words, ++image) {
+    // The little-endian words spell MOTAOKB1.
+    if (image[0] == 0x41544f4du && image[1] == 0x31424b4fu) return true;
+  }
+  return false;
+}
+#endif
+
+bool ota_delta_check_and_apply(void) {
+#if defined(MOTA_ROLLBACK_ENABLED)
+  if (*(const volatile char *)rollback_capability != 'M') return false;
+  const mota_rollback_record_t *record = gpregret_get() == 0 ? rollback_record(false) : NULL;
+  if (record) {
+    if (mota_rollback_should_restore(record->phase) ||
+        !rollback_phase(record, MOTA_ROLLBACK_RUNNING)) return rollback_restore(record);
+    if (!NRF_WDT->RUNSTATUS) {
+      NRF_WDT->CONFIG = (WDT_CONFIG_SLEEP_Run << WDT_CONFIG_SLEEP_Pos);
+      NRF_WDT->CRV = 60u * 32768u;
+      NRF_WDT->RREN = 1u;
+      NRF_WDT->TASKS_START = 1u;
+    }
+    if (!NRF_WDT->RUNSTATUS) return rollback_restore(record);
+    inherited_watchdog_feed();
+    return false;
+  }
+  const bool applied = ota_apply_requested();
+  if (rollback_armed_page != 0) {
+    if (applied) {
+      record = (const mota_rollback_record_t *)(uintptr_t)rollback_armed_page;
+      rollback_phase(record, rollback_trial_capable(record->next_size) ?
+                            MOTA_ROLLBACK_TRIAL : MOTA_ROLLBACK_DONE);
+    }
+    return true;
+  }
+  return applied;
+#else
+  return ota_apply_requested();
+#endif
 }

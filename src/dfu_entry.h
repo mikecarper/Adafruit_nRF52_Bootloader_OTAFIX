@@ -9,6 +9,19 @@
 #define DFU_MAGIC_OTA_APPJUM 0xB1u
 #define DFU_MAGIC_OTA_RESET  0xA8u
 
+#if defined(MOTA_RAK_SD_STORE)
+// RAK4631 BLE sessions keep their fault phase in GPREGRET across a system reset.
+// Keep the early-handoff marker and LoRa apply markers independent.
+#define DFU_MAGIC_OTA_RETRY 0xA9u
+#define DFU_MAGIC_OTA_USB   0xAAu
+#define DFU_MAGIC_OTA_WDT   0x04u
+#define DFU_MAGIC_OTA_MASK  0x07u
+
+static inline bool dfu_ble_recovery_magic(uint32_t magic) {
+  return (magic & ~DFU_MAGIC_OTA_MASK) == DFU_MAGIC_OTA_RESET;
+}
+#endif
+
 static inline uint8_t dfu_entry_reset_magic(uint8_t gpregret) {
   return gpregret == DFU_MAGIC_OTA_APPJUM ? DFU_MAGIC_OTA_RESET : gpregret;
 }

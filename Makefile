@@ -323,6 +323,7 @@ C_SRC += \
   src/dfu_image_policy.c \
   src/bootloader_settings_guard.c \
   src/flash_nrf5x.c \
+  src/watchdog.c \
   src/main.c \
   src/screen.c \
   src/images.c \
@@ -635,8 +636,11 @@ CFLAGS += -DDFU_APP_DATA_RESERVED=$(DFU_APP_DATA_RESERVED)
 
 # Exact all-in-one RAK4631 pass choices must also reach the LTO link via CFLAGS.
 # Other boards use the normal size options with their qualified compiler.
-ifneq ($(filter $(BOARD),heltec_t096 heltec_t114 heltec_mesh_tower_v2_sdcard),)
+ifneq ($(filter $(BOARD),heltec_t096 heltec_t114 heltec_mesh_tower_v2_sdcard wiscore_rak3401_auto),)
 CFLAGS += -fno-schedule-insns2 -fno-optimize-sibling-calls -fno-tree-loop-im -fno-tree-ter
+endif
+ifneq ($(filter $(BOARD),heltec_mesh_tower_v2_sdcard wiscore_rak3401_auto),)
+CFLAGS += -fno-code-hoisting -fno-tree-dominator-opts -fno-tree-tail-merge
 endif
 ifneq ($(call mota_feature_flag,MOTA_RAK_SD_STORE),)
 CFLAGS += -fno-schedule-insns -fno-schedule-insns2 -fno-code-hoisting \

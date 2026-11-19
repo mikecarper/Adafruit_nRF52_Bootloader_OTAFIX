@@ -407,7 +407,7 @@ void tud_msc_write10_complete_cb(uint8_t lun)
         // skip if there is no bootloader change
         if ( memcmp(new_bootloader, (uint8_t*) BOOTLOADER_ADDR_START, DFU_BL_IMAGE_MAX_SIZE) )
         {
-          PRINTF("Coyping new bootloader\r\n");
+          PRINTF("Copying new bootloader\r\n");
 
           sd_mbr_command_t command =
           {
@@ -416,8 +416,11 @@ void tud_msc_write10_complete_cb(uint8_t lun)
             .params.copy_bl.bl_len = DFU_BL_IMAGE_MAX_SIZE/4 // size in words
           };
 
-          // on success, COPY_BL won't return but run the new bootloader right away.
+          // COPY_BL starts the new bootloader on success. A return leaves USB available for retry.
           sd_mbr_command(&command);
+          uf2_write_session_reset();
+          led_state(STATE_USB_MOUNTED);
+          return;
         }
 
         PRINTF("bootloader update complete\r\n");

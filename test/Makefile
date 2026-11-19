@@ -12,7 +12,7 @@ override CFLAGS += -DDETOOLS_CONFIG_IN_PLACE_RESUME=0
 SRC      = ../src
 INC      = -I $(SRC) -I $(SRC)/detools
 PSTORAGE_SRC = ../lib/sdk11/components/drivers_nrf/pstorage/pstorage_raw.c
-PSTORAGE_INC = -I pstorage_stubs -I ../lib/sdk11/components/drivers_nrf/pstorage
+PSTORAGE_INC = -I pstorage_stubs -I ../lib/sdk11/components/drivers_nrf/pstorage -I $(SRC)
 PEER_DATA_INC = -I $(SRC) \
 	-I ../lib/sdk11/components/libraries/bootloader_dfu \
 	-I ../lib/sdk11/components/libraries/util \
@@ -294,7 +294,12 @@ pstorage_busy_test: pstorage_busy_test.c $(PSTORAGE_SRC) $(wildcard pstorage_stu
 	$(CC) $(CFLAGS) -Wno-int-to-pointer-cast -DNRF52_SERIES $(PSTORAGE_INC) \
 		pstorage_busy_test.c $(PSTORAGE_SRC) -o $@
 
+ota_rollback_record_test: ota_rollback_record_test.c $(SRC)/ota_rollback_record.h
+	$(CC) $(CFLAGS) $(INC) $< -o $@
+
+check: ota_rollback_record_test
 check: apply_sim readback_test readback_test_v7 readback_internal_test bootloader_image_test sd_apply_test qspi_apply_test bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test softdevice_fwid_test dfu_init_bounds_test dfu_init_signed_bounds_test qspi_alignment_test qspi_wake_test usb_wait_test dfu_timeout_test uf2_write_state_test bootloader_settings_guard_test dfu_image_policy_test dfu_entry_test peer_data_layout_test peer_data_layout_nrf52_test peer_data_layout_nrf52833_test pstorage_busy_test
+	./ota_rollback_record_test
 	python3 version_derivation_test.py
 	python3 startup_vector_test.py
 	python3 bootloader_write_policy_test.py
@@ -454,6 +459,7 @@ sanitize:
 
 clean:
 	rm -f readback_qspi_internal_test
+	rm -f ota_rollback_record_test
 	rm -f readback_x1_internal_v7_test bootloader_mota_x1_internal_v7_test
 	rm -f readback_solar_internal_test bootloader_mota_solar_internal_test
 	rm -f tower_dual_sd_test tower_dual_internal_test tower_dual_boot_sd_test tower_dual_boot_internal_test

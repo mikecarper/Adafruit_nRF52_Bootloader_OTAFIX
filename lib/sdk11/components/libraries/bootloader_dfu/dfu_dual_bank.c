@@ -720,6 +720,7 @@ uint32_t dfu_image_activate()
     switch (m_dfu_state)
     {
         case DFU_STATE_WAIT_4_ACTIVATE:
+            m_dfu_state = DFU_STATE_ACTIVATING;
 
             // Stop the DFU Timer because the peer activity need not be monitored any longer.
             err_code = app_timer_stop(m_dfu_timer_id);

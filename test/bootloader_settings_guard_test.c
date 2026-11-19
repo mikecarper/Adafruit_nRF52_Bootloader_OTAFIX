@@ -53,10 +53,17 @@ int main(void) {
   // the first marker word as the transaction commit point.
   bootloader_settings_t flash;
   memset(&flash, 0xFF, sizeof(flash));
+  assert(bootloader_settings_is_erased(&flash));
+  for (size_t offset = 0; offset < sizeof(flash); ++offset) {
+    bootloader_settings_t torn = flash;
+    ((uint8_t*)&torn)[offset] = 0xFEu;
+    assert(!bootloader_settings_is_erased(&torn));
+  }
   memcpy((uint8_t*)&flash + 2u * sizeof(uint32_t),
          (uint8_t const*)&settings + 2u * sizeof(uint32_t),
          sizeof(settings) - 2u * sizeof(uint32_t));
   assert(!bootloader_settings_integrity_valid(&flash));
+  assert(flash.bank_0 == UINT16_MAX && !bootloader_settings_is_erased(&flash));
   memcpy((uint8_t*)&flash + sizeof(uint32_t),
          (uint8_t const*)&settings + sizeof(uint32_t), sizeof(uint32_t));
   assert(!bootloader_settings_integrity_valid(&flash));

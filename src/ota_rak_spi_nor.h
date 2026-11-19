@@ -29,7 +29,7 @@ static uint8_t nor_status(void) {
 
 static bool nor_wait_ready(uint32_t steps) {
   while (steps-- != 0u) {
-    ota_rak_spi_watchdog();
+    otafix_watchdog_feed();
     const uint8_t status = nor_status();
     if (!ota_rak_spi_healthy()) return false;
     if ((status & 1u) == 0u) return true;

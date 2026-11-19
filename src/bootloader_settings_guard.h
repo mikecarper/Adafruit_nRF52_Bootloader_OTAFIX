@@ -9,6 +9,7 @@
 // trailer therefore identifies a legacy record, which remains readable after
 // basic geometry checks at each use site.
 bool bootloader_settings_is_legacy(bootloader_settings_t const* settings);
+bool bootloader_settings_is_erased(bootloader_settings_t const* settings);
 
 // New records carry a CRC over the backward-compatible prefix.  The CRC covers
 // the intended validity markers, so a geometry-first write is not committed

@@ -14,6 +14,48 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class DfuSessionStartTest(unittest.TestCase):
+    def test_single_and_dual_bank_dispatch_activation_only_once(self):
+        dfu = ROOT / "lib/sdk11/components/libraries/bootloader_dfu"
+        states = declaration((dfu / "dfu_bank_internal.h").read_text(), "dfu_state_t;")
+        harness = r'''
+#include <assert.h>
+#include <stdint.h>
+#define NRF_SUCCESS 0u
+#define NRF_ERROR_INVALID_STATE 8u
+#define APP_ERROR_CHECK(result) assert((result) == NRF_SUCCESS)
+''' + states + r'''
+static dfu_state_t m_dfu_state = DFU_STATE_WAIT_4_ACTIVATE;
+static unsigned stopped, activated;
+static unsigned m_dfu_timer_id;
+static uint32_t app_timer_stop(unsigned id) {
+  assert(id == m_dfu_timer_id);
+  ++stopped;
+  return NRF_SUCCESS;
+}
+static uint32_t activate(void) {
+  ++activated;
+  return NRF_SUCCESS;
+}
+static const struct { uint32_t (*activate)(void); } m_functions = {activate};
+'''
+        main = r'''
+int main(void) {
+  assert(dfu_image_activate() == NRF_SUCCESS);
+  assert(dfu_image_activate() == NRF_ERROR_INVALID_STATE);
+  assert(stopped == 1 && activated == 1);
+}
+'''
+        with tempfile.TemporaryDirectory(prefix="otafix-dfu-activate-") as directory:
+            for bank in ("single", "dual"):
+                with self.subTest(bank=bank):
+                    source = (dfu / f"dfu_{bank}_bank.c").read_text()
+                    implementation = function(source, "uint32_t dfu_image_activate()")
+                    binary = Path(directory) / (f"{bank}.exe" if os.name == "nt" else bank)
+                    subprocess.run([os.environ.get("CC", "gcc"), "-std=c11", "-O2", "-Wall", "-Wextra",
+                                    "-Werror", "-x", "c", "-", "-o", str(binary)],
+                                   input=harness + implementation + main, text=True, check=True)
+                    subprocess.run([str(binary)], check=True)
+
     def test_completed_status_cannot_end_a_new_session(self):
         source = (ROOT / "lib/sdk11/components/libraries/bootloader_dfu/bootloader.c").read_text()
         entry = re.search(r"uint32_t bootloader_dfu_start\([^\n]+\)\s*\{.*?^\}",
@@ -110,7 +152,6 @@ int main(void) {
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#define NRF_WDT ((void *)1)
 #define CFG_TUD_MSC 0
 '''
         harness += declaration(source, "bootloader_status_t;")
@@ -118,9 +159,8 @@ int main(void) {
 static bootloader_status_t m_update_status;
 static unsigned scheduled, storage, polls, reloads;
 static bool watchdog_running;
-static bool nrf_wdt_started(void *wdt) { assert(wdt == NRF_WDT); return watchdog_running; }
-static void nrf_wdt_reload_request_set(void *wdt, unsigned channel) {
-  assert(wdt == NRF_WDT && channel < 8); ++reloads;
+static void otafix_watchdog_feed(void) {
+  if (watchdog_running) reloads += 8;
 }
 static void app_sched_execute(void) {
   ++scheduled;
