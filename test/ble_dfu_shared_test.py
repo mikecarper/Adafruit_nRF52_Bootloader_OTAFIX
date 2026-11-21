@@ -45,15 +45,16 @@ class BleDfuSharedTests(unittest.TestCase):
         cls.work = Path(cls.temp.name)
         source = SOURCE.read_text(encoding="ascii")
         prefix = source[source.index("#define MAX_DFU_PKT_LEN"):source.index("// Preserve the three existing attributes")]
+        control_write = "__attribute__((noinline)) static uint32_t on_ctrl_pt_write("
         signatures = ("static uint32_t dfu_characteristic_add(", "static uint32_t dfu_pkt_char_add(",
                       "static uint32_t dfu_rev_char_add(", "static uint32_t dfu_ctrl_pt_add(",
                       "uint32_t ble_dfu_init(", "static uint32_t dfu_notification_send(",
                       "uint32_t ble_dfu_bytes_rcvd_report(", "uint32_t ble_dfu_pkts_rcpt_notify(",
                       "uint32_t ble_dfu_response_send(", "static bool is_cccd_configured(",
-                      "static uint32_t on_ctrl_pt_write(")
+                      control_write)
         methods = "\n".join(definition(source, signature) for signature in signatures)
         mapping_asserts = source[source.index("_Static_assert(BLE_DFU_START"):
-                                 source.index("static uint32_t on_ctrl_pt_write(")]
+                                 source.index(control_write)]
         methods = mapping_asserts + "\n" + methods
         harness = FIXTURE.read_text().replace("@PRODUCTION@", prefix + "\n" + methods)
         (cls.work / "main.c").write_text(harness)
@@ -128,6 +129,9 @@ static inline uint8_t uint32_encode(uint32_t value, uint8_t *out) {
 
     def test_control_authorization_and_cccd_error_order_is_unchanged(self):
         self.run_scenario(6)
+
+    def test_empty_control_write_is_rejected_before_dispatch(self):
+        self.run_scenario(7)
 
 
 if __name__ == "__main__":

@@ -199,35 +199,31 @@ _Static_assert(BLE_DFU_START == OP_CODE_START_DFU - 1 &&
 _Static_assert(PKT_START_DFU_PARAM_LEN == PKT_INIT_DFU_PARAM_LEN,
                "DFU start/init parameter bounds differ");
 
-static uint32_t on_ctrl_pt_write(ble_dfu_t * p_dfu, ble_gatts_evt_write_t * p_ble_write_evt)
+// Keep the shared BLE event dispatcher within the fixed RAK bootloader region.
+__attribute__((noinline)) static uint32_t on_ctrl_pt_write(ble_dfu_t * p_dfu, ble_gatts_evt_write_t * p_ble_write_evt)
 {
     ble_gatts_rw_authorize_reply_params_t auth_reply;
+    uint16_t const len = p_ble_write_evt->len;
 
     auth_reply.type = BLE_GATTS_AUTHORIZE_TYPE_WRITE;
-    auth_reply.type = BLE_GATTS_AUTHORIZE_TYPE_WRITE;
-    auth_reply.params.write.update = 1;
     auth_reply.params.write.offset = p_ble_write_evt->offset;
-    auth_reply.params.write.len = p_ble_write_evt->len;
+    auth_reply.params.write.len = len;
     auth_reply.params.write.p_data = p_ble_write_evt->data;
-
-
+    uint16_t status = BLE_GATT_STATUS_SUCCESS;
     if (!is_cccd_configured(p_dfu))
     {
-        // Send an error response to the peer indicating that the CCCD is improperly configured.
-        auth_reply.params.write.gatt_status =
-            BLE_GATT_STATUS_ATTERR_CPS_CCCD_CONFIG_ERROR;
-
-        return (sd_ble_gatts_rw_authorize_reply(p_dfu->conn_handle, &auth_reply));
-
+        status = BLE_GATT_STATUS_ATTERR_CPS_CCCD_CONFIG_ERROR;
     }
-    else
+    if (len == 0)
     {
-        uint32_t err_code;
-
-        auth_reply.params.write.gatt_status = BLE_GATT_STATUS_SUCCESS;
-
-        err_code = (sd_ble_gatts_rw_authorize_reply(p_dfu->conn_handle, &auth_reply));
-        VERIFY_SUCCESS(err_code);
+        status = BLE_GATT_STATUS_ATTERR_INVALID_ATT_VAL_LENGTH;
+    }
+    auth_reply.params.write.update = status == BLE_GATT_STATUS_SUCCESS;
+    auth_reply.params.write.gatt_status = status;
+    uint32_t const err_code = sd_ble_gatts_rw_authorize_reply(p_dfu->conn_handle, &auth_reply);
+    if ((status | err_code) != 0)
+    {
+        return err_code;
     }
 
     ble_dfu_evt_t ble_dfu_evt;
@@ -236,7 +232,7 @@ static uint32_t on_ctrl_pt_write(ble_dfu_t * p_dfu, ble_gatts_evt_write_t * p_bl
     if (opcode >= OP_CODE_START_DFU && opcode <= OP_CODE_SYS_RESET) {
         ble_dfu_evt.ble_dfu_evt_type = (ble_dfu_evt_type_t)(opcode - 1u);
         if (opcode <= OP_CODE_RECEIVE_INIT) {
-            if (p_ble_write_evt->len < PKT_START_DFU_PARAM_LEN) {
+            if (len < PKT_START_DFU_PARAM_LEN) {
                 return ble_dfu_response_send(p_dfu, (ble_dfu_procedure_t)opcode,
                                              BLE_DFU_RESP_VAL_OPER_FAILED);
             }
@@ -244,7 +240,7 @@ static uint32_t on_ctrl_pt_write(ble_dfu_t * p_dfu, ble_gatts_evt_write_t * p_bl
             ble_dfu_evt.evt.ble_dfu_pkt_write.p_data = &p_ble_write_evt->data[1];
         }
     } else if (opcode == OP_CODE_PKT_RCPT_NOTIF_REQ) {
-        if (p_ble_write_evt->len < PKT_RCPT_NOTIF_REQ_LEN) {
+        if (len < PKT_RCPT_NOTIF_REQ_LEN) {
             return ble_dfu_response_send(p_dfu, BLE_DFU_PKT_RCPT_REQ_PROCEDURE,
                                          BLE_DFU_RESP_VAL_NOT_SUPPORTED);
         }

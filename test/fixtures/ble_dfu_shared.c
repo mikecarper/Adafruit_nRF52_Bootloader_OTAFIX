@@ -54,11 +54,13 @@ uint32_t sd_ble_gatts_value_get(uint16_t conn, uint16_t handle, ble_gatts_value_
 
 uint32_t sd_ble_gatts_rw_authorize_reply(uint16_t conn, ble_gatts_rw_authorize_reply_params_t const *reply) {
   assert(conn == active_dfu->conn_handle && active_write);
-  assert(reply->type == BLE_GATTS_AUTHORIZE_TYPE_WRITE && reply->params.write.update == 1);
+  const bool has_value = active_write->len != 0;
+  const bool accepted = has_value && cccd_enabled && cccd_result == NRF_SUCCESS;
+  assert(reply->type == BLE_GATTS_AUTHORIZE_TYPE_WRITE && reply->params.write.update == accepted);
   assert(reply->params.write.offset == active_write->offset && reply->params.write.len == active_write->len);
   assert(reply->params.write.p_data == active_write->data);
-  assert(reply->params.write.gatt_status == (cccd_enabled && cccd_result == NRF_SUCCESS
-    ? BLE_GATT_STATUS_SUCCESS : BLE_GATT_STATUS_ATTERR_CPS_CCCD_CONFIG_ERROR));
+  assert(reply->params.write.gatt_status == (!has_value ? BLE_GATT_STATUS_ATTERR_INVALID_ATT_VAL_LENGTH :
+    accepted ? BLE_GATT_STATUS_SUCCESS : BLE_GATT_STATUS_ATTERR_CPS_CCCD_CONFIG_ERROR));
   authorize_calls++; trace_event('A');
   return authorize_result;
 }
@@ -232,7 +234,7 @@ int main(int argc, char **argv) {
     dfu.dfu_ctrl_pt_handles.cccd_handle = 100;
     dfu.evt_handler = event_handler; dfu.error_handler = error_handler;
     for (unsigned opcode = 0; opcode <= 255; opcode++) {
-      for (unsigned len = 0; len <= 4; len++) {
+      for (unsigned len = 1; len <= 4; len++) {
         for (unsigned variant = 0; variant < (scenario == 5 ? 2u : 4u); variant++) {
           active_write->len = len; active_write->offset = 5;
           active_write->data[0] = opcode;
@@ -270,6 +272,18 @@ int main(int argc, char **argv) {
       }
     }
     free(active_write);
+  } else if (scenario == 7) {
+    // Zero-length ATT writes have no opcode and must stop at authorization.
+    ble_gatts_evt_write_t empty = {0};
+    active_write = &empty;
+    dfu.conn_handle = 17;
+    dfu.dfu_ctrl_pt_handles.cccd_handle = 100;
+    dfu.evt_handler = event_handler;
+    control_trace = true;
+    cccd_enabled = true;
+    assert(on_ctrl_pt_write(&dfu, active_write) == NRF_SUCCESS);
+    assert(authorize_calls == 1 && !control_events && !hvx_calls);
+    assert(strcmp(trace, "GA") == 0);
   } else abort();
   return 0;
 }
