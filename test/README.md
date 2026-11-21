@@ -58,14 +58,18 @@ DFU does not satisfy this gate.
 
 Use `tools/uf2_drive_hil.py` on the hardware controller. First run it without
 `--execute`; that validates the exact artifact and selected application USB
-identity without changing the board. This RAK3401 example uses S140 6.1.1's
+identity without changing the board. The runner claims that USB path for the
+host user and rejects a concurrent HIL run on the same port. It requires the
+bootloader block device to disappear, not just unmount, before verifying the
+returning application. This does not replace the lab's radio reservations.
+This RAK3401 example uses S140 6.1.1's
 `0x26000` application base:
 
 ```bash
 python3 tools/uf2_drive_hil.py \
   --board wiscore_rak3401 \
   --port /dev/serial/by-id/usb-EXACT_RAK3401_ID \
-  --serial 0B81C9C68D8D01B4 \
+  --serial EXACT_NONRESERVED_RADIO_SERIAL \
   --application /path/to/RAK_4631_repeater.uf2 \
   --sha256 EXACT_64_CHARACTER_SHA256 \
   --family 0xADA52840 \

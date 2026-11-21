@@ -11,6 +11,7 @@ application USB identity and an expected CLI reply return.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 import hashlib
 import json
@@ -18,6 +19,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import struct
 import subprocess
 import sys
@@ -373,6 +375,30 @@ def same_physical_device(candidate: UsbIdentity, selected: UsbIdentity) -> bool:
     )
 
 
+@contextmanager
+def claim_usb_device(selected: UsbIdentity):
+    import fcntl  # The mounted-drive HIL runner is Linux-only.
+
+    owner = os.geteuid()
+    # Use the physical port, not ttyACM or the serial, which can change at DFU entry.
+    port = hashlib.sha256(selected.path_stem.encode()).hexdigest()[:24]
+    path = Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp")
+    lock_path = path / f"otafix-uf2-{owner}-{port}.lock"
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != owner or info.st_mode & 0o077:
+            raise HilError(f"refusing unsafe HIL USB lock: {lock_path}")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise HilError(f"another UF2 HIL test has claimed USB path {selected.path_stem}") from error
+        # Leave the inode in place so a contender cannot open a second lock.
+        yield lock_path
+    finally:
+        os.close(fd)
+
+
 def _flatten_lsblk(nodes: Iterable[dict[str, Any]]) -> Iterable[dict[str, Any]]:
     for node in nodes:
         yield node
@@ -573,6 +599,33 @@ def wait_for_application(selected: UsbIdentity, timeout: float) -> UsbIdentity:
     raise HilError(
         f"application USB identity {selected.vid}:{selected.pid} did not return"
     )
+
+
+def bootloader_storage_present(boot: UsbIdentity) -> bool:
+    for record in list_block_records():
+        node = record.get("name")
+        if not node or record.get("type") not in {"disk", "part"}:
+            continue
+        try:
+            current = usb_identity(node)
+        except HilError:
+            # A stale udev entry for the original block node is not proof of disconnect.
+            if node == boot.node:
+                return True
+            continue
+        if (current.vid, current.pid) == (boot.vid, boot.pid) and same_physical_device(current, boot):
+            return True
+    return False
+
+
+def wait_for_bootloader_departure(boot: UsbIdentity, deadline: float) -> None:
+    absent = 0
+    while time.monotonic() < deadline:
+        absent = 0 if bootloader_storage_present(boot) else absent + 1
+        if absent >= 2:
+            return
+        time.sleep(0.25)
+    raise HilError(f"UF2 storage did not leave USB path {boot.path_stem} after the copy")
 
 
 def read_kernel_log() -> list[str]:
@@ -782,6 +835,17 @@ def run_hil(
         "kernel_log_checked": not args.skip_kernel_log,
         "terminal_mode": "companion" if args.companion_terminal else "repeater",
     })
+    with claim_usb_device(selected) as lock:
+        report["usb_claim"] = str(lock)
+        if usb_identity(selected.node) != selected:
+            raise HilError("selected application USB identity changed before the HIL claim")
+        return run_claimed_hil(args, report, started, profile, selected, meshcli)
+
+
+def run_claimed_hil(
+    args: argparse.Namespace, report: dict[str, Any], started: float,
+    profile: BoardProfile, selected: UsbIdentity, meshcli: str,
+) -> dict[str, Any]:
     before_reply = verify_application_reply(
         meshcli,
         selected.node,
@@ -816,6 +880,7 @@ def run_hil(
         report["mount_owned_by_test"] = owned_mount
 
         revalidate_block_and_mount(selected, profile, block, mountpoint)
+        report["uf2_copy_started"] = True
         copy_result, sync_result = copy_and_sync(
             args.application, mountpoint, args.copy_timeout
         )
@@ -830,7 +895,12 @@ def run_hil(
             owned_mount = False
             report["unmounted_before_application_return"] = True
 
-        returned = wait_for_application(selected, args.return_timeout)
+        # An unmounted drive or a stale application serial node is not proof
+        # that the bootloader exited. Share one deadline across both checks.
+        deadline = time.monotonic() + args.return_timeout
+        wait_for_bootloader_departure(block.identity, deadline)
+        report["bootloader_storage_departed"] = True
+        returned = wait_for_application(selected, max(0.0, deadline - time.monotonic()))
         report["returned_application_usb"] = asdict(returned)
         reply = verify_application_reply(
             meshcli,
@@ -905,7 +975,7 @@ def main() -> int:
         report["error"] = str(error)
         write_report(args.report, report)
         print(f"FAIL: {error}", file=sys.stderr)
-        if args.execute:
+        if report.get("uf2_copy_started"):
             print(
                 "The application may now be invalid. Keep the board in recovery "
                 "and restore the hash-pinned application through a known-good path.",
@@ -915,8 +985,8 @@ def main() -> int:
     write_report(args.report, report)
     if report["status"] == "PASS":
         print(
-            "PASS: mounted-drive application UF2 copy, flush, application return, "
-            "CLI reply, and kernel I/O-error gate"
+            "PASS: mounted-drive application UF2 copy, flush, bootloader departure, "
+            "application return, CLI reply, and kernel I/O-error gate"
         )
     else:
         print(

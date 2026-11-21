@@ -4,7 +4,8 @@
 from __future__ import annotations
 
 import hashlib
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext
+from dataclasses import replace
 import importlib.util
 from pathlib import Path
 import struct
@@ -265,9 +266,48 @@ class IdentityTests(unittest.TestCase):
 
 
 class CopyAndKernelTests(unittest.TestCase):
+    def test_exclusive_usb_path_claim_survives_node_and_serial_changes(self) -> None:
+        selected = hil.UsbIdentity("/dev/ttyACM0", "1234", "usb-1.1", "239a", "8029", "RAK3401", "00")
+        reenumerated = replace(selected, node="/dev/ttyACM1", serial="5678")
+        other = replace(selected, path_stem="usb-1.2")
+        with tempfile.TemporaryDirectory() as directory, mock.patch.dict(hil.os.environ, XDG_RUNTIME_DIR=directory):
+            with hil.claim_usb_device(selected) as original:
+                with self.assertRaisesRegex(hil.HilError, "another UF2 HIL test has claimed"):
+                    with hil.claim_usb_device(reenumerated):
+                        self.fail("the same physical USB port was claimed twice")
+                with hil.claim_usb_device(other) as other_claim:
+                    self.assertNotEqual(original, other_claim)
+            with hil.claim_usb_device(reenumerated) as reopened:
+                self.assertEqual(reopened, original)
+
+    def test_mounted_state_and_block_name_do_not_prove_disconnect(self) -> None:
+        boot = hil.UsbIdentity("/dev/sda", "1234", "usb-1.1", "239a", "0029", "RAK3401", "00")
+        records = [{"name": "/dev/sdb", "type": "disk", "mountpoints": []}]
+        with mock.patch.object(hil, "list_block_records", return_value=records):
+            with mock.patch.object(hil, "usb_identity", return_value=replace(boot, node="/dev/sdb")):
+                self.assertTrue(hil.bootloader_storage_present(boot))
+            with mock.patch.object(hil, "usb_identity", return_value=replace(boot, path_stem="usb-1.2")):
+                self.assertFalse(hil.bootloader_storage_present(boot))
+            records[0]["name"] = boot.node
+            with mock.patch.object(hil, "usb_identity", side_effect=hil.HilError("stale udev")):
+                self.assertTrue(hil.bootloader_storage_present(boot))
+
+    def test_wait_requires_two_absent_samples_and_times_out_on_a_stalled_drive(self) -> None:
+        boot = hil.UsbIdentity("/dev/sda", "1234", "usb-1.1", "239a", "0029", "RAK3401", "00")
+        with mock.patch.object(hil.time, "sleep"):
+            with (mock.patch.object(hil.time, "monotonic", side_effect=range(10)),
+                  mock.patch.object(hil, "bootloader_storage_present", side_effect=[False, True, False, False]) as present):
+                hil.wait_for_bootloader_departure(boot, 10)
+                self.assertEqual(present.call_count, 4)
+            with (mock.patch.object(hil.time, "monotonic", side_effect=range(10)),
+                  mock.patch.object(hil, "bootloader_storage_present", return_value=True)):
+                with self.assertRaisesRegex(hil.HilError, "UF2 storage did not leave USB path"):
+                    hil.wait_for_bootloader_departure(boot, 3)
+
     def test_owned_mount_is_unmounted_before_waiting_for_application(self) -> None:
         selected = hil.UsbIdentity("/dev/ttyACM0", "1234", "usb-1.1", "239a", "8029", "RAK3401", "00")
-        block = hil.BlockDevice("/dev/sda", "vfat", "RAK3401", (), selected)
+        boot = replace(selected, node="/dev/sda", pid="0029")
+        block = hil.BlockDevice(boot.node, "vfat", "RAK3401", (), boot)
         image = hil.Uf2Image("app.uf2", "0" * 64, 512, 1, "0xADA52840", "0x26000", "0x26100")
         result = hil.CommandResult(0, "expected", 0.1)
         args = SimpleNamespace(board="wiscore_rak3401", application=Path("app.uf2"),
@@ -284,6 +324,7 @@ class CopyAndKernelTests(unittest.TestCase):
             "read_kernel_log": ["unchanged kernel log"], "serial_text_command": result,
             "wait_for_block_device": block, "mount_block_device": ("/tmp/uf2", True),
             "revalidate_block_and_mount": block,
+            "claim_usb_device": nullcontext(Path("/tmp/test-lock")),
         }
         with ExitStack() as stack:
             for name, value in stubs.items():
@@ -292,12 +333,16 @@ class CopyAndKernelTests(unittest.TestCase):
                                                   (calls.append("copy/sync") or (result, result))))
             unmount = stack.enter_context(mock.patch.object(hil, "unmount_owned", side_effect=lambda *a:
                                                             calls.append("unmount")))
+            departed = stack.enter_context(mock.patch.object(hil, "wait_for_bootloader_departure", side_effect=lambda *a:
+                                                             calls.append("confirm departure")))
             stack.enter_context(mock.patch.object(hil, "wait_for_application", side_effect=lambda *a:
                                                   (calls.append("wait for app") or selected)))
             report = hil.run_hil(args)
-        self.assertEqual(calls, ["copy/sync", "unmount", "wait for app"])
+        self.assertEqual(calls, ["copy/sync", "unmount", "confirm departure", "wait for app"])
         unmount.assert_called_once_with("/tmp/uf2", "/dev/sda")
+        self.assertEqual(departed.call_args.args[0], boot)
         self.assertTrue(report["unmounted_before_application_return"])
+        self.assertTrue(report["bootloader_storage_departed"])
         self.assertEqual(report["status"], "PASS")
 
     def test_kernel_capture_uses_pi_compatible_raw_option(self) -> None:
