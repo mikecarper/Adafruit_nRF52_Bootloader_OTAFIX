@@ -61,6 +61,30 @@ sensors, RTC, haptic driver, buzzer, radio reset and charge/status inputs remain
 undriven at reset. This limits speculative electrical behavior; it does not
 prove that the product power controller will remain awake throughout DFU.
 
+## Linux Legacy BLE application updates
+
+For the internal-staging X1, use the Linux updater's expected name
+`X1INT_DFU` and model `MeshTracker X1` with the exact BLE address and
+application ZIP SHA-256. There is no bootloader update required for this fix.
+The client handles the shortened `X1INT_DF` advertisement and the cached
+`X1_OTA` name, but verifies the connected device's model and live Legacy DFU
+revision `0x0008` before writing. The buttonless application reports `0x0001`
+and is not a firmware-transfer target. The aliases are not enabled for
+SoftDevice/bootloader recovery ZIPs.
+
+With an authenticated Companion handoff, BlueZ may keep the Companion's
+ordinary advertising name until the bootloader connection is established.
+For X1 application packages only, an exact address and advertised Legacy
+service permit a read-only connection even when the scan name is stale. This
+path cannot begin transfer until BlueZ reports the full `X1INT_DFU` name on
+that connected device, and the live model and revision checks also pass.
+
+On 2026-11-23 the sealed X1 passed that discovery path both with writes
+blocked and with a complete, application-only update. The target acknowledged
+all 628,892 bytes and validated the image; the same physical USB device came
+back as Companion `03214a16` with the preview.2 bootloader unchanged. This
+does not qualify phone or browser Bluetooth update behavior.
+
 ## Physical regression checklist
 
 For future local hardware validation, capture the exact production hardware

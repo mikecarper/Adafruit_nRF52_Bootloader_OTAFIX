@@ -9,9 +9,12 @@ project:
 
 It is fail-closed.  The ZIP's SHA-256, advertised address and name, advertised
 and connected DFU service, and required DIS model must all match before START
-DFU.  Packet receipt notifications are cumulative and must equal the
-exact byte count sent.  A missing, malformed, short, or ahead receipt aborts
-the transfer rather than guessing whether the target accepted data.
+DFU. X1 application updates also require a live Legacy bootloader revision
+read. If the name reported during discovery is stale, the X1's full name must
+be verified after connecting, before any DFU writes. Packet receipt
+notifications are cumulative and must equal the exact byte count sent. A
+missing, malformed, short, or ahead receipt aborts the transfer rather than
+guessing whether the target accepted data.
 
 PRN is also the write window.  At the universally compatible 20-byte packet
 size it starts at eight writes and may move to 16 and then 32 only after
@@ -51,7 +54,15 @@ from typing import Any, Callable, Protocol
 DFU_SERVICE = "00001530-1212-efde-1523-785feabcd123"
 DFU_CONTROL = "00001531-1212-efde-1523-785feabcd123"
 DFU_PACKET = "00001532-1212-efde-1523-785feabcd123"
+DFU_REVISION = "00001534-1212-efde-1523-785feabcd123"
 DIS_MODEL_NUMBER = "00002a24-0000-1000-8000-00805f9b34fb"
+
+X1_DFU_NAME = "X1INT_DFU"
+X1_DFU_MODEL = "MeshTracker X1"
+# The legacy advertisement has room for eight name bytes. BlueZ can keep the
+# complete application name instead of replacing it with the shortened name.
+X1_DFU_DISCOVERY_ALIASES = ("X1INT_DF", "X1_OTA")
+X1_NAME_TIMEOUT = 3.0
 
 OP_START = 0x01
 OP_INITIALIZE = 0x02
@@ -399,6 +410,8 @@ def select_advertisement(
     discovered: dict[Any, tuple[Any, Any]],
     address: str,
     expected_name: str,
+    *,
+    defer_name_check: bool = False,
 ) -> tuple[Any, Any]:
     """Select exactly one advertisement matching all pre-connection gates."""
 
@@ -412,7 +425,7 @@ def select_advertisement(
             f"expected exactly one advertisement for {address}, found {len(matches)}"
         )
     device, advertisement = matches[0]
-    if advertisement.local_name != expected_name:
+    if not defer_name_check and advertisement.local_name != expected_name:
         raise DfuError(
             f"advertised-name mismatch at {device.address}: got "
             f"{advertisement.local_name!r}, expected {expected_name!r}"
@@ -1268,6 +1281,69 @@ async def read_model(client: Any, expected_model: str) -> str:
     return model
 
 
+async def require_legacy_bootloader_revision(client: Any) -> None:
+    if client.services.get_characteristic(DFU_REVISION) is None:
+        raise DfuError("connected X1 does not expose the Legacy DFU revision")
+    try:
+        revision = bytes(await client.read_gatt_char(DFU_REVISION))
+    except Exception as exc:
+        raise DfuError(f"could not read X1 Legacy DFU revision: {exc}") from exc
+    # The buttonless application shares the advertised service but uses 0x0001.
+    if revision != b"\x08\x00":
+        raise DfuError(
+            "connected X1 is not running the Legacy DFU bootloader (expected revision 0x0008)"
+        )
+
+
+async def require_connected_x1_name(client: Any, device: Any, adapter: str) -> None:
+    # Bleak's BlueZ client.name reports Alias, which can be set by the user.
+    # Use the remote Name on the exact connected object, not the scan snapshot.
+    try:
+        from dbus_fast import BusType, Message, MessageType
+        from dbus_fast.aio import MessageBus
+    except ImportError as exc:
+        raise DfuError("verifying a stale X1 discovery name requires the BlueZ backend") from exc
+
+    address = str(client.address).upper()
+    path = f"/org/bluez/{adapter}/dev_{address.replace(':', '_')}"
+    details = getattr(device, "details", None)
+    if not isinstance(details, dict) or details.get("path") != path:
+        raise DfuError("cannot verify the connected X1 name on the selected BlueZ adapter")
+
+    async def wait_for_name() -> None:
+        bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+        try:
+            while client.is_connected:
+                reply = await bus.call(Message(
+                    destination="org.bluez", path=path,
+                    interface="org.freedesktop.DBus.Properties", member="GetAll",
+                    signature="s", body=["org.bluez.Device1"],
+                ))
+                if reply is None or reply.message_type != MessageType.METHOD_RETURN:
+                    raise DfuError("could not read the connected X1 name from BlueZ")
+                props, = reply.body
+                peer_address = props.get("Address")
+                if peer_address is None or peer_address.value.upper() != address:
+                    raise DfuError("BlueZ no longer reports the selected X1 address")
+                connected = props.get("Connected")
+                if not client.is_connected or connected is None or not connected.value:
+                    break
+                name = props.get("Name")
+                if name is not None and name.value == X1_DFU_NAME:
+                    return
+                await asyncio.sleep(0.15)
+            raise DfuError("X1 disconnected before its bootloader name was verified")
+        finally:
+            bus.disconnect()
+
+    try:
+        await asyncio.wait_for(wait_for_name(), X1_NAME_TIMEOUT)
+    except asyncio.TimeoutError as exc:
+        raise DfuError(
+            f"connected X1 did not report the full bootloader name {X1_DFU_NAME!r}"
+        ) from exc
+
+
 def ignore_termination_signals() -> dict[int, Any]:
     previous: dict[int, Any] = {}
     for name in ("SIGHUP", "SIGINT", "SIGTERM"):
@@ -1368,6 +1444,11 @@ async def run(args: argparse.Namespace) -> None:
         raise DfuError("Bleak is required; install it in a dedicated pipx environment") from exc
 
     package = read_package(args.package, args.sha256)
+    x1_application = (
+        package.kind == "application"
+        and args.expected_name == X1_DFU_NAME
+        and args.expected_model == X1_DFU_MODEL
+    )
     print(
         f"Package verified: kind={package.kind}, SHA-256={package.sha256}, "
         f"SD={package.softdevice_size}, BL={package.bootloader_size}, "
@@ -1380,10 +1461,13 @@ async def run(args: argparse.Namespace) -> None:
         **bleak_adapter_kwargs(BleakScanner, args.adapter),
     )
     device, advertisement = select_advertisement(
-        discovered, args.address, args.expected_name
+        discovered, args.address, args.expected_name, defer_name_check=x1_application,
+    )
+    verify_name_on_connection = x1_application and advertisement.local_name not in (
+        X1_DFU_NAME, *X1_DFU_DISCOVERY_ALIASES,
     )
     print(
-        f"Advertisement verified: address={device.address}, "
+        f"Advertisement {'candidate' if verify_name_on_connection else 'verified'}: address={device.address}, "
         f"name={advertisement.local_name!r}, Legacy DFU service present",
         flush=True,
     )
@@ -1422,6 +1506,12 @@ async def run(args: argparse.Namespace) -> None:
 
         model = await read_model(client, args.expected_model)
         print(f"DIS model verified: {model!r}", flush=True)
+        if x1_application:
+            await require_legacy_bootloader_revision(client)
+            print("X1 Legacy DFU bootloader revision verified: 0x0008", flush=True)
+        if verify_name_on_connection:
+            await require_connected_x1_name(client, device, args.adapter)
+            print(f"Connected X1 bootloader name verified: {X1_DFU_NAME!r}", flush=True)
         packet_size = await negotiate_packet_size(client, args.high_mtu)
         await lab_pre_start_pause(
             args.lab_pre_start_pause, client, disconnected
