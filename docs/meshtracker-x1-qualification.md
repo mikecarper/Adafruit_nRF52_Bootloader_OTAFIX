@@ -72,9 +72,18 @@ revision `0x0008` before writing. The buttonless application reports `0x0001`
 and is not a firmware-transfer target. The aliases are not enabled for
 SoftDevice/bootloader recovery ZIPs.
 
-The preview.2 bench completed an application update with the original client
-after manually verifying discovery. The Linux client fix is covered by
-simulated discovery tests; it was not run against the sealed radio.
+With an authenticated Companion handoff, BlueZ may keep the Companion's
+ordinary advertising name until the bootloader connection is established.
+For X1 application packages only, an exact address and advertised Legacy
+service permit a read-only connection even when the scan name is stale. This
+path cannot begin transfer until BlueZ reports the full `X1INT_DFU` name on
+that connected device, and the live model and revision checks also pass.
+
+On 2026-11-23 the sealed X1 passed that discovery path both with writes
+blocked and with a complete, application-only update. The target acknowledged
+all 628,892 bytes and validated the image; the same physical USB device came
+back as Companion `03214a16` with the preview.2 bootloader unchanged. This
+does not qualify phone or browser Bluetooth update behavior.
 
 ## Physical regression checklist
 
