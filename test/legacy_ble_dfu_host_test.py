@@ -565,6 +565,104 @@ class IdentityAndMtuTests(unittest.TestCase):
         self.assertTrue(model_action.required)
 
 
+class X1DiscoveryTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        directory = Path(temporary.name)
+        self.packages = {
+            kind: make_package(directory, kind)
+            for kind in ("application", "softdevice_bootloader")
+        }
+
+    async def attempt(
+        self,
+        *,
+        name: str,
+        error: str = "test stopped before transfer",
+        accepted: bool = False,
+        address: str = "AA:BB:CC:DD:EE:FF",
+        connected_address: str | None = None,
+        advertised_service: bool = True,
+        has_revision: bool = True,
+        revision: bytes = b"\x08\x00",
+        model: bytes = b"MeshTracker X1",
+        expected_model: str = "MeshTracker X1",
+        package_kind: str = "application",
+    ) -> None:
+        expected_address = "AA:BB:CC:DD:EE:FF"
+        device = IdentityAndMtuTests.Device(address)
+        advertisement = IdentityAndMtuTests.Advertisement(
+            name, [dfu.DFU_SERVICE] if advertised_service else []
+        )
+        client = mock.Mock(
+            address=connected_address or address,
+            is_connected=True,
+            connect=mock.AsyncMock(),
+            disconnect=mock.AsyncMock(),
+            start_notify=mock.AsyncMock(),
+            write_gatt_char=mock.AsyncMock(),
+            read_gatt_char=mock.AsyncMock(
+                side_effect={
+                    dfu.DIS_MODEL_NUMBER: model,
+                    dfu.DFU_REVISION: revision,
+                }.__getitem__
+            ),
+        )
+        client.services.get_characteristic.side_effect = (
+            lambda uuid: uuid if has_revision or uuid != dfu.DFU_REVISION else None
+        )
+        backend = mock.Mock(BleakClient=mock.Mock(return_value=client))
+        backend.BleakScanner.discover = mock.AsyncMock(
+            return_value={address: (device, advertisement)}
+        )
+        path, digest = self.packages[package_kind]
+        args = dfu.parser().parse_args([
+            "--address", expected_address, "--expected-name", "X1INT_DFU",
+            "--expected-model", expected_model, "--package", str(path),
+            "--sha256", digest,
+        ])
+        with (
+            mock.patch.dict(sys.modules, {"bleak": backend}),
+            mock.patch.object(
+                dfu, "negotiate_packet_size", side_effect=dfu.DfuError("test stopped before transfer")
+            ) as negotiate,
+            self.assertRaisesRegex(dfu.DfuError, error),
+        ):
+            await dfu.run(args)
+        if accepted:
+            negotiate.assert_awaited_once_with(client, False)
+            self.assertEqual(
+                client.read_gatt_char.await_args_list,
+                [mock.call(dfu.DIS_MODEL_NUMBER), mock.call(dfu.DFU_REVISION)],
+            )
+        else:
+            negotiate.assert_not_awaited()
+        client.start_notify.assert_not_awaited()
+        client.write_gatt_char.assert_not_awaited()
+
+    async def test_full_shortened_and_cached_names_reach_transfer_gate(self) -> None:
+        for name in ("X1INT_DFU", "X1INT_DF", "X1_OTA"):
+            with self.subTest(name=name):
+                await self.attempt(name=name, accepted=True)
+
+    async def test_cached_application_cannot_receive_dfu_writes(self) -> None:
+        await self.attempt(name="X1_OTA", revision=b"\x01\x00", error="not running the Legacy")
+        await self.attempt(name="X1_OTA", has_revision=False, error="does not expose the Legacy")
+        await self.attempt(name="X1_OTA", revision=b"\x08\x00\x00", error="not running the Legacy")
+        await self.attempt(name="X1_OTA", model=b"Other board", error="DIS model mismatch")
+
+    async def test_other_discovery_checks_stay_strict(self) -> None:
+        await self.attempt(name="X1_OTA", address="AA:BB:CC:DD:EE:01", error="found 0")
+        await self.attempt(
+            name="X1_OTA", connected_address="AA:BB:CC:DD:EE:01", error="connected-address mismatch"
+        )
+        await self.attempt(name="X1_OTA", advertised_service=False, error="does not advertise")
+        await self.attempt(name="X1INT_DFX", error="name mismatch")
+        await self.attempt(name="X1_OTA", expected_model="Other board", error="name mismatch")
+        await self.attempt(name="X1INT_DF", package_kind="softdevice_bootloader", error="name mismatch")
+
+
 class AdaptiveTests(unittest.TestCase):
     def test_every_fast_promotion_is_a_bounded_probe(self) -> None:
         adaptive = dfu.AdaptivePrn()

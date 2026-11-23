@@ -61,6 +61,21 @@ sensors, RTC, haptic driver, buzzer, radio reset and charge/status inputs remain
 undriven at reset. This limits speculative electrical behavior; it does not
 prove that the product power controller will remain awake throughout DFU.
 
+## Linux Legacy BLE application updates
+
+For the internal-staging X1, use the Linux updater's expected name
+`X1INT_DFU` and model `MeshTracker X1` with the exact BLE address and
+application ZIP SHA-256. There is no bootloader update required for this fix.
+The client handles the shortened `X1INT_DF` advertisement and the cached
+`X1_OTA` name, but verifies the connected device's model and live Legacy DFU
+revision `0x0008` before writing. The buttonless application reports `0x0001`
+and is not a firmware-transfer target. The aliases are not enabled for
+SoftDevice/bootloader recovery ZIPs.
+
+The preview.2 bench completed an application update with the original client
+after manually verifying discovery. The Linux client fix is covered by
+simulated discovery tests; it was not run against the sealed radio.
+
 ## Physical regression checklist
 
 For future local hardware validation, capture the exact production hardware
