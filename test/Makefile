@@ -74,7 +74,11 @@ readback_x1_internal_v7_test: readback_test.c $(SRC)/ota_delta.c $(SRC)/detools/
     $(SRC)/ota_hybrid_handoff.h $(SRC)/ota_ram_info.h $(SRC)/ota_layout.h
 	$(CC) $(CFLAGS) $(X1_INTERNAL_FLAGS) $(INC) readback_test.c \
 		$(SRC)/detools/detools.c $(SRC)/sha256.c $(SRC)/usb/uf2/bootloader_image.c -o $@
-bootloader_mota_x1_internal_v7_test: bootloader_mota_test.c $(SRC)/ota_delta.c \
+bootloader_mota_raw_x1_test bootloader_mota_raw_qspi_test bootloader_mota_raw_sd_test \
+bootloader_mota_raw_only_rak_test: override CFLAGS += -DMOTA_APP_PREPARED_BOOTLOADER=1
+bootloader_mota_raw_only_rak_test: override CFLAGS += -DMOTA_APP_PREPARED_BOOTLOADER_ONLY=1
+
+bootloader_mota_x1_internal_v7_test bootloader_mota_raw_x1_test: bootloader_mota_test.c $(SRC)/ota_delta.c \
     $(SRC)/detools/detools.c $(SRC)/sha256.c $(SRC)/usb/uf2/bootloader_image.c \
     $(SRC)/crc32.h $(SRC)/ota_hybrid_handoff.h $(SRC)/ota_ram_info.h $(SRC)/ota_layout.h
 	$(CC) $(CFLAGS) $(X1_INTERNAL_FLAGS) -DTEST_GENERIC_INTERNAL=1 \
@@ -152,7 +156,7 @@ rak_auto_hybrid_4631_test rak_auto_hybrid_3401_test: readback_test.c $(SRC)/ota_
 		readback_test.c $(SRC)/detools/detools.c $(SRC)/sha256.c $(SRC)/usb/uf2/bootloader_image.c -o $@
 
 bootloader_mota_recovery_test: override CFLAGS += -DRECOVERY_ALLOW_ALL_BOARDS=1
-bootloader_mota_test bootloader_mota_recovery_test: bootloader_mota_test.c $(SRC)/ota_delta.c $(SRC)/detools/detools.c \
+bootloader_mota_test bootloader_mota_recovery_test bootloader_mota_raw_qspi_test: bootloader_mota_test.c $(SRC)/ota_delta.c $(SRC)/detools/detools.c \
                       $(SRC)/sha256.c $(SRC)/usb/uf2/bootloader_image.c \
                       $(SRC)/usb/uf2/bootloader_image.h $(SRC)/ota_bl_info.h $(SRC)/ota_layout.h
 	$(CC) $(CFLAGS) -DOTA_DELTA_HOST_TEST -DMOTA_QSPI_FLASH -DMOTA_QSPI_BOOTLOADER_UPDATE \
@@ -172,9 +176,9 @@ bootloader_mota_internal_test: bootloader_mota_test.c $(SRC)/ota_delta.c $(SRC)/
 
 bootloader_mota_rak_auto_3401_test: RAK_AUTO_BOARD=3401
 bootloader_mota_rak_auto_3401_test: RAK_AUTO_TARGET=0x23818A80u
-bootloader_mota_rak_auto_4631_test: RAK_AUTO_BOARD=4631
-bootloader_mota_rak_auto_4631_test: RAK_AUTO_TARGET=0x2D0DF000u
-bootloader_mota_rak_auto_3401_test bootloader_mota_rak_auto_4631_test: bootloader_mota_test.c \
+bootloader_mota_rak_auto_4631_test bootloader_mota_raw_only_rak_test: RAK_AUTO_BOARD=4631
+bootloader_mota_rak_auto_4631_test bootloader_mota_raw_only_rak_test: RAK_AUTO_TARGET=0x2D0DF000u
+bootloader_mota_rak_auto_3401_test bootloader_mota_rak_auto_4631_test bootloader_mota_raw_only_rak_test: bootloader_mota_test.c \
     $(SRC)/ota_delta.c $(SRC)/detools/detools.c $(SRC)/sha256.c \
     $(SRC)/usb/uf2/bootloader_image.c $(SRC)/ota_bl_info.h $(SRC)/ota_layout.h
 	$(CC) $(CFLAGS) -DOTA_DELTA_HOST_TEST -DMOTA_INTERNAL_BOOTLOADER_UPDATE \
@@ -213,7 +217,7 @@ bootloader_mota_qspi_generic_test bootloader_mota_qspi_generic_v7_test bootloade
 	$(CC) $(CFLAGS) -DOTA_DELTA_HOST_TEST -DTEST_GENERIC_QSPI -DMOTA_QSPI_FLASH -DMOTA_QSPI_BOOTLOADER_UPDATE $(INC) \
 		bootloader_mota_test.c $(SRC)/detools/detools.c $(SRC)/sha256.c $(SRC)/usb/uf2/bootloader_image.c -o $@
 
-bootloader_mota_sd_test: bootloader_mota_test.c $(SRC)/ota_delta.c $(SRC)/detools/detools.c \
+bootloader_mota_sd_test bootloader_mota_raw_sd_test: bootloader_mota_test.c $(SRC)/ota_delta.c $(SRC)/detools/detools.c \
                          $(SRC)/sha256.c $(SRC)/usb/uf2/bootloader_image.c \
                          $(SRC)/usb/uf2/bootloader_image.h $(SRC)/ota_bl_info.h $(SRC)/ota_layout.h \
                          $(SRC)/ota_sd_auth.h $(SRC)/ota_sd_boot_token.h $(SRC)/ota_sd_spi.h
@@ -458,6 +462,7 @@ sanitize:
 	$(MAKE) CFLAGS="$(SANITIZER_CFLAGS)" check
 
 clean:
+	rm -f bootloader_mota_raw_x1_test bootloader_mota_raw_qspi_test bootloader_mota_raw_sd_test bootloader_mota_raw_only_rak_test
 	rm -f readback_qspi_internal_test
 	rm -f ota_rollback_record_test
 	rm -f readback_x1_internal_v7_test bootloader_mota_x1_internal_v7_test
@@ -472,7 +477,11 @@ clean:
 	rm -f bootloader_image_recovery_test dfu_image_policy_recovery_test bootloader_mota_recovery_test
 	rm -f apply_sim readback_test readback_test_v7 readback_internal_test bootloader_image_test sd_apply_test qspi_apply_test bootloader_mota_test bootloader_mota_internal_test bootloader_mota_sd_test softdevice_fwid_test dfu_init_bounds_test dfu_init_signed_bounds_test qspi_alignment_test qspi_wake_test usb_wait_test dfu_timeout_test uf2_write_state_test bootloader_settings_guard_test dfu_image_policy_test dfu_entry_test peer_data_layout_test peer_data_layout_nrf52_test peer_data_layout_nrf52833_test pstorage_busy_test
 
-.PHONY: check sanitize clean
+.PHONY: check sanitize clean check-prepared-bootloader
+
+check-prepared-bootloader: bootloader_mota_raw_x1_test bootloader_mota_raw_qspi_test \
+  bootloader_mota_raw_sd_test bootloader_mota_raw_only_rak_test
+	@set -e; for test in $^; do ./$$test; done
 
 # These executables include the retained handoff headers and/or image validator.
 # Rebuild them when the shared CRC implementation changes, not only its callers.
@@ -496,6 +505,7 @@ check: bootloader_mota_rak_auto_3401_test bootloader_mota_rak_auto_4631_test
 check: bootloader_mota_rak_recovery_3401_test bootloader_mota_rak_recovery_4631_test
 check: uf2_volume_test uf2_volume_standard_test
 check: check-tower-dual
+check: check-prepared-bootloader
 check: rak_auto_apply_4631_test rak_auto_apply_3401_test rak_auto_hybrid_4631_test rak_auto_hybrid_3401_test
 check: readback_x1_internal_v7_test bootloader_mota_x1_internal_v7_test
 check: readback_solar_internal_test bootloader_mota_solar_internal_test

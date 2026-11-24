@@ -678,6 +678,65 @@ static void report(const char *name, int ok, volatile int *failures) {
   }
 }
 
+#if defined(MOTA_APP_PREPARED_BOOTLOADER)
+static void test_prepared_bootloader(const uint8_t *image, volatile int *failures) {
+  static const struct {
+    const char *name;
+    uint8_t status;
+  } cases[] = {
+    {"prepared image reaches MBR without writes or external I/O", GPREGRET2_BL_MBR_HANDOFF},
+    {"prepared image requires an intact record", GPREGRET2_BL_CONTAINER},
+    {"prepared image rejects corruption", GPREGRET2_BL_INTEGRITY},
+    {"prepared image requires a version-matched envelope", GPREGRET2_BL_MANIFEST},
+    {"prepared image rejects a CRC-bound bank in scratch", GPREGRET2_BL_POLICY},
+    {"prepared image requires valid vectors even when SHA matches", GPREGRET2_BL_INTEGRITY},
+    {"prepared image rejects a different embedded board", GPREGRET2_BL_MANIFEST},
+    {"prepared image reports a returned MBR call", GPREGRET2_BL_MBR_RETURNED},
+#if MOTA_RAW_BOOT_ABI == 2u
+    {"external prepared image refuses a mismatched target", GPREGRET2_BL_POLICY},
+#endif
+  };
+  for (unsigned i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+    reset_device();
+    g_gpregret2 = MOTA_RAW_BOOT_SOURCE;
+    uint8_t *raw = FLASH + MOTA_RAW_BOOT_START;
+    uint8_t *record = raw + MOTA_NRF52_BL_SIZE;
+    memcpy(raw, image, MOTA_NRF52_BL_SIZE);
+    wr32(record, 0x30574152u | (MOTA_RAW_BOOT_ABI << 24u));
+    wr32(record + 4, TEST_CANDIDATE_BOOT_VERSION);
+#if MOTA_RAW_BOOT_ABI == 2u
+    wr32(record + 40, TEST_BOARD_ID);
+#endif
+    if (i == 1u) record[0] = 0xFFu;
+    if (i == 3u) wr32(record + 4, TEST_CANDIDATE_BOOT_VERSION + 1u);
+    if (i == 4u) {
+      g_bank0_crc = 1u;
+      g_bank0_size = MOTA_RAW_BOOT_START - MOTA_NRF52_APP_BASE + 1u;
+    }
+    if (i == 5u) wr32(raw, 0u);
+    if (i == 6u) {
+      wr32(raw + MANIFEST_OFFSET + offsetof(bootloader_update_manifest_t, board_id), 0u);
+      fix_image_crc(raw);
+    }
+#if MOTA_RAW_BOOT_ABI == 2u
+    if (i == 8u) wr32(record + 40, 0u);
+#endif
+    sha_bytes(raw, MOTA_NRF52_BL_SIZE, record + 8);
+    if (i == 2u) raw[128] ^= 1u;
+    g_mbr_success = i != 7u;
+    const bool applied = ota_delta_check_and_apply();
+    const bool should_call_mbr = i == 0u || i == 7u;
+    report(cases[i].name, applied == (i == 0u) && g_gpregret == 0u &&
+      g_gpregret2 == cases[i].status && g_mbr_calls == (int)should_call_mbr &&
+      (!should_call_mbr || (g_mbr_source == MOTA_RAW_BOOT_START && g_mbr_words == MOTA_NRF52_BL_SIZE / 4u)) &&
+      g_raw_pages_written == 0 && g_qspi_init_calls == 0 && g_qspi_deinit_calls == 0 &&
+      g_qspi_writes == 0 && g_settings_writes == 0 && app_unchanged() && old_bootloader_unchanged(), failures);
+    report("prepared request cannot be replayed after reset", !ota_delta_check_and_apply() &&
+      g_mbr_calls == (int)should_call_mbr, failures);
+  }
+}
+#endif
+
 #if defined(MOTA_QSPI_XIAO_IDENTITY)
 static int test_xiao_compatibility(uint8_t required_caps) {
   int failure_count = 0;
@@ -776,6 +835,20 @@ int main(void) {
   uint8_t *mota  = make_mota(image, MOTA_NRF52_BL_SIZE, 3,
                              MFLAG_FULL | MFLAG_SIGNED | MFLAG_BOOTLOADER,
                              TEST_TARGET_ID, TEST_HW_ID, &total);
+
+#if defined(MOTA_APP_PREPARED_BOOTLOADER)
+  test_prepared_bootloader(image, &failures);
+#if defined(MOTA_APP_PREPARED_BOOTLOADER_ONLY)
+  reset_device();
+  stage(mota, total);
+  report("raw-only build rejects the retired package handoff", !ota_delta_check_and_apply() &&
+    g_gpregret == 0u && g_gpregret2 == GPREGRET2_BL_CONTAINER && g_mbr_calls == 0 &&
+    g_raw_pages_written == 0 && app_unchanged() && old_bootloader_unchanged(), &failures);
+  free(mota);
+  free(image);
+  return failures ? 1 : 0;
+#endif
+#endif
 
   reset_device();
   stage(mota, total);

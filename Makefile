@@ -97,6 +97,12 @@ ifneq ($(MOTA_RAM_ARENA_SIZE),0)
 endif
 
 SDK_PATH     = lib/sdk/components
+ifeq ($(MOTA_APP_PREPARED_BOOTLOADER),1)
+CFLAGS += -DMOTA_APP_PREPARED_BOOTLOADER=1
+endif
+ifeq ($(MOTA_APP_PREPARED_BOOTLOADER_ONLY),1)
+CFLAGS += -DMOTA_APP_PREPARED_BOOTLOADER_ONLY=1
+endif
 SDK11_PATH   = lib/sdk11/components
 TUSB_PATH    = lib/tinyusb/src
 TCRYPT_PATH  = lib/tinycrypt/lib

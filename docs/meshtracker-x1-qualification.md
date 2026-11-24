@@ -11,11 +11,11 @@ internal staging described below. Existing 2.4.12 assets and their manifest are
 unchanged; a new release must publish the X1 files before remote downloaders
 can offer them. No local physical X1 test is claimed by this promotion.
 
-This change enables bootloader builds and exact-profile package validators and
-builders. It does not enable a released matching internal-staging MeshCore X1
-application or an application-driven LoRa bootloader-update handoff. That
-integration remains separate work. Existing external-staging X1 applications
-cannot supply this internal handoff.
+The matching MeshCore Repeater and Room builds use the internal OTA staging
+profile. Existing external-staging X1 applications cannot supply this handoff.
+The X1 bootloader includes both its legacy package receiver and the verified
+app-prepared `MOTARAW1` receiver by default. It does not require the raw path
+when upgrading from existing X1 firmware.
 
 ## Confirmed contracts
 
@@ -85,6 +85,29 @@ all 628,892 bytes and validated the image; the same physical USB device came
 back as Companion `03214a16` with the preview.2 bootloader unchanged. This
 does not qualify phone or browser Bluetooth update behavior.
 
+## Physical LoRa bootloader updates on 2026-11-23
+
+The same sealed X1 on Mercerwood ran the matching S140 v7 Repeater application,
+installed through USB serial DFU with the bootloader left in place. Signed
+40-block bootloader packages were downloaded from a separate sender over
+LoRa. The test used local USB commands to confirm installation. With the exact
+version/hash staged, the device refused an untrusted signer and an incorrect
+operator hash before rebooting.
+
+The test upgraded preview.2 to a local preview.3 build using the legacy
+package, then upgraded preview.3 to a local preview.4 build using app-prepared
+raw staging. Installed CRCs matched both candidates (`A85F96DA`, `3B573D16`),
+and the second upgrade reported successful MBR handoff (`C8`). The X1 returned
+to the same application digest (`F5EF2B18`) after each upgrade. The ephemeral
+test signer was removed and the radios' original transmit powers and normal
+radio modes were restored. No interruption was induced during the hardware
+MBR write; rejection and replay tests use the host simulator.
+
+An application-only serial DFU then booted the Room build. It reported the
+exact Room OTA target `E87DA657`, the same installed preview.4 CRC
+(`3B573D16`), and an empty signer allowlist. This was a Room startup and
+identity check, not a second physical Room bootloader self-update.
+
 ## Physical regression checklist
 
 For future local hardware validation, capture the exact production hardware
@@ -95,14 +118,13 @@ the product's power/reset controller does not interrupt lengthy USB, BLE or
 LoRa updates without additional GPIO servicing. Verify all untouched rails
 and recovery behavior against the schematic/measurements.
 
-When a matching **internal-staging S140-v7** X1 application and its LoRa
-bootloader-update integration are available, test exact-base delta apply,
-signed exact-profile bootloader self-update, wrong-base and cross-board
-rejection, and interrupted apply/recovery. No mOTA handoff
-from an external-staging application is compatible with this profile.
+Future hardware coverage should add application exact-base delta apply,
+wrong-base and cross-board rejection, and interrupted apply/recovery.
+No mOTA handoff from an external-staging application is compatible with
+this profile.
 Preserve identity/settings and perform the ordinary
 [hardware checks](meshcore-hardware-coverage.md#hardware-checks-before-promotion)
-when testing hardware. This work has not flashed hardware.
+when testing hardware.
 
 ## Source verification on 2026-11-11
 

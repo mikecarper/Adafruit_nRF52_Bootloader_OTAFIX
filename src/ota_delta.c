@@ -80,6 +80,49 @@
   #define MOTA_BOOT_UPDATE_CODEC_MASK ((1u << CODEC_FULL) | (1u << CODEC_INPLACE))
 #endif
 
+#if defined(MOTA_APP_PREPARED_BOOTLOADER_ONLY) && !defined(MOTA_APP_PREPARED_BOOTLOADER)
+  #error "Raw-only bootloader update requires MOTA_APP_PREPARED_BOOTLOADER"
+#endif
+#if defined(MOTA_APP_PREPARED_BOOTLOADER)
+  #if !defined(MOTA_BOOTLOADER_UPDATE_ENABLED)
+    #error "App-prepared updates require an existing bootloader-update profile"
+  #endif
+  #if defined(MOTA_QSPI_BOOTLOADER_UPDATE) || (defined(MOTA_SD_BOOTLOADER_UPDATE) && !defined(MOTA_RAK_SD_STORE))
+    #define MOTA_RAW_BOOT_START MOTA_NRF52_BL_SCRATCH_START
+    #define MOTA_RAW_BOOT_SOURCE 0xE0u
+    #define MOTA_RAW_BOOT_ABI 2u
+  #else
+    #define MOTA_RAW_BOOT_START MOTA_NRF52_INTERNAL_BL_SLOT_START
+    #define MOTA_RAW_BOOT_SOURCE 0xE2u
+    #define MOTA_RAW_BOOT_ABI 1u
+  #endif
+
+typedef struct {
+  uint32_t magic;
+  uint32_t version;
+  uint8_t hash[32];
+#if MOTA_RAW_BOOT_ABI == 2u
+  uint32_t board_id;
+#endif
+} mota_raw_boot_record_t;
+
+// The image is followed by the record in its own page. Keep both below InternalFS.
+_Static_assert(MOTA_RAW_BOOT_START + MOTA_NRF52_BL_SIZE + MOTA_NRF52_FLASH_PAGE <= MOTA_NRF52_APP_END,
+               "Prepared bootloader scratch must stay below InternalFS");
+_Static_assert(sizeof(mota_raw_boot_record_t) == (MOTA_RAW_BOOT_ABI == 1u ? 40u : 44u),
+               "Prepared bootloader handoff record ABI");
+
+__attribute__((used, aligned(4))) static const struct {
+  uint8_t magic[8];
+  uint16_t abi, record_len;
+  uint32_t source;
+} g_mota_raw_boot_info = {
+  {'M', 'O', 'T', 'A', 'R', 'A', 'W', '0' + MOTA_RAW_BOOT_ABI},
+  MOTA_RAW_BOOT_ABI, sizeof(mota_raw_boot_record_t), MOTA_RAW_BOOT_SOURCE,
+};
+_Static_assert(sizeof(g_mota_raw_boot_info) == 16u, "Prepared bootloader capability marker ABI");
+#endif
+
 // Capability marker the running MeshCore app scans for (see ota_bl_info.h). `used` + the reference in
 // ota_delta_check_and_apply() keep it through -ffunction/data-sections, --gc-sections and -flto.
 __attribute__((used, aligned(4))) const mota_bl_info_t g_mota_bl_info = {
@@ -1604,6 +1647,48 @@ static int mbr_copy_bootloader(uint32_t raw_start) {
 #endif
 }
 
+#if defined(MOTA_APP_PREPARED_BOOTLOADER)
+static bool reject_prepared_bootloader(uint32_t result) {
+  // This source never initializes an external storage bus.
+  gpregret2_set(result);
+  return false;
+}
+
+static bool apply_prepared_bootloader(void) {
+  const uint32_t start = MOTA_RAW_BOOT_START;
+  mota_raw_boot_record_t record;
+  fl_read(start + MOTA_NRF52_BL_SIZE, &record, sizeof(record));
+  if (record.magic != (0x30574152u | (MOTA_RAW_BOOT_ABI << 24u)) || !record.version) {
+    return reject_prepared_bootloader(GPREGRET2_BL_CONTAINER);
+  }
+  if (!ota_delta_live_app_fits_below(start)) {
+    return reject_prepared_bootloader(GPREGRET2_BL_POLICY);
+  }
+  const uint8_t *image = boot_image_pointer(start);
+  if (!image || !boot_vectors_valid(image) ||
+      !region_hash_valid(start, MOTA_NRF52_BL_SIZE, record.hash, false, UINT32_MAX)) {
+    return reject_prepared_bootloader(GPREGRET2_BL_INTEGRITY);
+  }
+  struct mota_min request;
+  request.fw_version = record.version;
+#if defined(MOTA_QSPI_XIAO_IDENTITY)
+  if ((record.board_id | 1u) != 0x28860045u) {
+    return reject_prepared_bootloader(GPREGRET2_BL_POLICY);
+  }
+  request.target_id = record.board_id;
+#elif MOTA_RAW_BOOT_ABI == 2u
+  if (record.board_id != BOOT_UPDATE_BOARD_ID) {
+    return reject_prepared_bootloader(GPREGRET2_BL_POLICY);
+  }
+#endif
+  if (!boot_image_metadata_valid_at(start, &request)) {
+    return reject_prepared_bootloader(GPREGRET2_BL_MANIFEST);
+  }
+  gpregret2_set(GPREGRET2_BL_MBR_HANDOFF);
+  return mbr_copy_bootloader(start) ? true : reject_prepared_bootloader(GPREGRET2_BL_MBR_RETURNED);
+}
+#endif
+
 __attribute__((noinline, noclone)) static bool boot_update_reject(const struct mota_min *m, uint32_t result) {
   gpregret2_set(result);
   if (m && m->approved && !clear_approval(m)) {
@@ -1639,6 +1724,14 @@ __attribute__((noinline, noclone)) static bool apply_bootloader_update(void) {
   const uint32_t source = gpregret2_get();
   gpregret_set(0); // consume first: every validation/copy failure is fail-closed
   gpregret2_set(GPREGRET2_BL_GATE);
+#if defined(MOTA_APP_PREPARED_BOOTLOADER)
+  if (source == MOTA_RAW_BOOT_SOURCE) {
+    return apply_prepared_bootloader();
+  }
+#if defined(MOTA_APP_PREPARED_BOOTLOADER_ONLY)
+  return reject_prepared_bootloader(GPREGRET2_BL_CONTAINER);
+#endif
+#endif
 #if defined(MOTA_SD_BOOTLOADER_UPDATE)
 #if defined(MOTA_SD_DUAL_STORE) || defined(MOTA_RAK_SD_STORE)
   g_sd_source = source == GPREGRET2_OTA_STAGE_SD;
@@ -1762,6 +1855,10 @@ static bool finish_apply(bool result) {
 
 static bool ota_apply_requested(void) {
   inherited_watchdog_feed();
+#if defined(MOTA_APP_PREPARED_BOOTLOADER)
+  const volatile uint8_t *raw_cap = &g_mota_raw_boot_info.magic[0];
+  if (*raw_cap == 0u) return finish_apply(false);
+#endif
 #if defined(MOTA_RAK_SD_STORE)
   // Real boots initialize .bss; also make a rejected/host-simulated invocation
   // incapable of leaking its selected source into a later unrelated request.
