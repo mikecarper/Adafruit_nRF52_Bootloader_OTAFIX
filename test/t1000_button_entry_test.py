@@ -31,6 +31,10 @@ class T1000ButtonTests(unittest.TestCase):
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include "usb_lock.h"
+#undef MESH_USB_LOCK_FS
+static uint8_t superblocks[256];
+#define MESH_USB_LOCK_FS superblocks
 #define PINNUM(p,n) ((p)*32+(n))
 #define NRF_GPIO_PIN_PULLUP 3
 #define NRF_GPIO_PIN_PULLDOWN 1
@@ -109,7 +113,8 @@ static void bootloader_dfu_start(bool ota, uint32_t timeout, bool cancel) {
         harness += function(main, "static void check_dfu_mode(void) {") + "\n"
         harness += r'''
 int main(int argc, char **argv) {
-  if (argc != 12) return 2;
+  if (argc != 13) return 2;
+  if (atoi(argv[12])) memcpy(superblocks + 180, "MCULOCK1", 8);
   held_until = strtoul(argv[1], NULL, 0);
   power.GPREGRET = strtoul(argv[2], NULL, 0);
   host_mounts = atoi(argv[3]);
@@ -159,13 +164,13 @@ int main(int argc, char **argv) {
     def run_entry(self, held_ms=0, magic=0, host=True, release=False,
                   single_tap=False, double_reset=False, second_held=False,
                   board="t1000_e", repress=False, valid_app=True, rollback=False,
-                  pin_reset=False):
+                  pin_reset=False, locked=False):
         output = subprocess.check_output([str(self.binaries[board]), str(held_ms), str(magic),
                                           str(int(host)), str(int(release)),
                                           str(int(single_tap)), str(int(double_reset)),
                                           str(int(second_held)), str(int(repress)),
                                           str(int(valid_app)), str(int(rollback)),
-                                          str(int(pin_reset))])
+                                          str(int(pin_reset)), str(int(locked))])
         return json.loads(output)
 
     def test_electrical_contract_and_idle_boot(self):
@@ -295,6 +300,17 @@ int main(int argc, char **argv) {
         for board in ("pca10056", "rak_recovery"):
             with self.subTest(board=board):
                 self.check_rollback_keeps_manual_recovery_and_first_reset_window(board)
+
+    def test_usb_lock_routes_wired_entries_to_ble(self):
+        for board in ("t1000_e", "meshtracker_x1", "rak_recovery"):
+            for entry in (dict(magic=0x4e), dict(magic=0x57), dict(double_reset=True),
+                          dict(held_ms=10000), dict(valid_app=False)):
+                with self.subTest(board=board, entry=entry):
+                    state = self.run_entry(board=board, locked=True, **entry)
+                    self.assertEqual((state["usb_calls"], state["ble_calls"], state["ota"]), (0, 1, 1))
+            self.assertEqual(self.run_entry(board=board, locked=True)["dfu_calls"], 0)
+        retry = self.run_entry(board="rak_recovery", valid_app=False, magic=0xaa, locked=True)
+        self.assertEqual((retry["usb_calls"], retry["ota"]), (0, 1))
 
     def test_rak_failed_ble_recovery_still_reaches_headless_radios(self):
         options = dict(board="rak_recovery", valid_app=False, magic=0xaa)

@@ -33,6 +33,7 @@
  * -# Activate Image, boot application.
  *
  */
+#include "usb_lock.h"
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
@@ -452,13 +453,15 @@ static void check_dfu_mode(void) {
   }
 #endif
 
+  const bool wired_locked = mesh_usb_locked(MESH_USB_LOCK_FS);
+
   // App mode: Double Reset detection or DFU startup for nrf52832
   if (rollback_first || !(just_start_app || dfu_start)) { // Allow double reset even when no app.
 #ifdef NRF52832_XXAA
     /* Even DFU is not active, we still force an 1000 ms dfu serial mode when startup
      * to support auto programming from Arduino IDE
      * Note: Double Reset WONT work with nrf52832 since all its SRAM got cleared with GPIO reset. */
-    bootloader_dfu_start(false, DFU_SERIAL_STARTUP_INTERVAL, false);
+    if (!wired_locked) bootloader_dfu_start(false, DFU_SERIAL_STARTUP_INTERVAL, false);
 #else
     // Note: RESETREAS is not clear by bootloader, it should be cleared by application upon init()
     if (reason_reset_pin) {
@@ -517,6 +520,10 @@ static void check_dfu_mode(void) {
 
   // Enter DFU mode accordingly to input
   if (dfu_start || !valid_app) {
+    if (wired_locked) {
+      _ota_dfu = true;
+      probe_usb = false;
+    }
     if (!_ota_dfu) {
       // A buttonless handoff can leave the SoftDevice enabled even when a
       // later recovery decision selects USB. Direct NVMC access from the
@@ -569,7 +576,7 @@ static void check_dfu_mode(void) {
     }
 
     // Initiate an update of the firmware.
-    if ((app_single_tap || uf2_dfu || serial_only_dfu) && !single_button_probe
+    if (!wired_locked && (app_single_tap || uf2_dfu || serial_only_dfu) && !single_button_probe
 #if defined(MOTA_RAK_SD_STORE)
         && !ble_usb
 #endif

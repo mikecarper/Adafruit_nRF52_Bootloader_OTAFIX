@@ -198,7 +198,14 @@ static inline bool _NRFX_IRQ_IS_PENDING(IRQn_Type irq_number)
  */
 
 #include <soc/nrfx_coredep.h>
+#if defined(MOTA_RAK_SD_STORE)
+// The all-in-one RAK image shares one Nordic calibrated loop between every
+// driver, including the SDK timer. Each inlined copy also costs 16-byte alignment.
+void otafix_rak_delay_us(uint32_t us);
+#define NRFX_DELAY_US(us_time)    otafix_rak_delay_us(us_time)
+#else
 #define NRFX_DELAY_US(us_time)    nrfx_coredep_delay_us(us_time)
+#endif
 #define NRFX_DELAY_MS(ms_time)    NRFX_DELAY_US(1000*ms_time)
 
 //------------------------------------------------------------------------------

@@ -62,6 +62,12 @@ static void external_watchdog_tick(void) {
 }
 #endif
 
+#if defined(MOTA_RAK_SD_STORE)
+__attribute__((noinline, noclone)) void otafix_rak_delay_us(uint32_t us) {
+  nrfx_coredep_delay_us(us);
+}
+#endif
+
 void board_watchdog_feed(void) {
 #ifdef EXTERNAL_WATCHDOG_DONE_PIN
   // board_teardown() returns every GPIO to its reset state before the in-place

@@ -162,6 +162,14 @@ __STATIC_INLINE void nrf_delay_us(uint32_t number_of_us)
 {}
 #endif
 
+#elif defined(MOTA_RAK_SD_STORE) && defined(__GNUC__)
+
+void otafix_rak_delay_us(uint32_t us);
+__STATIC_INLINE void nrf_delay_us(uint32_t number_of_us)
+{
+    otafix_rak_delay_us(number_of_us);
+}
+
 #elif defined ( __GNUC__ ) || ( __ICCARM__ )
 
 __STATIC_INLINE void nrf_delay_us(uint32_t number_of_us)

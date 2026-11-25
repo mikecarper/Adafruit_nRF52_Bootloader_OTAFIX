@@ -1,5 +1,21 @@
 # Adafruit nRF52 Bootloader with Enhanced OTA DFU
 
+## Reversible wired DFU lock
+
+MeshCore admins can send `set usb.lock on` over LoRa and then `reboot`.
+On a compatible bootloader, `get usb.lock` reports `app+DFU`. While locked,
+USB/serial DFU entry requests and recovery buttons select Bluetooth DFU.
+Normal boots and LoRa update or rollback continue to follow their usual paths.
+Send `set usb.lock off` and `reboot` from the wireless admin connection to
+restore wired access. New boards start unlocked.
+
+MeshCore mirrors the optional `MCULOCK1` entry in the two fixed 128-byte
+Adafruit littlefs v1 superblocks of InternalFS. OTAFIX reads it before
+choosing a transport. Either copy keeps the lock active if an unlock was
+interrupted. The lock covers wired firmware updates through OTAFIX while the
+policy is present. Bluetooth DFU and physical debug access retain their
+existing authorization requirements.
+
 ## OTAFIX 2.4.12
 
 [OTAFIX 2.4.12](https://github.com/mikecarper/Adafruit_nRF52_Bootloader_OTAFIX/releases/tag/v0.11.0-OTAFIX2.4.12)
